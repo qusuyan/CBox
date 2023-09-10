@@ -9,3 +9,7 @@ edition = "2021"
 mailbox = { git="ssh://git@github.com/qusuyan/mailbox.git" }
 env_logger = "0.10"
 log = "0.4"
+clap = { version = "4.4.2", features = ["derive"] }
+
+[patch.'ssh://git@github.com/qusuyan/mailbox.git']
+mailbox = { path="../mailbox/client" }

@@ -2,6 +2,7 @@ use mailbox::ClientStub;
 use env_logger::fmt::{Color, Style, StyledValue};
 use log::Level;
 use std::io::Write;
+use clap::Parser;
 
 fn colored_level(style: &mut Style, level: Level) -> StyledValue<&'static str> {
     match level {
@@ -13,7 +14,16 @@ fn colored_level(style: &mut Style, level: Level) -> StyledValue<&'static str> {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct CliArgs {
+    #[arg(short, long)]
+    id: u64,
+}
+
 pub fn main() {
+    let args = CliArgs::parse();
+
     env_logger::builder()
     .format(move |buf, record| {
         let mut style = buf.style();
@@ -24,6 +34,12 @@ pub fn main() {
     })
     .init();
 
-    let mut stub: ClientStub<String> = ClientStub::new(0).unwrap();
-    stub.send(1, "test".to_string()).unwrap();
+    let mut stub: ClientStub<String> = ClientStub::new(args.id).unwrap();
+    print!("Connected to mailbox server");
+
+    if args.id == 0 {
+        stub.send(1, "test".to_string()).unwrap();
+    } else {
+        print!("{:?}", stub.recv());
+    }
 }
