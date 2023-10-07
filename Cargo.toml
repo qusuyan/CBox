@@ -1,15 +1,10 @@
-[package]
-name = "blockchain_copycat"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-mailbox = { git="ssh://git@github.com/qusuyan/mailbox.git" }
-env_logger = "0.10"
-log = "0.4"
-clap = { version = "4.4.2", features = ["derive"] }
+[workspace]
+members = [
+    "copycat_server", 
+    "copycat_utils"
+]
+resolver = "2"
 
 [patch.'ssh://git@github.com/qusuyan/mailbox.git']
-mailbox = { path="../mailbox/client" }
+mailbox_client = { path="../mailbox/mailbox_client" }
+mailbox_utils = { path="../mailbox/mailbox_utils" }
