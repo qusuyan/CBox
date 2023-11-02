@@ -1,17 +1,17 @@
-mod stage;
 mod composition;
 mod node;
+mod peers;
+mod stage;
 
-use node::Node;
 use composition::SystemCompose;
-use stage::txn_validation::TxnValidationType;
+use node::Node;
+use stage::{txn_dissemination::TxnDisseminationType, txn_validation::TxnValidationType};
 use tokio::runtime::Builder;
 
 use copycat_utils::log::colored_level;
 use std::io::Write;
 
 use clap::Parser;
-
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -24,14 +24,14 @@ pub fn main() {
     let args = CliArgs::parse();
 
     env_logger::builder()
-    .format(move |buf, record| {
-        let mut style = buf.style();
-        let level = colored_level(&mut style, record.level());
-        let mut style = buf.style();
-        let target = style.set_bold(true).value(record.target());
-        writeln!(buf, "{level} {target}: {}", record.args())
-    })
-    .init();
+        .format(move |buf, record| {
+            let mut style = buf.style();
+            let level = colored_level(&mut style, record.level());
+            let mut style = buf.style();
+            let target = style.set_bold(true).value(record.target());
+            writeln!(buf, "{level} {target}: {}", record.args())
+        })
+        .init();
 
     let id = args.id;
     let num_threads: usize = 8;
@@ -42,11 +42,14 @@ pub fn main() {
         .build()
         .expect("Creating new runtime failed");
 
-    let compose = SystemCompose{ txn_validation_stage: TxnValidationType::DUMMY };
+    let compose = SystemCompose {
+        txn_validation_stage: TxnValidationType::Dummy,
+        txn_dissemination_stage: TxnDisseminationType::Broadcast,
+    };
 
     runtime.block_on(async {
         // TODO
-        let node: Node<String> = match Node::init(id, compose).await {
+        let node: Node<String, String> = match Node::init(id, compose).await {
             Ok(node) => node,
             Err(e) => {
                 log::error!("Node {id}: failed to start node: {e:?}");

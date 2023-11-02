@@ -2,21 +2,18 @@ use copycat_utils::NodeId;
 
 use super::TxnValidation;
 
-
 pub struct DummyTxnValidation {
-    id: NodeId, 
+    _id: NodeId,
 }
 
 impl DummyTxnValidation {
     pub fn new(id: NodeId) -> Self {
-        Self {
-            id,
-        }
+        Self { _id: id }
     }
 }
 
-impl<Txn> TxnValidation<Txn> for DummyTxnValidation {
-    fn validate(&self, txn: &Txn) -> bool {
+impl<TxnType> TxnValidation<TxnType> for DummyTxnValidation {
+    fn validate(&self, _txn: &TxnType) -> bool {
         true
     }
 }
