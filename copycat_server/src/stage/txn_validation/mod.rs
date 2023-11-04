@@ -1,13 +1,16 @@
 mod dummy;
 use dummy::DummyTxnValidation;
 
-use copycat_utils::NodeId;
+use copycat_utils::{CopycatError, NodeId};
+
+use async_trait::async_trait;
 
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::mpsc;
 
+#[async_trait]
 pub trait TxnValidation<TxnType>: Send + Sync {
-    fn validate(&self, txn: &TxnType) -> bool;
+    async fn validate(&self, txn: &TxnType) -> Result<bool, CopycatError>;
 }
 
 pub enum TxnValidationType {
@@ -35,35 +38,44 @@ pub async fn txn_validation_thread<TxnType>(
     let txn_validation_stage = get_txn_validation::<TxnType>(id, txn_validation_type);
 
     loop {
-        let (txn, should_disseminate) = tokio::select! {
+        let (src, txn) = tokio::select! {
             new_txn = req_recv.recv() => {
                 match new_txn {
-                    Some(txn) => (txn, true),
+                    Some(txn) => (id, txn),
                     None => {
-                        log::error!("Node {id}: request channel closed");
+                        log::error!("Node {id}: request pipe closed");
                         continue;
                     }
                 }
             },
             new_peer_txn = peer_txn_recv.recv() => {
                 match new_peer_txn {
-                    Some((_src, txn)) => (txn, false),
+                    Some(txn) => txn,
                     None => {
-                        log::error!("Node {id}: request channel closed");
+                        log::error!("Node {id}: peer_txn pipe closed");
                         continue;
                     }
                 }
             }
         };
 
-        if txn_validation_stage.validate(&txn) {
-            if let Err(e) = validated_txn_send.send((txn, should_disseminate)).await {
-                log::error!(
-                    "Node {id}: failed to send from txn_validation to txn_dissemination: {e:?}"
-                );
+        match txn_validation_stage.validate(&txn).await {
+            Ok(valid) => {
+                if !valid {
+                    log::warn!("Node {id}: got invalid txn, ignoring...");
+                    continue;
+                }
+
+                let should_disseminate = src == id;
+                if let Err(e) = validated_txn_send.send((txn, should_disseminate)).await {
+                    log::error!("Node {id}: failed to send to validated_txn pipe: {e:?}");
+                    continue;
+                }
             }
-        } else {
-            log::warn!("Node {id}: got invalid txn, ignoring...");
+            Err(e) => {
+                log::error!("Node {id}: error validating txn: {e:?}");
+                continue;
+            }
         }
     }
 }

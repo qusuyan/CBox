@@ -21,7 +21,6 @@ pub trait TxnDissemination<TxnType>: Send + Sync {
 }
 
 fn get_txn_dissemination<TxnType, BlockType>(
-    id: NodeId,
     txn_dissemination_type: TxnDisseminationType,
     peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
 ) -> Box<dyn TxnDissemination<TxnType>>
@@ -34,7 +33,7 @@ where
     }
 }
 
-pub async fn txn_dissemination_thread<BlockType, TxnType>(
+pub async fn txn_dissemination_thread<TxnType, BlockType>(
     id: NodeId,
     txn_dissemination_type: TxnDisseminationType,
     peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
@@ -44,13 +43,13 @@ pub async fn txn_dissemination_thread<BlockType, TxnType>(
     TxnType: 'static + Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
     BlockType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
 {
-    let txn_dissemination_stage = get_txn_dissemination(id, txn_dissemination_type, peer_messenger);
+    let txn_dissemination_stage = get_txn_dissemination(txn_dissemination_type, peer_messenger);
 
     loop {
         let (txn, should_disseminate) = match validated_txn_recv.recv().await {
             Some(txn) => txn,
             None => {
-                log::error!("Node {id}: getting next valid txn failed");
+                log::error!("Node {id}: validated_txn pipe closed unexpectedly");
                 continue;
             }
         };
@@ -58,9 +57,13 @@ pub async fn txn_dissemination_thread<BlockType, TxnType>(
         if should_disseminate {
             if let Err(e) = txn_dissemination_stage.disseminate(txn.clone()).await {
                 log::error!("Node {id}: failed to disseminate txn: {e:?}");
+                continue;
             }
         }
 
-        txn_ready_send.send(txn);
+        if let Err(e) = txn_ready_send.send(txn).await {
+            log::error!("Node {id}: failed to send to txn_ready pipe: {e:?}");
+            continue;
+        }
     }
 }
