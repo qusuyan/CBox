@@ -5,16 +5,21 @@ use async_trait::async_trait;
 
 use tokio::sync::mpsc;
 
+use std::sync::Arc;
+
 #[async_trait]
-pub trait Decision<BlockType> {
+pub trait Decision<BlockType>: Sync + Send {
     async fn decide(&self, block: &BlockType) -> Result<bool, CopycatError>;
 }
 
-pub enum DecisionType {}
+pub enum DecisionType {
+    Dummy,
+}
 
 fn get_decision<TxnType, BlockType>(
     decision_type: DecisionType,
-    peer_messenger: PeerMessenger<TxnType, BlockType>,
+    peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
+    peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
 ) -> Box<dyn Decision<BlockType>> {
     todo!();
 }
@@ -22,11 +27,12 @@ fn get_decision<TxnType, BlockType>(
 pub async fn decision_thread<TxnType, BlockType>(
     id: NodeId,
     decision_type: DecisionType,
-    peer_messenger: PeerMessenger<TxnType, BlockType>,
-    mut block_ready_recv: mpsc::Receiver<BlockType>,
-    commit_send: mpsc::Sender<BlockType>,
+    peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
+    peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
+    mut block_ready_recv: mpsc::Receiver<Arc<BlockType>>,
+    commit_send: mpsc::Sender<Arc<BlockType>>,
 ) {
-    let decision_stage = get_decision(decision_type, peer_messenger);
+    let decision_stage = get_decision(decision_type, peer_messenger, peer_consensus_recv);
 
     loop {
         let block = match block_ready_recv.recv().await {

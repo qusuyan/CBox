@@ -20,10 +20,12 @@ impl<TxnType, BlockType> BroadcastTxnDissemination<TxnType, BlockType> {
 #[async_trait]
 impl<TxnType, BlockType> TxnDissemination<TxnType> for BroadcastTxnDissemination<TxnType, BlockType>
 where
-    TxnType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
+    TxnType: 'static + std::fmt::Debug + Clone + Serialize + DeserializeOwned + Sync + Send,
     BlockType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
 {
-    async fn disseminate(&self, txn: TxnType) -> Result<(), CopycatError> {
-        self.transport.broadcast(MsgType::NewTxn { txn }).await
+    async fn disseminate(&self, txn: &TxnType) -> Result<(), CopycatError> {
+        self.transport
+            .broadcast(MsgType::NewTxn { txn: txn.clone() })
+            .await
     }
 }

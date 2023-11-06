@@ -17,7 +17,7 @@ pub enum TxnDisseminationType {
 
 #[async_trait]
 pub trait TxnDissemination<TxnType>: Send + Sync {
-    async fn disseminate(&self, txn: TxnType) -> Result<(), CopycatError>;
+    async fn disseminate(&self, txn: &TxnType) -> Result<(), CopycatError>;
 }
 
 fn get_txn_dissemination<TxnType, BlockType>(
@@ -25,7 +25,7 @@ fn get_txn_dissemination<TxnType, BlockType>(
     peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
 ) -> Box<dyn TxnDissemination<TxnType>>
 where
-    TxnType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
+    TxnType: 'static + std::fmt::Debug + Clone + Serialize + DeserializeOwned + Sync + Send,
     BlockType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
 {
     match txn_dissemination_type {
@@ -37,8 +37,8 @@ pub async fn txn_dissemination_thread<TxnType, BlockType>(
     id: NodeId,
     txn_dissemination_type: TxnDisseminationType,
     peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
-    mut validated_txn_recv: mpsc::Receiver<(TxnType, bool)>,
-    txn_ready_send: mpsc::Sender<TxnType>,
+    mut validated_txn_recv: mpsc::Receiver<(Arc<TxnType>, bool)>,
+    txn_ready_send: mpsc::Sender<Arc<TxnType>>,
 ) where
     TxnType: 'static + Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
     BlockType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
@@ -55,7 +55,7 @@ pub async fn txn_dissemination_thread<TxnType, BlockType>(
         };
 
         if should_disseminate {
-            if let Err(e) = txn_dissemination_stage.disseminate(txn.clone()).await {
+            if let Err(e) = txn_dissemination_stage.disseminate(&txn).await {
                 log::error!("Node {id}: failed to disseminate txn: {e:?}");
                 continue;
             }

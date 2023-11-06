@@ -1,27 +1,42 @@
+mod chain;
 mod composition;
 mod node;
 mod peers;
 mod stage;
 
-use composition::SystemCompose;
-use node::Node;
-use stage::{txn_dissemination::TxnDisseminationType, txn_validation::TxnValidationType};
-use tokio::runtime::Builder;
-
+use chain::{get_chain_compose, ChainType, DummyBlock};
 use copycat_utils::log::colored_level;
+use node::Node;
+
 use std::io::Write;
+use tokio::runtime::Builder;
 
 use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct CliArgs {
-    #[arg(short, long)]
+    #[arg(long, short = 'i')]
     id: u64,
+
+    #[arg(long, short = 'c', value_enum, default_value = "Dummy")]
+    chain: ChainType,
+
+    #[arg(long, short = 't')]
+    num_threads: usize,
+}
+
+impl CliArgs {
+    pub fn validate(&mut self) {
+        if self.num_threads < 8 {
+            self.num_threads = 8;
+        }
+    }
 }
 
 pub fn main() {
-    let args = CliArgs::parse();
+    let mut args = CliArgs::parse();
+    args.validate();
 
     env_logger::builder()
         .format(move |buf, record| {
@@ -34,22 +49,18 @@ pub fn main() {
         .init();
 
     let id = args.id;
-    let num_threads: usize = 8;
     let runtime = Builder::new_multi_thread()
         .enable_all()
-        .worker_threads(num_threads)
+        .worker_threads(args.num_threads)
         .thread_name("tokio-worker-replica")
         .build()
         .expect("Creating new runtime failed");
 
-    let compose = SystemCompose {
-        txn_validation_stage: TxnValidationType::Dummy,
-        txn_dissemination_stage: TxnDisseminationType::Broadcast,
-    };
+    let compose = get_chain_compose(args.chain);
 
     runtime.block_on(async {
         // TODO
-        let node: Node<String, String> = match Node::init(id, compose).await {
+        let node: Node<String, DummyBlock<String>> = match Node::init(id, compose).await {
             Ok(node) => node,
             Err(e) => {
                 log::error!("Node {id}: failed to start node: {e:?}");

@@ -4,7 +4,7 @@ use mailbox_client::ClientStub;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum MsgType<TxnType, BlockType> {
@@ -40,10 +40,10 @@ where
     ) -> Result<
         (
             Self,
-            mpsc::UnboundedReceiver<(NodeId, TxnType)>,
-            mpsc::UnboundedReceiver<(NodeId, BlockType)>,
-            mpsc::UnboundedReceiver<(NodeId, Vec<u8>)>,
-            mpsc::UnboundedReceiver<(NodeId, Vec<u8>)>,
+            mpsc::UnboundedReceiver<(NodeId, Arc<TxnType>)>,
+            mpsc::UnboundedReceiver<(NodeId, Arc<BlockType>)>,
+            mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
+            mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
         ),
         CopycatError,
     > {
@@ -108,10 +108,10 @@ where
         id: NodeId,
         transport_hub: ClientStub<MsgType<TxnType, BlockType>>,
         mut tx_recv: mpsc::UnboundedReceiver<SendRequest<TxnType, BlockType>>,
-        rx_txn_send: mpsc::UnboundedSender<(NodeId, TxnType)>,
-        rx_blk_send: mpsc::UnboundedSender<(NodeId, BlockType)>,
-        rx_consensus_send: mpsc::UnboundedSender<(NodeId, Vec<u8>)>,
-        rx_pmaker_send: mpsc::UnboundedSender<(NodeId, Vec<u8>)>,
+        rx_txn_send: mpsc::UnboundedSender<(NodeId, Arc<TxnType>)>,
+        rx_blk_send: mpsc::UnboundedSender<(NodeId, Arc<BlockType>)>,
+        rx_consensus_send: mpsc::UnboundedSender<(NodeId, Arc<Vec<u8>>)>,
+        rx_pmaker_send: mpsc::UnboundedSender<(NodeId, Arc<Vec<u8>>)>,
     ) {
         log::trace!("Node {id}: peer messenger thread started");
 
@@ -144,22 +144,22 @@ where
                             let (src, content) = msg;
                             match content {
                                 MsgType::NewTxn{txn} => {
-                                    if let Err(e) = rx_txn_send.send((src, txn)) {
+                                    if let Err(e) = rx_txn_send.send((src, Arc::new(txn))) {
                                         log::error!("Node {id}: rx_txn_send failed: {e:?}")
                                     }
                                 },
                                 MsgType::NewBlock{blk} => {
-                                    if let Err(e) = rx_blk_send.send((src, blk)) {
+                                    if let Err(e) = rx_blk_send.send((src, Arc::new(blk))) {
                                         log::error!("Node {id}: rx_blk_send failed: {e:?}")
                                     }
                                 },
                                 MsgType::ConsensusMsg{msg} => {
-                                    if let Err(e) = rx_consensus_send.send((src, msg)) {
+                                    if let Err(e) = rx_consensus_send.send((src, Arc::new(msg))) {
                                         log::error!("Node {id}: rx_consensus_send failed: {e:?}")
                                     }
                                 },
                                 MsgType::PMakerMsg{msg} => {
-                                    if let Err(e) = rx_pmaker_send.send((src, msg)) {
+                                    if let Err(e) = rx_pmaker_send.send((src, Arc::new(msg))) {
                                         log::error!("Node {id}: rx_pmaker_send failed: {e:?}")
                                     }
                                 },

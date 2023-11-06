@@ -1,15 +1,18 @@
-use tokio::sync::mpsc;
+use async_trait::async_trait;
 
 use copycat_utils::{CopycatError, NodeId};
 
-use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::mpsc;
 
 #[async_trait]
-pub trait BlockValidation<BlockType> {
+pub trait BlockValidation<BlockType>: Sync + Send {
     async fn validate(&self, block: &BlockType) -> Result<bool, CopycatError>;
 }
 
-pub enum BlockValidationType {}
+pub enum BlockValidationType {
+    Dummy,
+}
 
 fn get_block_validation<BlockType>(
     block_validation_type: BlockValidationType,
@@ -20,8 +23,8 @@ fn get_block_validation<BlockType>(
 pub async fn block_validation_thread<BlockType>(
     id: NodeId,
     block_validation_type: BlockValidationType,
-    mut peer_blk_recv: mpsc::UnboundedReceiver<(NodeId, BlockType)>,
-    block_ready_send: mpsc::Sender<BlockType>,
+    mut peer_blk_recv: mpsc::UnboundedReceiver<(NodeId, Arc<BlockType>)>,
+    block_ready_send: mpsc::Sender<Arc<BlockType>>,
 ) {
     let block_validation_stage = get_block_validation(block_validation_type);
 

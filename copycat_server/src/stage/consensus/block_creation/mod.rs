@@ -1,31 +1,45 @@
+mod dummy;
+use dummy::DummyBlockCreation;
+
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
-pub enum BlockCreationType {}
+pub enum BlockCreationType {
+    Dummy,
+}
 
 #[async_trait]
-pub trait BlockCreation<TxnType, BlockType> {
-    async fn new_txn(&self, txn: TxnType) -> Result<(), CopycatError>;
-    async fn new_block(&self, pmaker_msg: Vec<u8>) -> Result<BlockType, CopycatError>;
+pub trait BlockCreation<TxnType, BlockType>: Sync + Send {
+    async fn new_txn(&mut self, txn: Arc<TxnType>) -> Result<(), CopycatError>;
+    async fn new_block(&mut self, pmaker_msg: Arc<Vec<u8>>)
+        -> Result<Arc<BlockType>, CopycatError>;
 }
 
 fn get_blk_creation<TxnType, BlockType>(
     block_creation_type: BlockCreationType,
-) -> Box<dyn BlockCreation<TxnType, BlockType>> {
-    todo!();
+) -> Box<dyn BlockCreation<TxnType, BlockType>>
+where
+    DummyBlockCreation<TxnType>: BlockCreation<TxnType, BlockType>,
+{
+    match block_creation_type {
+        BlockCreationType::Dummy => Box::new(DummyBlockCreation::new()),
+    }
 }
 
 pub async fn block_creation_thread<TxnType, BlockType>(
     id: NodeId,
     block_creation_type: BlockCreationType,
-    mut txn_ready_recv: mpsc::Receiver<TxnType>,
-    mut should_propose_recv: mpsc::Receiver<Vec<u8>>,
-    new_block_send: mpsc::Sender<BlockType>,
-) {
-    let block_creation_stage = get_blk_creation(block_creation_type);
+    mut txn_ready_recv: mpsc::Receiver<Arc<TxnType>>,
+    mut should_propose_recv: mpsc::Receiver<Arc<Vec<u8>>>,
+    new_block_send: mpsc::Sender<Arc<BlockType>>,
+) where
+    TxnType: Sync + Send,
+{
+    let mut block_creation_stage = get_blk_creation(block_creation_type);
 
     loop {
         tokio::select! {

@@ -1,4 +1,6 @@
 mod dummy;
+use std::sync::Arc;
+
 use dummy::DummyTxnValidation;
 
 use copycat_utils::{CopycatError, NodeId};
@@ -29,9 +31,9 @@ fn get_txn_validation<TxnType>(
 pub async fn txn_validation_thread<TxnType>(
     id: NodeId,
     txn_validation_type: TxnValidationType,
-    mut req_recv: mpsc::Receiver<TxnType>,
-    mut peer_txn_recv: mpsc::UnboundedReceiver<(NodeId, TxnType)>,
-    validated_txn_send: mpsc::Sender<(TxnType, bool)>,
+    mut req_recv: mpsc::Receiver<Arc<TxnType>>,
+    mut peer_txn_recv: mpsc::UnboundedReceiver<(NodeId, Arc<TxnType>)>,
+    validated_txn_send: mpsc::Sender<(Arc<TxnType>, bool)>,
 ) where
     TxnType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
 {
