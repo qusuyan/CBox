@@ -1,4 +1,7 @@
-use crate::peers::PeerMessenger;
+mod broadcast;
+use broadcast::BroadcastBlockDissemination;
+
+use crate::{block::ChainType, peers::PeerMessenger};
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -8,25 +11,28 @@ use tokio::sync::mpsc;
 
 use std::sync::Arc;
 
-pub enum BlockDisseminationType {
-    Broadcast,
-}
-
 #[async_trait]
 pub trait BlockDissemination<BlockType>: Sync + Send {
     async fn disseminate(&self, block: &BlockType) -> Result<(), CopycatError>;
 }
 
 fn get_block_dissemination<TxnType, BlockType>(
-    block_dissemination_type: BlockDisseminationType,
+    chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
-) -> Box<dyn BlockDissemination<BlockType>> {
-    todo!();
+) -> Box<dyn BlockDissemination<BlockType>>
+where
+    TxnType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
+    BlockType: 'static + Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
+{
+    match chain_type {
+        ChainType::Dummy => Box::new(BroadcastBlockDissemination::new(peer_messenger)),
+        ChainType::Bitcoin => todo!(),
+    }
 }
 
 pub async fn block_dissemination_thread<TxnType, BlockType>(
     id: NodeId,
-    block_dissemination_type: BlockDisseminationType,
+    chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
     mut new_block_recv: mpsc::Receiver<Arc<BlockType>>,
     block_ready_send: mpsc::Sender<Arc<BlockType>>,
@@ -34,8 +40,7 @@ pub async fn block_dissemination_thread<TxnType, BlockType>(
     TxnType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
     BlockType: 'static + Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
 {
-    let block_dissemination_stage =
-        get_block_dissemination(block_dissemination_type, peer_messenger);
+    let block_dissemination_stage = get_block_dissemination(chain_type, peer_messenger);
 
     loop {
         let new_blk = match new_block_recv.recv().await {

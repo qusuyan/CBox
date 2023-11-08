@@ -9,11 +9,7 @@ use tokio::sync::mpsc;
 
 use std::sync::Arc;
 
-use crate::peers::PeerMessenger;
-
-pub enum TxnDisseminationType {
-    Broadcast,
-}
+use crate::{block::ChainType, peers::PeerMessenger};
 
 #[async_trait]
 pub trait TxnDissemination<TxnType>: Send + Sync {
@@ -21,21 +17,22 @@ pub trait TxnDissemination<TxnType>: Send + Sync {
 }
 
 fn get_txn_dissemination<TxnType, BlockType>(
-    txn_dissemination_type: TxnDisseminationType,
+    chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
 ) -> Box<dyn TxnDissemination<TxnType>>
 where
     TxnType: 'static + std::fmt::Debug + Clone + Serialize + DeserializeOwned + Sync + Send,
     BlockType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
 {
-    match txn_dissemination_type {
-        TxnDisseminationType::Broadcast => Box::new(BroadcastTxnDissemination::new(peer_messenger)),
+    match chain_type {
+        ChainType::Dummy => Box::new(BroadcastTxnDissemination::new(peer_messenger)),
+        ChainType::Bitcoin => todo!(),
     }
 }
 
 pub async fn txn_dissemination_thread<TxnType, BlockType>(
     id: NodeId,
-    txn_dissemination_type: TxnDisseminationType,
+    chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
     mut validated_txn_recv: mpsc::Receiver<(Arc<TxnType>, bool)>,
     txn_ready_send: mpsc::Sender<Arc<TxnType>>,
@@ -43,7 +40,7 @@ pub async fn txn_dissemination_thread<TxnType, BlockType>(
     TxnType: 'static + Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
     BlockType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
 {
-    let txn_dissemination_stage = get_txn_dissemination(txn_dissemination_type, peer_messenger);
+    let txn_dissemination_stage = get_txn_dissemination(chain_type, peer_messenger);
 
     loop {
         let (txn, should_disseminate) = match validated_txn_recv.recv().await {

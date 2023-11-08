@@ -1,16 +1,14 @@
-use copycat_utils::{CopycatError, NodeId};
+use copycat_utils::CopycatError;
 
 use super::TxnValidation;
 
 use async_trait::async_trait;
 
-pub struct DummyTxnValidation {
-    _id: NodeId,
-}
+pub struct DummyTxnValidation {}
 
 impl DummyTxnValidation {
-    pub fn new(id: NodeId) -> Self {
-        Self { _id: id }
+    pub fn new() -> Self {
+        Self {}
     }
 }
 

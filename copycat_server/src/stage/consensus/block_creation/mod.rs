@@ -8,38 +8,37 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-pub enum BlockCreationType {
-    Dummy,
-}
+use crate::block::{Block, ChainType};
 
 #[async_trait]
-pub trait BlockCreation<TxnType, BlockType>: Sync + Send {
+pub trait BlockCreation<TxnType>: Sync + Send {
     async fn new_txn(&mut self, txn: Arc<TxnType>) -> Result<(), CopycatError>;
-    async fn new_block(&mut self, pmaker_msg: Arc<Vec<u8>>)
-        -> Result<Arc<BlockType>, CopycatError>;
+    async fn new_block(
+        &mut self,
+        pmaker_msg: Arc<Vec<u8>>,
+    ) -> Result<Arc<Block<TxnType>>, CopycatError>;
 }
 
-fn get_blk_creation<TxnType, BlockType>(
-    block_creation_type: BlockCreationType,
-) -> Box<dyn BlockCreation<TxnType, BlockType>>
+fn get_blk_creation<TxnType>(chain_type: ChainType) -> Box<dyn BlockCreation<TxnType>>
 where
-    DummyBlockCreation<TxnType>: BlockCreation<TxnType, BlockType>,
+    TxnType: 'static + Sync + Send,
 {
-    match block_creation_type {
-        BlockCreationType::Dummy => Box::new(DummyBlockCreation::new()),
+    match chain_type {
+        ChainType::Dummy => Box::new(DummyBlockCreation::new()),
+        ChainType::Bitcoin => todo!(),
     }
 }
 
-pub async fn block_creation_thread<TxnType, BlockType>(
+pub async fn block_creation_thread<TxnType>(
     id: NodeId,
-    block_creation_type: BlockCreationType,
+    chain_type: ChainType,
     mut txn_ready_recv: mpsc::Receiver<Arc<TxnType>>,
     mut should_propose_recv: mpsc::Receiver<Arc<Vec<u8>>>,
-    new_block_send: mpsc::Sender<Arc<BlockType>>,
+    new_block_send: mpsc::Sender<Arc<Block<TxnType>>>,
 ) where
-    TxnType: Sync + Send,
+    TxnType: 'static + Sync + Send,
 {
-    let mut block_creation_stage = get_blk_creation(block_creation_type);
+    let mut block_creation_stage = get_blk_creation(chain_type);
 
     loop {
         tokio::select! {

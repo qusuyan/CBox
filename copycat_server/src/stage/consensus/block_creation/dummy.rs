@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use super::BlockCreation;
-use crate::chain::DummyBlock;
+use crate::block::{Block, DummyBlock};
 use copycat_utils::CopycatError;
 
 use std::sync::Arc;
@@ -19,7 +19,7 @@ impl<TxnType> DummyBlockCreation<TxnType> {
 }
 
 #[async_trait]
-impl<TxnType> BlockCreation<TxnType, DummyBlock<TxnType>> for DummyBlockCreation<TxnType>
+impl<TxnType> BlockCreation<TxnType> for DummyBlockCreation<TxnType>
 where
     TxnType: Sync + Send,
 {
@@ -31,8 +31,10 @@ where
     async fn new_block(
         &mut self,
         _pmaker_msg: Arc<Vec<u8>>,
-    ) -> Result<Arc<DummyBlock<TxnType>>, CopycatError> {
+    ) -> Result<Arc<Block<TxnType>>, CopycatError> {
         let txns = self.mem_pool.drain(0..self.mem_pool.len());
-        Ok(Arc::new(DummyBlock::new(txns.collect())))
+        Ok(Arc::new(Block::Dummy {
+            blk: DummyBlock::new(txns.collect()),
+        }))
     }
 }

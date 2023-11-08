@@ -1,10 +1,10 @@
-mod chain;
+mod block;
 mod composition;
 mod node;
 mod peers;
 mod stage;
 
-use chain::{get_chain_compose, ChainType, DummyBlock};
+use block::ChainType;
 use copycat_utils::log::colored_level;
 use node::Node;
 
@@ -56,11 +56,11 @@ pub fn main() {
         .build()
         .expect("Creating new runtime failed");
 
-    let compose = get_chain_compose(args.chain);
+    // let compose = get_chain_compose(args.chain);
 
     runtime.block_on(async {
         // TODO
-        let node: Node<String, DummyBlock<String>> = match Node::init(id, compose).await {
+        let node: Node<String> = match Node::init(id, args.chain).await {
             Ok(node) => node,
             Err(e) => {
                 log::error!("Node {id}: failed to start node: {e:?}");
