@@ -1,5 +1,4 @@
 use std::fmt;
-use mailbox_utils::MailboxError;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CopycatError(pub String);
@@ -23,4 +22,5 @@ macro_rules! impl_from_error {
     };
 }
 
-impl_from_error!(MailboxError);
+impl_from_error!(mailbox_utils::MailboxError);
+impl_from_error!(tokio::task::JoinError);

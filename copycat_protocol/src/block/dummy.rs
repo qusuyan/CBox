@@ -1,9 +1,10 @@
 use super::BlockTrait;
 
+use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, GetSize)]
 pub struct DummyBlock<TxnType> {
     txns: Vec<Arc<TxnType>>,
 }

@@ -1,3 +1,4 @@
+use copycat_protocol::MsgType;
 use copycat_utils::{CopycatError, NodeId};
 use mailbox_client::ClientStub;
 
@@ -7,13 +8,6 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use std::{fmt::Debug, sync::Arc};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum MsgType<TxnType, BlockType> {
-    NewTxn { txn: TxnType },
-    NewBlock { blk: BlockType },
-    ConsensusMsg { msg: Vec<u8> },
-    PMakerMsg { msg: Vec<u8> },
-}
-
 enum SendRequest<TxnType, BlockType> {
     Send {
         dest: NodeId,
@@ -94,6 +88,7 @@ where
     }
 
     pub async fn broadcast(&self, msg: MsgType<TxnType, BlockType>) -> Result<(), CopycatError> {
+        log::trace!("Node {}: broadcasting {msg:?}", self.id);
         if let Err(e) = self.tx_send.send(SendRequest::Broadcast { msg }) {
             Err(CopycatError(format!(
                 "Node {}: broadcast failed: {e:?}",
@@ -120,6 +115,7 @@ where
                 local_req = tx_recv.recv() => {
                     match local_req {
                         Some(req) => {
+                            log::trace!("Node {id}: got request {req:?}");
                             match req {
                                 SendRequest::Send{dest, msg} => {
                                     if let Err(e) = transport_hub.send(dest, msg).await {

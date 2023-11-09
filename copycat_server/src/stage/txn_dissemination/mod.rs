@@ -1,15 +1,16 @@
 mod broadcast;
 use broadcast::BroadcastTxnDissemination;
 
-use async_trait::async_trait;
+use crate::peers::PeerMessenger;
+use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
+
+use async_trait::async_trait;
 
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::mpsc;
 
 use std::sync::Arc;
-
-use crate::{block::ChainType, peers::PeerMessenger};
 
 #[async_trait]
 pub trait TxnDissemination<TxnType>: Send + Sync {
@@ -40,6 +41,8 @@ pub async fn txn_dissemination_thread<TxnType, BlockType>(
     TxnType: 'static + Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
     BlockType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
 {
+    log::trace!("Node {id}: Txn Dissemination stage starting...");
+
     let txn_dissemination_stage = get_txn_dissemination(chain_type, peer_messenger);
 
     loop {
@@ -50,6 +53,8 @@ pub async fn txn_dissemination_thread<TxnType, BlockType>(
                 continue;
             }
         };
+
+        log::trace!("Node {id}: got new txn {txn:?}, should_disseminate = {should_disseminate}");
 
         if should_disseminate {
             if let Err(e) = txn_dissemination_stage.disseminate(&txn).await {

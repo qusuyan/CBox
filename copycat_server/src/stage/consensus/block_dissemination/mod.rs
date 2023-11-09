@@ -1,7 +1,8 @@
 mod broadcast;
 use broadcast::BroadcastBlockDissemination;
 
-use crate::{block::ChainType, peers::PeerMessenger};
+use crate::peers::PeerMessenger;
+use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -40,6 +41,8 @@ pub async fn block_dissemination_thread<TxnType, BlockType>(
     TxnType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
     BlockType: 'static + Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
 {
+    log::trace!("Node {id}: Txn Validation stage starting...");
+
     let block_dissemination_stage = get_block_dissemination(chain_type, peer_messenger);
 
     loop {
@@ -50,6 +53,8 @@ pub async fn block_dissemination_thread<TxnType, BlockType>(
                 continue;
             }
         };
+
+        log::trace!("Node {id}: got new block {new_blk:?}");
 
         if let Err(e) = block_dissemination_stage.disseminate(&new_blk).await {
             log::error!("Node {id}: failed to disseminate new block: {e:?}");

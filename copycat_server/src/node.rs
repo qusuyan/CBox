@@ -1,12 +1,14 @@
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::sync::Arc;
 
+use copycat_protocol::block::Block;
+use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::block::ChainType;
 use crate::peers::PeerMessenger;
 use crate::stage::commit::commit_thread;
 use crate::stage::consensus::block_creation::block_creation_thread;
@@ -19,8 +21,8 @@ use crate::stage::txn_validation::txn_validation_thread;
 
 pub struct Node<TxnType> {
     req_send: mpsc::Sender<Arc<TxnType>>,
-    executed_recv: mpsc::Receiver<Arc<TxnType>>,
     // actor threads
+    _peer_messenger: Arc<PeerMessenger<TxnType, Block<TxnType>>>,
     _txn_validation_handle: JoinHandle<()>,
     _txn_dissemination_handle: JoinHandle<()>,
     _pacemaker_handle: JoinHandle<()>,
@@ -28,13 +30,19 @@ pub struct Node<TxnType> {
     _block_dissemination_handle: JoinHandle<()>,
     _block_validation_handle: JoinHandle<()>,
     _decision_handle: JoinHandle<()>,
+    _commit_handle: JoinHandle<()>,
 }
 
 impl<TxnType> Node<TxnType>
 where
-    TxnType: 'static + Debug + Clone + Serialize + DeserializeOwned + Sync + Send,
+    TxnType: 'static + Debug + Clone + Serialize + DeserializeOwned + Sync + Send + Eq + Hash,
 {
-    pub async fn init(id: NodeId, chain_type: ChainType) -> Result<Self, CopycatError> {
+    pub async fn init(
+        id: NodeId,
+        chain_type: ChainType,
+    ) -> Result<(Self, mpsc::Receiver<Arc<TxnType>>), CopycatError> {
+        log::trace!("starting node {id}: {chain_type:?}");
+
         let (peer_messenger, peer_txn_recv, peer_blk_recv, peer_consensus_recv, peer_pmaker_recv) =
             PeerMessenger::new(id).await?;
 
@@ -43,7 +51,7 @@ where
         let (req_send, req_recv) = mpsc::channel::<Arc<TxnType>>(0x1000000);
         let (validated_txn_send, validated_txn_recv) = mpsc::channel(0x1000000);
         let (txn_ready_send, txn_ready_recv) = mpsc::channel(0x1000000);
-        let (should_propose_send, should_propose_recv) = mpsc::channel(0x1000000);
+        let (pacemaker_send, pacemaker_recv) = mpsc::channel(0x1000000);
         let (new_block_send, new_block_recv) = mpsc::channel(0x1000000);
         let (block_ready_send, block_ready_recv) = mpsc::channel(0x1000000);
         let (commit_send, commit_recv) = mpsc::channel(0x1000000);
@@ -70,14 +78,14 @@ where
             chain_type,
             peer_messenger.clone(),
             peer_pmaker_recv,
-            should_propose_send,
+            pacemaker_send,
         ));
 
         let _block_creation_handle = tokio::spawn(block_creation_thread(
             id,
             chain_type,
             txn_ready_recv,
-            should_propose_recv,
+            pacemaker_recv,
             new_block_send,
         ));
 
@@ -108,16 +116,41 @@ where
         let _commit_handle =
             tokio::spawn(commit_thread(id, chain_type, commit_recv, executed_send));
 
-        Ok(Self {
-            req_send,
+        log::trace!("Node {id}: stages started");
+
+        Ok((
+            Self {
+                req_send,
+                _peer_messenger: peer_messenger,
+                _txn_validation_handle,
+                _txn_dissemination_handle,
+                _pacemaker_handle,
+                _block_creation_handle,
+                _block_dissemination_handle,
+                _block_validation_handle,
+                _decision_handle,
+                _commit_handle,
+            },
             executed_recv,
-            _txn_validation_handle,
-            _txn_dissemination_handle,
-            _pacemaker_handle,
-            _block_creation_handle,
-            _block_dissemination_handle,
-            _block_validation_handle,
-            _decision_handle,
-        })
+        ))
+    }
+
+    pub async fn wait_completion(self) -> Result<(), CopycatError> {
+        self._txn_validation_handle.await?;
+        self._txn_dissemination_handle.await?;
+        self._pacemaker_handle.await?;
+        self._block_creation_handle.await?;
+        self._block_dissemination_handle.await?;
+        self._block_validation_handle.await?;
+        self._decision_handle.await?;
+        self._commit_handle.await?;
+        Ok(())
+    }
+
+    pub async fn send_req(&self, txn: TxnType) -> Result<(), CopycatError> {
+        if let Err(e) = self.req_send.send(Arc::new(txn)).await {
+            return Err(CopycatError(format!("{e:?}")));
+        }
+        Ok(())
     }
 }

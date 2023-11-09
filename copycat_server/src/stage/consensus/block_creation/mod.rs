@@ -1,27 +1,27 @@
 mod dummy;
 use dummy::DummyBlockCreation;
 
+use copycat_protocol::block::Block;
+use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
-use std::sync::Arc;
+use std::{hash::Hash, sync::Arc};
 use tokio::sync::mpsc;
-
-use crate::block::{Block, ChainType};
 
 #[async_trait]
 pub trait BlockCreation<TxnType>: Sync + Send {
     async fn new_txn(&mut self, txn: Arc<TxnType>) -> Result<(), CopycatError>;
-    async fn new_block(
-        &mut self,
-        pmaker_msg: Arc<Vec<u8>>,
-    ) -> Result<Arc<Block<TxnType>>, CopycatError>;
+    async fn new_block(&mut self) -> Result<Arc<Block<TxnType>>, CopycatError>;
 }
 
-fn get_blk_creation<TxnType>(chain_type: ChainType) -> Box<dyn BlockCreation<TxnType>>
+fn get_blk_creation<TxnType>(
+    chain_type: ChainType,
+    should_propose_recv: mpsc::Receiver<Arc<Vec<u8>>>,
+) -> Box<dyn BlockCreation<TxnType>>
 where
-    TxnType: 'static + Sync + Send,
+    TxnType: 'static + Sync + Send + Eq + Hash,
 {
     match chain_type {
         ChainType::Dummy => Box::new(DummyBlockCreation::new()),
@@ -33,18 +33,21 @@ pub async fn block_creation_thread<TxnType>(
     id: NodeId,
     chain_type: ChainType,
     mut txn_ready_recv: mpsc::Receiver<Arc<TxnType>>,
-    mut should_propose_recv: mpsc::Receiver<Arc<Vec<u8>>>,
+    pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
     new_block_send: mpsc::Sender<Arc<Block<TxnType>>>,
 ) where
-    TxnType: 'static + Sync + Send,
+    TxnType: 'static + std::fmt::Debug + Sync + Send + Eq + Hash,
 {
-    let mut block_creation_stage = get_blk_creation(chain_type);
+    log::trace!("Node {id}: Txn Validation stage starting...");
+
+    let mut block_creation_stage = get_blk_creation(chain_type, pacemaker_recv);
 
     loop {
         tokio::select! {
             new_txn = txn_ready_recv.recv() => {
                 match new_txn {
                     Some(txn) => {
+                        log::trace!("Node {id}: got new txn {txn:?}");
                         if let Err(e) = block_creation_stage.new_txn(txn).await {
                             log::error!("Node {id}: failed to record new txn: {e:?}");
                             continue;
@@ -56,24 +59,17 @@ pub async fn block_creation_thread<TxnType>(
                     }
                 }
             },
-            should_propose = should_propose_recv.recv() => {
-                match should_propose {
-                    Some(pmaker_msg) => {
-                        let new_blk = match block_creation_stage.new_block(pmaker_msg).await {
-                            Ok(blk) => blk,
-                            Err(e) => {
-                                log::error!("Node {id}: failed to create new block: {e:?}");
-                                continue;
-                            }
-                        };
-
-                        if let Err(e) = new_block_send.send(new_blk).await {
+            new_blk = block_creation_stage.new_block() => {
+                match new_blk {
+                    Ok(block) => {
+                        log::trace!("Node {id}: proposing new block {block:?}");
+                        if let Err(e) = new_block_send.send(block).await {
                             log::error!("Node {id}: failed to send to new_block pipe: {e:?}");
                             continue;
                         }
                     },
-                    None => {
-                        log::error!("Node {id}: should_propose pipe closed unexpectedly");
+                    Err(e) => {
+                        log::error!("Node {id}: error creating new block: {e:?}");
                         continue;
                     }
                 }

@@ -1,7 +1,8 @@
 mod dummy;
 use dummy::DummyPacemaker;
 
-use crate::{block::ChainType, peers::PeerMessenger};
+use crate::peers::PeerMessenger;
+use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -33,6 +34,8 @@ pub async fn pacemaker_thread<TxnType, BlockType>(
     peer_pmaker_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
     should_propose_send: mpsc::Sender<Arc<Vec<u8>>>,
 ) {
+    log::trace!("Node {id}: pacemaker starting...");
+
     let pmaker = get_pacemaker(chain_type, peer_messenger, peer_pmaker_recv);
 
     loop {
@@ -43,6 +46,8 @@ pub async fn pacemaker_thread<TxnType, BlockType>(
                 continue;
             }
         };
+
+        log::trace!("Node {id}: got pacemaker peer message {propose_msg:?}");
 
         if let Err(e) = should_propose_send.send(propose_msg).await {
             log::error!("Node {id}: failed to send to should_propose pipe: {e:?}");

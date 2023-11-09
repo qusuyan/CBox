@@ -1,10 +1,9 @@
-mod block;
 mod composition;
 mod node;
 mod peers;
 mod stage;
 
-use block::ChainType;
+use copycat_protocol::ChainType;
 use copycat_utils::log::colored_level;
 use node::Node;
 
@@ -16,13 +15,16 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct CliArgs {
+    /// ID of the blockchain node
     #[arg(long, short = 'i')]
     id: u64,
 
-    #[arg(long, short = 'c', value_enum, default_value = "Dummy")]
+    /// The type of blockchain
+    #[arg(long, short = 'c', value_enum, default_value = "dummy")]
     chain: ChainType,
 
-    #[arg(long, short = 't')]
+    /// Number of executor threads
+    #[arg(long, short = 't', default_value = "8")]
     num_threads: usize,
 }
 
@@ -60,12 +62,29 @@ pub fn main() {
 
     runtime.block_on(async {
         // TODO
-        let node: Node<String> = match Node::init(id, args.chain).await {
+        let (node, mut executed): (Node<String>, _) = match Node::init(id, args.chain).await {
             Ok(node) => node,
             Err(e) => {
                 log::error!("Node {id}: failed to start node: {e:?}");
                 return;
             }
         };
+
+        let test_msg = (0..50000000).map(|_| id.to_string()).collect::<String>();
+
+        if let Err(e) = node.send_req(test_msg).await {
+            log::error!("Node {id}: failed to send txn request: {e:?}");
+        }
+
+        loop {
+            match executed.recv().await {
+                Some(txn) => {
+                    log::info!("got committed txn {txn:?}")
+                }
+                None => {
+                    log::error!("Node {id}: failed to recv executed txns");
+                }
+            }
+        }
     })
 }

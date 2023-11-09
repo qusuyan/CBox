@@ -1,7 +1,8 @@
 mod dummy;
 use dummy::DummyDecision;
 
-use crate::{block::ChainType, peers::PeerMessenger};
+use crate::peers::PeerMessenger;
+use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -33,7 +34,11 @@ pub async fn decision_thread<TxnType, BlockType>(
     peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
     mut block_ready_recv: mpsc::Receiver<Arc<BlockType>>,
     commit_send: mpsc::Sender<Arc<BlockType>>,
-) {
+) where
+    BlockType: std::fmt::Debug,
+{
+    log::trace!("Node {id}: Decision stage starting...");
+
     let decision_stage = get_decision(chain_type, peer_messenger, peer_consensus_recv);
 
     loop {
@@ -44,6 +49,8 @@ pub async fn decision_thread<TxnType, BlockType>(
                 continue;
             }
         };
+
+        log::trace!("Node {id}: got new block {block:?}");
 
         match decision_stage.decide(&block).await {
             Ok(decision) => {

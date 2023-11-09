@@ -3,7 +3,8 @@ use dummy::DummyCommit;
 
 use async_trait::async_trait;
 
-use crate::block::{BlockTrait, ChainType};
+use copycat_protocol::block::BlockTrait;
+use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use std::sync::Arc;
@@ -35,8 +36,10 @@ pub async fn commit_thread<TxnType, BlockType>(
     executed_send: mpsc::Sender<Arc<TxnType>>,
 ) where
     TxnType: 'static + Sync + Send,
-    BlockType: 'static + BlockTrait<TxnType>,
+    BlockType: 'static + std::fmt::Debug + BlockTrait<TxnType>,
 {
+    log::trace!("Node {id}: Txn Validation stage starting...");
+
     let commit_stage = get_commit(chain_type, executed_send);
 
     loop {
@@ -47,6 +50,8 @@ pub async fn commit_thread<TxnType, BlockType>(
                 continue;
             }
         };
+
+        log::trace!("Node {id}: got new block {block:?}");
 
         if let Err(e) = commit_stage.commit(block).await {
             log::error!("Node {id}: failed to commit: {e:?}");

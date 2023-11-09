@@ -3,12 +3,11 @@ use dummy::DummyBlockValidation;
 
 use async_trait::async_trait;
 
+use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-
-use crate::block::ChainType;
 
 #[async_trait]
 pub trait BlockValidation<BlockType>: Sync + Send {
@@ -27,17 +26,29 @@ pub async fn block_validation_thread<BlockType>(
     chain_type: ChainType,
     mut peer_blk_recv: mpsc::UnboundedReceiver<(NodeId, Arc<BlockType>)>,
     block_ready_send: mpsc::Sender<Arc<BlockType>>,
-) {
+) where
+    BlockType: std::fmt::Debug,
+{
+    log::trace!("Node {id}: Txn Validation stage starting...");
+
     let block_validation_stage = get_block_validation(chain_type);
 
     loop {
         let (src, new_block) = match peer_blk_recv.recv().await {
-            Some(blk) => blk,
+            Some((src, blk)) => {
+                if src == id {
+                    // ignore blocks proposed by myself
+                    continue;
+                }
+                (src, blk)
+            }
             None => {
                 log::error!("Node {id}: peer_blk pipe closed unexpectedly");
                 continue;
             }
         };
+
+        log::trace!("Node {id}: got from {src} new block {new_block:?}");
 
         match block_validation_stage.validate(&new_block).await {
             Ok(valid) => {

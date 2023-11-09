@@ -1,10 +1,13 @@
 [workspace]
 members = [
     "copycat_server", 
-    "copycat_utils"
+    "copycat_utils",
+    "copycat_mailbox",
+    "copycat_protocol",
 ]
 resolver = "2"
 
 [patch.'ssh://git@github.com/qusuyan/mailbox.git']
 mailbox_client = { path="../mailbox/mailbox_client" }
 mailbox_utils = { path="../mailbox/mailbox_utils" }
+mailbox = {path="../mailbox"}

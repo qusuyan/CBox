@@ -1,7 +1,7 @@
 mod dummy;
 use dummy::DummyTxnValidation;
 
-use crate::block::ChainType;
+use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -31,6 +31,8 @@ pub async fn txn_validation_thread<TxnType>(
 ) where
     TxnType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
 {
+    log::trace!("Node {id}: Txn Validation stage starting...");
+
     let txn_validation_stage = get_txn_validation(chain_type);
 
     loop {
@@ -46,14 +48,22 @@ pub async fn txn_validation_thread<TxnType>(
             },
             new_peer_txn = peer_txn_recv.recv() => {
                 match new_peer_txn {
-                    Some(txn) => txn,
+                    Some((src, txn)) => {
+                        if src == id {
+                            // ignore txns sent by self
+                            continue;
+                        }
+                        (src, txn)
+                    },
                     None => {
                         log::error!("Node {id}: peer_txn pipe closed");
                         continue;
-                    }
+                    },
                 }
             }
         };
+
+        log::trace!("Node {id}: got from {src} new txn {txn:?}");
 
         match txn_validation_stage.validate(&txn).await {
             Ok(valid) => {

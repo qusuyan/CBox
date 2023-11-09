@@ -5,7 +5,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 
 use super::BlockDissemination;
-use crate::peers::{MsgType, PeerMessenger};
+use crate::peers::PeerMessenger;
+use copycat_protocol::MsgType;
 
 pub struct BroadcastBlockDissemination<TxnType, BlockType> {
     peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,

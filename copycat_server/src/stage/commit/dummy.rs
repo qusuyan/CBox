@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use super::Commit;
-use crate::block::BlockTrait;
+use copycat_protocol::block::BlockTrait;
 use copycat_utils::CopycatError;
 
 use std::sync::Arc;
