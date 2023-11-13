@@ -3,7 +3,7 @@ mod node;
 mod peers;
 mod stage;
 
-use copycat_protocol::ChainType;
+use copycat_protocol::{transaction::Txn, ChainType};
 use copycat_utils::log::colored_level;
 use node::Node;
 
@@ -62,7 +62,7 @@ pub fn main() {
 
     runtime.block_on(async {
         // TODO
-        let (node, mut executed): (Node<String>, _) = match Node::init(id, args.chain).await {
+        let (node, mut executed): (Node, _) = match Node::init(id, args.chain).await {
             Ok(node) => node,
             Err(e) => {
                 log::error!("Node {id}: failed to start node: {e:?}");
@@ -70,9 +70,9 @@ pub fn main() {
             }
         };
 
-        let test_msg = (0..50000000).map(|_| id.to_string()).collect::<String>();
+        let test_msg = (0..500000).map(|_| id.to_string()).collect::<String>();
 
-        if let Err(e) = node.send_req(test_msg).await {
+        if let Err(e) = node.send_req(Txn::Dummy { txn: test_msg }).await {
             log::error!("Node {id}: failed to send txn request: {e:?}");
         }
 

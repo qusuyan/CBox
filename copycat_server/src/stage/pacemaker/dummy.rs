@@ -1,7 +1,7 @@
-use async_trait::async_trait;
-
 use super::Pacemaker;
 use copycat_utils::CopycatError;
+
+use async_trait::async_trait;
 
 use std::sync::Arc;
 

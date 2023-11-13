@@ -1,7 +1,8 @@
-use async_trait::async_trait;
-
 use super::Decision;
+use copycat_protocol::block::Block;
 use copycat_utils::CopycatError;
+
+use async_trait::async_trait;
 
 pub struct DummyDecision {}
 
@@ -12,8 +13,8 @@ impl DummyDecision {
 }
 
 #[async_trait]
-impl<BlockType> Decision<BlockType> for DummyDecision {
-    async fn decide(&self, _block: &BlockType) -> Result<bool, CopycatError> {
+impl Decision for DummyDecision {
+    async fn decide(&self, _block: &Block) -> Result<bool, CopycatError> {
         Ok(true)
     }
 }

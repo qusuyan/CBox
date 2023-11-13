@@ -1,7 +1,6 @@
 use mailbox_utils;
 use mailbox_utils::{config, MachineId};
 
-use copycat_protocol::block::Block;
 use copycat_protocol::{ChainType, MsgType};
 
 use tokio::runtime::Builder;
@@ -89,9 +88,7 @@ fn main() {
 
     runtime.block_on(async {
         if let Err(e) = match chain_type {
-            ChainType::Dummy => {
-                mailbox::init::<MsgType<String, Block<String>>>(id, machine_list, pipe_info).await
-            }
+            ChainType::Dummy => mailbox::init::<MsgType>(id, machine_list, pipe_info).await,
             ChainType::Bitcoin => todo!(),
         } {
             log::error!("Ipc Server failed with error {:?}", e);

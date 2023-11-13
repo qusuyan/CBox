@@ -2,42 +2,38 @@ mod dummy;
 use dummy::DummyBlockCreation;
 
 use copycat_protocol::block::Block;
+use copycat_protocol::transaction::Txn;
 use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
-use std::{hash::Hash, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[async_trait]
-pub trait BlockCreation<TxnType>: Sync + Send {
-    async fn new_txn(&mut self, txn: Arc<TxnType>) -> Result<(), CopycatError>;
-    async fn new_block(&mut self) -> Result<Arc<Block<TxnType>>, CopycatError>;
+pub trait BlockCreation: Sync + Send {
+    async fn new_txn(&mut self, txn: Arc<Txn>) -> Result<(), CopycatError>;
+    async fn new_block(&mut self) -> Result<Arc<Block>, CopycatError>;
 }
 
-fn get_blk_creation<TxnType>(
+fn get_blk_creation(
     chain_type: ChainType,
     should_propose_recv: mpsc::Receiver<Arc<Vec<u8>>>,
-) -> Box<dyn BlockCreation<TxnType>>
-where
-    TxnType: 'static + Sync + Send + Eq + Hash,
-{
+) -> Box<dyn BlockCreation> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyBlockCreation::new()),
         ChainType::Bitcoin => todo!(),
     }
 }
 
-pub async fn block_creation_thread<TxnType>(
+pub async fn block_creation_thread(
     id: NodeId,
     chain_type: ChainType,
-    mut txn_ready_recv: mpsc::Receiver<Arc<TxnType>>,
+    mut txn_ready_recv: mpsc::Receiver<Arc<Txn>>,
     pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
-    new_block_send: mpsc::Sender<Arc<Block<TxnType>>>,
-) where
-    TxnType: 'static + std::fmt::Debug + Sync + Send + Eq + Hash,
-{
+    new_block_send: mpsc::Sender<Arc<Block>>,
+) {
     log::trace!("Node {id}: Txn Validation stage starting...");
 
     let mut block_creation_stage = get_blk_creation(chain_type, pacemaker_recv);

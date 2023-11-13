@@ -1,41 +1,32 @@
-use copycat_protocol::MsgType;
+use copycat_protocol::{block::Block, transaction::Txn, MsgType};
 use copycat_utils::{CopycatError, NodeId};
 use mailbox_client::ClientStub;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use std::{fmt::Debug, sync::Arc};
 
 #[derive(Debug, Serialize, Deserialize)]
-enum SendRequest<TxnType, BlockType> {
-    Send {
-        dest: NodeId,
-        msg: MsgType<TxnType, BlockType>,
-    },
-    Broadcast {
-        msg: MsgType<TxnType, BlockType>,
-    },
+enum SendRequest {
+    Send { dest: NodeId, msg: MsgType },
+    Broadcast { msg: MsgType },
 }
 
-pub struct PeerMessenger<TxnType, BlockType> {
+pub struct PeerMessenger {
     id: NodeId,
-    tx_send: mpsc::UnboundedSender<SendRequest<TxnType, BlockType>>,
+    tx_send: mpsc::UnboundedSender<SendRequest>,
     _messenger_handle: JoinHandle<()>,
 }
 
-impl<TxnType, BlockType> PeerMessenger<TxnType, BlockType>
-where
-    TxnType: 'static + Debug + Serialize + DeserializeOwned + Sync + Send,
-    BlockType: 'static + Debug + Serialize + DeserializeOwned + Sync + Send,
-{
+impl PeerMessenger {
     pub async fn new(
         id: NodeId,
     ) -> Result<
         (
             Self,
-            mpsc::UnboundedReceiver<(NodeId, Arc<TxnType>)>,
-            mpsc::UnboundedReceiver<(NodeId, Arc<BlockType>)>,
+            mpsc::UnboundedReceiver<(NodeId, Arc<Txn>)>,
+            mpsc::UnboundedReceiver<(NodeId, Arc<Block>)>,
             mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
             mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
         ),
@@ -72,11 +63,7 @@ where
         ))
     }
 
-    pub async fn send(
-        &self,
-        dest: NodeId,
-        msg: MsgType<TxnType, BlockType>,
-    ) -> Result<(), CopycatError> {
+    pub async fn send(&self, dest: NodeId, msg: MsgType) -> Result<(), CopycatError> {
         if let Err(e) = self.tx_send.send(SendRequest::Send { dest, msg }) {
             Err(CopycatError(format!(
                 "Node {}: send to {dest} failed: {e:?}",
@@ -87,7 +74,7 @@ where
         }
     }
 
-    pub async fn broadcast(&self, msg: MsgType<TxnType, BlockType>) -> Result<(), CopycatError> {
+    pub async fn broadcast(&self, msg: MsgType) -> Result<(), CopycatError> {
         log::trace!("Node {}: broadcasting {msg:?}", self.id);
         if let Err(e) = self.tx_send.send(SendRequest::Broadcast { msg }) {
             Err(CopycatError(format!(
@@ -101,10 +88,10 @@ where
 
     async fn peer_messenger_thread(
         id: NodeId,
-        transport_hub: ClientStub<MsgType<TxnType, BlockType>>,
-        mut tx_recv: mpsc::UnboundedReceiver<SendRequest<TxnType, BlockType>>,
-        rx_txn_send: mpsc::UnboundedSender<(NodeId, Arc<TxnType>)>,
-        rx_blk_send: mpsc::UnboundedSender<(NodeId, Arc<BlockType>)>,
+        transport_hub: ClientStub<MsgType>,
+        mut tx_recv: mpsc::UnboundedReceiver<SendRequest>,
+        rx_txn_send: mpsc::UnboundedSender<(NodeId, Arc<Txn>)>,
+        rx_blk_send: mpsc::UnboundedSender<(NodeId, Arc<Block>)>,
         rx_consensus_send: mpsc::UnboundedSender<(NodeId, Arc<Vec<u8>>)>,
         rx_pmaker_send: mpsc::UnboundedSender<(NodeId, Arc<Vec<u8>>)>,
     ) {

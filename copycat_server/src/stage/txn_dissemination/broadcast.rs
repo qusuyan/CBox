@@ -1,30 +1,26 @@
-use async_trait::async_trait;
+use super::TxnDissemination;
+use crate::peers::PeerMessenger;
+use copycat_protocol::transaction::Txn;
+use copycat_protocol::MsgType;
 use copycat_utils::CopycatError;
-use serde::{de::DeserializeOwned, Serialize};
+
+use async_trait::async_trait;
 
 use std::sync::Arc;
 
-use super::TxnDissemination;
-use crate::peers::PeerMessenger;
-use copycat_protocol::MsgType;
-
-pub struct BroadcastTxnDissemination<TxnType, BlockType> {
-    transport: Arc<PeerMessenger<TxnType, BlockType>>,
+pub struct BroadcastTxnDissemination {
+    transport: Arc<PeerMessenger>,
 }
 
-impl<TxnType, BlockType> BroadcastTxnDissemination<TxnType, BlockType> {
-    pub fn new(transport: Arc<PeerMessenger<TxnType, BlockType>>) -> Self {
+impl BroadcastTxnDissemination {
+    pub fn new(transport: Arc<PeerMessenger>) -> Self {
         Self { transport }
     }
 }
 
 #[async_trait]
-impl<TxnType, BlockType> TxnDissemination<TxnType> for BroadcastTxnDissemination<TxnType, BlockType>
-where
-    TxnType: 'static + std::fmt::Debug + Clone + Serialize + DeserializeOwned + Sync + Send,
-    BlockType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
-{
-    async fn disseminate(&self, txn: &TxnType) -> Result<(), CopycatError> {
+impl TxnDissemination for BroadcastTxnDissemination {
+    async fn disseminate(&self, txn: &Txn) -> Result<(), CopycatError> {
         self.transport
             .broadcast(MsgType::NewTxn { txn: txn.clone() })
             .await

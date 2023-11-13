@@ -1,43 +1,34 @@
 mod dummy;
 use dummy::DummyCommit;
 
-use async_trait::async_trait;
-
-use copycat_protocol::block::BlockTrait;
+use copycat_protocol::block::Block;
+use copycat_protocol::transaction::Txn;
 use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
+
+use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[async_trait]
-pub trait Commit<BlockType: ?Sized>: Sync + Send {
-    async fn commit(&self, block: Arc<BlockType>) -> Result<(), CopycatError>;
+pub trait Commit: Sync + Send {
+    async fn commit(&self, block: Arc<Block>) -> Result<(), CopycatError>;
 }
 
-pub fn get_commit<TxnType, BlockType: ?Sized>(
-    chain_type: ChainType,
-    executed_send: mpsc::Sender<Arc<TxnType>>,
-) -> Box<dyn Commit<BlockType>>
-where
-    TxnType: 'static,
-    DummyCommit<TxnType>: Commit<BlockType>,
-{
+pub fn get_commit(chain_type: ChainType, executed_send: mpsc::Sender<Arc<Txn>>) -> Box<dyn Commit> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyCommit::new(executed_send)),
         ChainType::Bitcoin => todo!(),
     }
 }
 
-pub async fn commit_thread<TxnType, BlockType>(
+pub async fn commit_thread(
     id: NodeId,
     chain_type: ChainType,
-    mut commit_recv: mpsc::Receiver<Arc<BlockType>>,
-    executed_send: mpsc::Sender<Arc<TxnType>>,
-) where
-    TxnType: 'static + Sync + Send,
-    BlockType: 'static + std::fmt::Debug + BlockTrait<TxnType>,
-{
+    mut commit_recv: mpsc::Receiver<Arc<Block>>,
+    executed_send: mpsc::Sender<Arc<Txn>>,
+) {
     log::trace!("Node {id}: Txn Validation stage starting...");
 
     let commit_stage = get_commit(chain_type, executed_send);

@@ -2,41 +2,39 @@ mod dummy;
 use dummy::DummyDecision;
 
 use crate::peers::PeerMessenger;
+use copycat_protocol::block::Block;
 use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use std::sync::Arc;
-
 #[async_trait]
-pub trait Decision<BlockType>: Sync + Send {
-    async fn decide(&self, block: &BlockType) -> Result<bool, CopycatError>;
+pub trait Decision: Sync + Send {
+    async fn decide(&self, block: &Block) -> Result<bool, CopycatError>;
 }
 
-fn get_decision<TxnType, BlockType>(
+fn get_decision(
     chain_type: ChainType,
-    peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
+    peer_messenger: Arc<PeerMessenger>,
     peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
-) -> Box<dyn Decision<BlockType>> {
+) -> Box<dyn Decision> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyDecision::new()),
         ChainType::Bitcoin => todo!(),
     }
 }
 
-pub async fn decision_thread<TxnType, BlockType>(
+pub async fn decision_thread(
     id: NodeId,
     chain_type: ChainType,
-    peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
+    peer_messenger: Arc<PeerMessenger>,
     peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
-    mut block_ready_recv: mpsc::Receiver<Arc<BlockType>>,
-    commit_send: mpsc::Sender<Arc<BlockType>>,
-) where
-    BlockType: std::fmt::Debug,
-{
+    mut block_ready_recv: mpsc::Receiver<Arc<Block>>,
+    commit_send: mpsc::Sender<Arc<Block>>,
+) {
     log::trace!("Node {id}: Decision stage starting...");
 
     let decision_stage = get_decision(chain_type, peer_messenger, peer_consensus_recv);

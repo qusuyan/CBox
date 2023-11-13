@@ -1,12 +1,9 @@
-use std::fmt::Debug;
-use std::hash::Hash;
 use std::sync::Arc;
 
-use copycat_protocol::block::Block;
+use copycat_protocol::transaction::Txn;
 use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
-use serde::{de::DeserializeOwned, Serialize};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::peers::PeerMessenger;
@@ -19,10 +16,10 @@ use crate::stage::pacemaker::pacemaker_thread;
 use crate::stage::txn_dissemination::txn_dissemination_thread;
 use crate::stage::txn_validation::txn_validation_thread;
 
-pub struct Node<TxnType> {
-    req_send: mpsc::Sender<Arc<TxnType>>,
+pub struct Node {
+    req_send: mpsc::Sender<Arc<Txn>>,
     // actor threads
-    _peer_messenger: Arc<PeerMessenger<TxnType, Block<TxnType>>>,
+    _peer_messenger: Arc<PeerMessenger>,
     _txn_validation_handle: JoinHandle<()>,
     _txn_dissemination_handle: JoinHandle<()>,
     _pacemaker_handle: JoinHandle<()>,
@@ -33,14 +30,11 @@ pub struct Node<TxnType> {
     _commit_handle: JoinHandle<()>,
 }
 
-impl<TxnType> Node<TxnType>
-where
-    TxnType: 'static + Debug + Clone + Serialize + DeserializeOwned + Sync + Send + Eq + Hash,
-{
+impl Node {
     pub async fn init(
         id: NodeId,
         chain_type: ChainType,
-    ) -> Result<(Self, mpsc::Receiver<Arc<TxnType>>), CopycatError> {
+    ) -> Result<(Self, mpsc::Receiver<Arc<Txn>>), CopycatError> {
         log::trace!("starting node {id}: {chain_type:?}");
 
         let (peer_messenger, peer_txn_recv, peer_blk_recv, peer_consensus_recv, peer_pmaker_recv) =
@@ -48,7 +42,7 @@ where
 
         let peer_messenger = Arc::new(peer_messenger);
 
-        let (req_send, req_recv) = mpsc::channel::<Arc<TxnType>>(0x1000000);
+        let (req_send, req_recv) = mpsc::channel::<Arc<Txn>>(0x1000000);
         let (validated_txn_send, validated_txn_recv) = mpsc::channel(0x1000000);
         let (txn_ready_send, txn_ready_recv) = mpsc::channel(0x1000000);
         let (pacemaker_send, pacemaker_recv) = mpsc::channel(0x1000000);
@@ -147,7 +141,7 @@ where
         Ok(())
     }
 
-    pub async fn send_req(&self, txn: TxnType) -> Result<(), CopycatError> {
+    pub async fn send_req(&self, txn: Txn) -> Result<(), CopycatError> {
         if let Err(e) = self.req_send.send(Arc::new(txn)).await {
             return Err(CopycatError(format!("{e:?}")));
         }

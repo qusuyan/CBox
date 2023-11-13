@@ -1,36 +1,34 @@
 mod dummy;
 use dummy::DummyTxnValidation;
 
+use copycat_protocol::transaction::Txn;
 use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
-use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[async_trait]
-pub trait TxnValidation<TxnType>: Send + Sync {
-    async fn validate(&self, txn: &TxnType) -> Result<bool, CopycatError>;
+pub trait TxnValidation: Send + Sync {
+    async fn validate(&self, txn: &Txn) -> Result<bool, CopycatError>;
 }
 
-fn get_txn_validation<TxnType>(chain_type: ChainType) -> Box<dyn TxnValidation<TxnType>> {
+fn get_txn_validation(chain_type: ChainType) -> Box<dyn TxnValidation> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyTxnValidation::new()),
         ChainType::Bitcoin => todo!(),
     }
 }
 
-pub async fn txn_validation_thread<TxnType>(
+pub async fn txn_validation_thread(
     id: NodeId,
     chain_type: ChainType,
-    mut req_recv: mpsc::Receiver<Arc<TxnType>>,
-    mut peer_txn_recv: mpsc::UnboundedReceiver<(NodeId, Arc<TxnType>)>,
-    validated_txn_send: mpsc::Sender<(Arc<TxnType>, bool)>,
-) where
-    TxnType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
-{
+    mut req_recv: mpsc::Receiver<Arc<Txn>>,
+    mut peer_txn_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Txn>)>,
+    validated_txn_send: mpsc::Sender<(Arc<Txn>, bool)>,
+) {
     log::trace!("Node {id}: Txn Validation stage starting...");
 
     let txn_validation_stage = get_txn_validation(chain_type);

@@ -1,6 +1,6 @@
-use copycat_utils::CopycatError;
-
 use super::TxnValidation;
+use copycat_protocol::transaction::Txn;
+use copycat_utils::CopycatError;
 
 use async_trait::async_trait;
 
@@ -13,8 +13,8 @@ impl DummyTxnValidation {
 }
 
 #[async_trait]
-impl<TxnType> TxnValidation<TxnType> for DummyTxnValidation {
-    async fn validate(&self, _txn: &TxnType) -> Result<bool, CopycatError> {
+impl TxnValidation for DummyTxnValidation {
+    async fn validate(&self, _txn: &Txn) -> Result<bool, CopycatError> {
         Ok(true)
     }
 }

@@ -1,34 +1,33 @@
 mod dummy;
 use dummy::DummyBlockValidation;
 
-use async_trait::async_trait;
-
+use copycat_protocol::block::Block;
 use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
+
+use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[async_trait]
-pub trait BlockValidation<BlockType>: Sync + Send {
-    async fn validate(&self, block: &BlockType) -> Result<bool, CopycatError>;
+pub trait BlockValidation: Sync + Send {
+    async fn validate(&self, block: &Block) -> Result<bool, CopycatError>;
 }
 
-fn get_block_validation<BlockType>(chain_type: ChainType) -> Box<dyn BlockValidation<BlockType>> {
+fn get_block_validation(chain_type: ChainType) -> Box<dyn BlockValidation> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyBlockValidation::new()),
         ChainType::Bitcoin => todo!(),
     }
 }
 
-pub async fn block_validation_thread<BlockType>(
+pub async fn block_validation_thread(
     id: NodeId,
     chain_type: ChainType,
-    mut peer_blk_recv: mpsc::UnboundedReceiver<(NodeId, Arc<BlockType>)>,
-    block_ready_send: mpsc::Sender<Arc<BlockType>>,
-) where
-    BlockType: std::fmt::Debug,
-{
+    mut peer_blk_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Block>)>,
+    block_ready_send: mpsc::Sender<Arc<Block>>,
+) {
     log::trace!("Node {id}: Txn Validation stage starting...");
 
     let block_validation_stage = get_block_validation(chain_type);

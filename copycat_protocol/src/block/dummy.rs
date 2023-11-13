@@ -1,3 +1,5 @@
+use crate::transaction::Txn;
+
 use super::BlockTrait;
 
 use get_size::GetSize;
@@ -5,21 +7,18 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, GetSize)]
-pub struct DummyBlock<TxnType> {
-    txns: Vec<Arc<TxnType>>,
+pub struct DummyBlock {
+    txns: Vec<Arc<Txn>>,
 }
 
-impl<TxnType> DummyBlock<TxnType> {
-    pub fn new(txns: Vec<Arc<TxnType>>) -> Self {
+impl DummyBlock {
+    pub fn new(txns: Vec<Arc<Txn>>) -> Self {
         Self { txns }
     }
 }
 
-impl<TxnType> BlockTrait<TxnType> for DummyBlock<TxnType>
-where
-    TxnType: Sync + Send,
-{
-    fn fetch_txns(&self) -> Vec<Arc<TxnType>> {
+impl BlockTrait for DummyBlock {
+    fn fetch_txns(&self) -> Vec<Arc<Txn>> {
         self.txns.clone()
     }
 }

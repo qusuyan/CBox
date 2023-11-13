@@ -1,20 +1,20 @@
-use async_trait::async_trait;
-use tokio::time::{Duration, Instant};
-
 use super::BlockCreation;
 use copycat_protocol::block::{Block, DummyBlock};
+use copycat_protocol::transaction::Txn;
 use copycat_utils::CopycatError;
 
-use std::collections::HashSet;
-use std::hash::Hash;
-use std::sync::Arc;
+use async_trait::async_trait;
 
-pub struct DummyBlockCreation<TxnType> {
-    mem_pool: HashSet<Arc<TxnType>>,
+use std::collections::HashSet;
+use std::sync::Arc;
+use tokio::time::{Duration, Instant};
+
+pub struct DummyBlockCreation {
+    mem_pool: HashSet<Arc<Txn>>,
     last_block: Instant,
 }
 
-impl<TxnType> DummyBlockCreation<TxnType> {
+impl DummyBlockCreation {
     pub fn new() -> Self {
         Self {
             mem_pool: HashSet::new(),
@@ -24,16 +24,13 @@ impl<TxnType> DummyBlockCreation<TxnType> {
 }
 
 #[async_trait]
-impl<TxnType> BlockCreation<TxnType> for DummyBlockCreation<TxnType>
-where
-    TxnType: Sync + Send + Eq + Hash,
-{
-    async fn new_txn(&mut self, txn: Arc<TxnType>) -> Result<(), CopycatError> {
+impl BlockCreation for DummyBlockCreation {
+    async fn new_txn(&mut self, txn: Arc<Txn>) -> Result<(), CopycatError> {
         self.mem_pool.insert(txn);
         Ok(())
     }
 
-    async fn new_block(&mut self) -> Result<Arc<Block<TxnType>>, CopycatError> {
+    async fn new_block(&mut self) -> Result<Arc<Block>, CopycatError> {
         loop {
             let now = Instant::now();
             if self.mem_pool.len() >= 1000 || now - self.last_block >= Duration::from_secs(10) {

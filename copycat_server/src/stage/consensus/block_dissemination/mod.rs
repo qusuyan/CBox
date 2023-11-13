@@ -2,45 +2,37 @@ mod broadcast;
 use broadcast::BroadcastBlockDissemination;
 
 use crate::peers::PeerMessenger;
+use copycat_protocol::block::Block;
 use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
-use serde::{de::DeserializeOwned, Serialize};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use std::sync::Arc;
-
 #[async_trait]
-pub trait BlockDissemination<BlockType>: Sync + Send {
-    async fn disseminate(&self, block: &BlockType) -> Result<(), CopycatError>;
+pub trait BlockDissemination: Sync + Send {
+    async fn disseminate(&self, block: &Block) -> Result<(), CopycatError>;
 }
 
-fn get_block_dissemination<TxnType, BlockType>(
+fn get_block_dissemination(
     chain_type: ChainType,
-    peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
-) -> Box<dyn BlockDissemination<BlockType>>
-where
-    TxnType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
-    BlockType: 'static + Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
-{
+    peer_messenger: Arc<PeerMessenger>,
+) -> Box<dyn BlockDissemination> {
     match chain_type {
         ChainType::Dummy => Box::new(BroadcastBlockDissemination::new(peer_messenger)),
         ChainType::Bitcoin => todo!(),
     }
 }
 
-pub async fn block_dissemination_thread<TxnType, BlockType>(
+pub async fn block_dissemination_thread(
     id: NodeId,
     chain_type: ChainType,
-    peer_messenger: Arc<PeerMessenger<TxnType, BlockType>>,
-    mut new_block_recv: mpsc::Receiver<Arc<BlockType>>,
-    block_ready_send: mpsc::Sender<Arc<BlockType>>,
-) where
-    TxnType: 'static + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
-    BlockType: 'static + Clone + std::fmt::Debug + Serialize + DeserializeOwned + Sync + Send,
-{
+    peer_messenger: Arc<PeerMessenger>,
+    mut new_block_recv: mpsc::Receiver<Arc<Block>>,
+    block_ready_send: mpsc::Sender<Arc<Block>>,
+) {
     log::trace!("Node {id}: Txn Validation stage starting...");
 
     let block_dissemination_stage = get_block_dissemination(chain_type, peer_messenger);
