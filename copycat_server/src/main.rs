@@ -3,7 +3,7 @@ mod node;
 mod peers;
 mod stage;
 
-use copycat_protocol::{transaction::Txn, ChainType};
+use copycat_protocol::{transaction::Txn, ChainType, DissemPattern};
 use copycat_utils::log::colored_level;
 use node::Node;
 
@@ -26,6 +26,10 @@ struct CliArgs {
     /// Number of executor threads
     #[arg(long, short = 't', default_value = "8")]
     num_threads: usize,
+
+    /// Dissemination pattern
+    #[arg(long, short = 'n', default_value = "broadcast")]
+    dissem_pattern: DissemPattern,
 }
 
 impl CliArgs {
@@ -62,13 +66,14 @@ pub fn main() {
 
     runtime.block_on(async {
         // TODO
-        let (node, mut executed): (Node, _) = match Node::init(id, args.chain).await {
-            Ok(node) => node,
-            Err(e) => {
-                log::error!("Node {id}: failed to start node: {e:?}");
-                return;
-            }
-        };
+        let (node, mut executed): (Node, _) =
+            match Node::init(id, args.chain, args.dissem_pattern).await {
+                Ok(node) => node,
+                Err(e) => {
+                    log::error!("Node {id}: failed to start node: {e:?}");
+                    return;
+                }
+            };
 
         let test_msg = (0..500000).map(|_| id.to_string()).collect::<String>();
 

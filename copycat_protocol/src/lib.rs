@@ -12,6 +12,12 @@ pub enum ChainType {
     Bitcoin,
 }
 
+#[derive(Copy, Clone, Debug, clap::ValueEnum)]
+pub enum DissemPattern {
+    Broadcast,
+    Gossip,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
 pub enum MsgType {
     NewTxn { txn: Txn },

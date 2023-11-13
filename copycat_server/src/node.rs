@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use copycat_protocol::transaction::Txn;
-use copycat_protocol::ChainType;
+use copycat_protocol::{ChainType, DissemPattern};
 use copycat_utils::{CopycatError, NodeId};
 
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -34,6 +34,7 @@ impl Node {
     pub async fn init(
         id: NodeId,
         chain_type: ChainType,
+        dissem_pattern: DissemPattern,
     ) -> Result<(Self, mpsc::Receiver<Arc<Txn>>), CopycatError> {
         log::trace!("starting node {id}: {chain_type:?}");
 
@@ -61,7 +62,7 @@ impl Node {
 
         let _txn_dissemination_handle = tokio::spawn(txn_dissemination_thread(
             id,
-            chain_type,
+            dissem_pattern,
             peer_messenger.clone(),
             validated_txn_recv,
             txn_ready_send,
@@ -85,7 +86,7 @@ impl Node {
 
         let _block_dissemination_handle = tokio::spawn(block_dissemination_thread(
             id,
-            chain_type,
+            dissem_pattern,
             peer_messenger.clone(),
             new_block_recv,
             block_ready_send.clone(),
