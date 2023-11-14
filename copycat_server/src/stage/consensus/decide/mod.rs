@@ -2,6 +2,7 @@ mod dummy;
 use dummy::DummyDecision;
 
 use crate::peers::PeerMessenger;
+use crate::state::ChainState;
 use copycat_protocol::block::Block;
 use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
@@ -19,6 +20,7 @@ pub trait Decision: Sync + Send {
 fn get_decision(
     chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger>,
+    state: Arc<ChainState>,
     peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
 ) -> Box<dyn Decision> {
     match chain_type {
@@ -30,6 +32,7 @@ fn get_decision(
 pub async fn decision_thread(
     id: NodeId,
     chain_type: ChainType,
+    state: Arc<ChainState>,
     peer_messenger: Arc<PeerMessenger>,
     peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
     mut block_ready_recv: mpsc::Receiver<Arc<Block>>,
@@ -37,7 +40,7 @@ pub async fn decision_thread(
 ) {
     log::trace!("Node {id}: Decision stage starting...");
 
-    let decision_stage = get_decision(chain_type, peer_messenger, peer_consensus_recv);
+    let decision_stage = get_decision(chain_type, peer_messenger, state, peer_consensus_recv);
 
     loop {
         let block = match block_ready_recv.recv().await {

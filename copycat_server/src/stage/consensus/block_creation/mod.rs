@@ -1,6 +1,7 @@
 mod dummy;
 use dummy::DummyBlockCreation;
 
+use crate::state::ChainState;
 use copycat_protocol::block::Block;
 use copycat_protocol::transaction::Txn;
 use copycat_protocol::ChainType;
@@ -19,7 +20,8 @@ pub trait BlockCreation: Sync + Send {
 
 fn get_blk_creation(
     chain_type: ChainType,
-    should_propose_recv: mpsc::Receiver<Arc<Vec<u8>>>,
+    state: Arc<ChainState>,
+    pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
 ) -> Box<dyn BlockCreation> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyBlockCreation::new()),
@@ -30,13 +32,14 @@ fn get_blk_creation(
 pub async fn block_creation_thread(
     id: NodeId,
     chain_type: ChainType,
+    state: Arc<ChainState>,
     mut txn_ready_recv: mpsc::Receiver<Arc<Txn>>,
     pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
     new_block_send: mpsc::Sender<Arc<Block>>,
 ) {
     log::trace!("Node {id}: Txn Validation stage starting...");
 
-    let mut block_creation_stage = get_blk_creation(chain_type, pacemaker_recv);
+    let mut block_creation_stage = get_blk_creation(chain_type, state, pacemaker_recv);
 
     loop {
         tokio::select! {

@@ -1,6 +1,7 @@
 mod dummy;
 use dummy::DummyBlockValidation;
 
+use crate::state::ChainState;
 use copycat_protocol::block::Block;
 use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
@@ -15,7 +16,7 @@ pub trait BlockValidation: Sync + Send {
     async fn validate(&self, block: &Block) -> Result<bool, CopycatError>;
 }
 
-fn get_block_validation(chain_type: ChainType) -> Box<dyn BlockValidation> {
+fn get_block_validation(chain_type: ChainType, state: Arc<ChainState>) -> Box<dyn BlockValidation> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyBlockValidation::new()),
         ChainType::Bitcoin => todo!(),
@@ -25,12 +26,13 @@ fn get_block_validation(chain_type: ChainType) -> Box<dyn BlockValidation> {
 pub async fn block_validation_thread(
     id: NodeId,
     chain_type: ChainType,
+    state: Arc<ChainState>,
     mut peer_blk_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Block>)>,
     block_ready_send: mpsc::Sender<Arc<Block>>,
 ) {
     log::trace!("Node {id}: Txn Validation stage starting...");
 
-    let block_validation_stage = get_block_validation(chain_type);
+    let block_validation_stage = get_block_validation(chain_type, state);
 
     loop {
         let (src, new_block) = match peer_blk_recv.recv().await {

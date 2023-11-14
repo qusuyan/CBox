@@ -1,5 +1,5 @@
 mod bitcoin;
-pub use bitcoin::BitCoinTxn;
+pub use bitcoin::BitcoinTxn;
 
 mod dummy;
 pub use dummy::DummyTxn;
@@ -12,5 +12,5 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, GetSize)]
 pub enum Txn {
     Dummy { txn: DummyTxn },
-    Bitcoin { txn: BitCoinTxn },
+    Bitcoin { txn: BitcoinTxn },
 }

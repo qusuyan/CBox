@@ -1,4 +1,6 @@
 pub mod block;
+pub mod crypto;
+pub use crypto::CryptoScheme;
 pub mod transaction;
 
 use block::Block;

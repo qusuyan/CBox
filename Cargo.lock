@@ -261,6 +261,7 @@ name = "copycat_protocol"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "copycat_utils",
  "get-size",
  "serde",
 ]
@@ -270,10 +271,12 @@ name = "copycat_server"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bincode",
  "clap",
  "copycat_protocol",
  "copycat_utils",
  "env_logger",
+ "lazy_static",
  "log",
  "mailbox_client",
  "serde",
@@ -284,6 +287,7 @@ dependencies = [
 name = "copycat_utils"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "env_logger",
  "log",
  "mailbox_utils",

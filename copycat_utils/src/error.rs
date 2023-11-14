@@ -24,3 +24,4 @@ macro_rules! impl_from_error {
 
 impl_from_error!(mailbox_utils::MailboxError);
 impl_from_error!(tokio::task::JoinError);
+impl_from_error!(bincode::Error);

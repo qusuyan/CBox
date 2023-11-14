@@ -2,8 +2,10 @@ mod composition;
 mod node;
 mod peers;
 mod stage;
+mod state;
 
-use copycat_protocol::{transaction::Txn, ChainType, DissemPattern};
+use copycat_protocol::transaction::Txn;
+use copycat_protocol::{ChainType, CryptoScheme, DissemPattern};
 use copycat_utils::log::colored_level;
 use node::Node;
 
@@ -30,6 +32,10 @@ struct CliArgs {
     /// Dissemination pattern
     #[arg(long, short = 'n', default_value = "broadcast")]
     dissem_pattern: DissemPattern,
+
+    /// Cryptography scheme
+    #[arg(long, short = 'p', value_enum, default_value = "dummy")]
+    crypto: CryptoScheme,
 }
 
 impl CliArgs {
@@ -67,7 +73,7 @@ pub fn main() {
     runtime.block_on(async {
         // TODO
         let (node, mut executed): (Node, _) =
-            match Node::init(id, args.chain, args.dissem_pattern).await {
+            match Node::init(id, args.chain, args.dissem_pattern, args.crypto).await {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("Node {id}: failed to start node: {e:?}");

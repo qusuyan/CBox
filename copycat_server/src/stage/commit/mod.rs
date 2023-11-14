@@ -1,6 +1,7 @@
 mod dummy;
 use dummy::DummyCommit;
 
+use crate::state::ChainState;
 use copycat_protocol::block::Block;
 use copycat_protocol::transaction::Txn;
 use copycat_protocol::ChainType;
@@ -16,7 +17,11 @@ pub trait Commit: Sync + Send {
     async fn commit(&self, block: Arc<Block>) -> Result<(), CopycatError>;
 }
 
-pub fn get_commit(chain_type: ChainType, executed_send: mpsc::Sender<Arc<Txn>>) -> Box<dyn Commit> {
+pub fn get_commit(
+    chain_type: ChainType,
+    state: Arc<ChainState>,
+    executed_send: mpsc::Sender<Arc<Txn>>,
+) -> Box<dyn Commit> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyCommit::new(executed_send)),
         ChainType::Bitcoin => todo!(),
@@ -26,12 +31,13 @@ pub fn get_commit(chain_type: ChainType, executed_send: mpsc::Sender<Arc<Txn>>) 
 pub async fn commit_thread(
     id: NodeId,
     chain_type: ChainType,
+    state: Arc<ChainState>,
     mut commit_recv: mpsc::Receiver<Arc<Block>>,
     executed_send: mpsc::Sender<Arc<Txn>>,
 ) {
     log::trace!("Node {id}: Txn Validation stage starting...");
 
-    let commit_stage = get_commit(chain_type, executed_send);
+    let commit_stage = get_commit(chain_type, state, executed_send);
 
     loop {
         let block = match commit_recv.recv().await {
