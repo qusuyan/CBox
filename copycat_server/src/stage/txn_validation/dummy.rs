@@ -4,6 +4,8 @@ use copycat_utils::CopycatError;
 
 use async_trait::async_trait;
 
+use std::sync::Arc;
+
 pub struct DummyTxnValidation {}
 
 impl DummyTxnValidation {
@@ -14,7 +16,7 @@ impl DummyTxnValidation {
 
 #[async_trait]
 impl TxnValidation for DummyTxnValidation {
-    async fn validate(&self, _txn: &Txn) -> Result<bool, CopycatError> {
+    async fn validate(&mut self, _txn: Arc<Txn>) -> Result<bool, CopycatError> {
         Ok(true)
     }
 }

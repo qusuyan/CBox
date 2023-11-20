@@ -2,7 +2,6 @@ mod broadcast;
 use broadcast::BroadcastBlockDissemination;
 
 use crate::peers::PeerMessenger;
-use crate::state::ChainState;
 use copycat_protocol::block::Block;
 use copycat_protocol::DissemPattern;
 use copycat_utils::{CopycatError, NodeId};
@@ -20,7 +19,6 @@ pub trait BlockDissemination: Sync + Send {
 fn get_block_dissemination(
     dissem_pattern: DissemPattern,
     peer_messenger: Arc<PeerMessenger>,
-    state: Arc<ChainState>,
 ) -> Box<dyn BlockDissemination> {
     match dissem_pattern {
         DissemPattern::Broadcast => Box::new(BroadcastBlockDissemination::new(peer_messenger)),
@@ -31,14 +29,13 @@ fn get_block_dissemination(
 pub async fn block_dissemination_thread(
     id: NodeId,
     dissem_pattern: DissemPattern,
-    state: Arc<ChainState>,
     peer_messenger: Arc<PeerMessenger>,
     mut new_block_recv: mpsc::Receiver<Arc<Block>>,
     block_ready_send: mpsc::Sender<Arc<Block>>,
 ) {
     log::trace!("Node {id}: Txn Validation stage starting...");
 
-    let block_dissemination_stage = get_block_dissemination(dissem_pattern, peer_messenger, state);
+    let block_dissemination_stage = get_block_dissemination(dissem_pattern, peer_messenger);
 
     loop {
         let new_blk = match new_block_recv.recv().await {

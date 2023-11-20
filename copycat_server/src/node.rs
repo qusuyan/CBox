@@ -8,26 +8,24 @@ use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::peers::PeerMessenger;
 use crate::stage::commit::commit_thread;
-use crate::stage::consensus::block_creation::block_creation_thread;
 use crate::stage::consensus::block_dissemination::block_dissemination_thread;
-use crate::stage::consensus::block_validation::block_validation_thread;
+use crate::stage::consensus::block_management::block_management_thread;
 use crate::stage::consensus::decide::decision_thread;
 use crate::stage::pacemaker::pacemaker_thread;
 use crate::stage::txn_dissemination::txn_dissemination_thread;
 use crate::stage::txn_validation::txn_validation_thread;
-use crate::state::ChainState;
+// use crate::state::ChainState;
 
 pub struct Node {
     req_send: mpsc::Sender<Arc<Txn>>,
-    _state: Arc<ChainState>,
+    // _state: Arc<ChainState>,
     // actor threads
     _peer_messenger: Arc<PeerMessenger>,
     _txn_validation_handle: JoinHandle<()>,
     _txn_dissemination_handle: JoinHandle<()>,
     _pacemaker_handle: JoinHandle<()>,
-    _block_creation_handle: JoinHandle<()>,
+    _block_management_handle: JoinHandle<()>,
     _block_dissemination_handle: JoinHandle<()>,
-    _block_validation_handle: JoinHandle<()>,
     _decision_handle: JoinHandle<()>,
     _commit_handle: JoinHandle<()>,
 }
@@ -41,7 +39,7 @@ impl Node {
     ) -> Result<(Self, mpsc::Receiver<Arc<Txn>>), CopycatError> {
         log::trace!("starting node {id}: {chain_type:?}");
 
-        let state = Arc::new(ChainState::new(chain_type));
+        // let state = Arc::new(ChainState::new(chain_type));
 
         let (peer_messenger, peer_txn_recv, peer_blk_recv, peer_consensus_recv, peer_pmaker_recv) =
             PeerMessenger::new(id).await?;
@@ -60,7 +58,6 @@ impl Node {
         let _txn_validation_handle = tokio::spawn(txn_validation_thread(
             id,
             chain_type,
-            state.clone(),
             crypto_scheme,
             req_recv,
             peer_txn_recv,
@@ -70,7 +67,6 @@ impl Node {
         let _txn_dissemination_handle = tokio::spawn(txn_dissemination_thread(
             id,
             dissem_pattern,
-            state.clone(),
             peer_messenger.clone(),
             validated_txn_recv,
             txn_ready_send,
@@ -79,16 +75,15 @@ impl Node {
         let _pacemaker_handle = tokio::spawn(pacemaker_thread(
             id,
             chain_type,
-            state.clone(),
             peer_messenger.clone(),
             peer_pmaker_recv,
             pacemaker_send,
         ));
 
-        let _block_creation_handle = tokio::spawn(block_creation_thread(
+        let _block_management_handle = tokio::spawn(block_management_thread(
             id,
             chain_type,
-            state.clone(),
+            peer_blk_recv,
             txn_ready_recv,
             pacemaker_recv,
             new_block_send,
@@ -97,51 +92,34 @@ impl Node {
         let _block_dissemination_handle = tokio::spawn(block_dissemination_thread(
             id,
             dissem_pattern,
-            state.clone(),
             peer_messenger.clone(),
             new_block_recv,
-            block_ready_send.clone(),
-        ));
-
-        let _block_validation_handle = tokio::spawn(block_validation_thread(
-            id,
-            chain_type,
-            state.clone(),
-            peer_blk_recv,
             block_ready_send,
         ));
 
         let _decision_handle = tokio::spawn(decision_thread(
             id,
             chain_type,
-            state.clone(),
             peer_messenger.clone(),
             peer_consensus_recv,
             block_ready_recv,
             commit_send,
         ));
 
-        let _commit_handle = tokio::spawn(commit_thread(
-            id,
-            chain_type,
-            state.clone(),
-            commit_recv,
-            executed_send,
-        ));
+        let _commit_handle =
+            tokio::spawn(commit_thread(id, chain_type, commit_recv, executed_send));
 
         log::trace!("Node {id}: stages started");
 
         Ok((
             Self {
                 req_send,
-                _state: state,
                 _peer_messenger: peer_messenger,
                 _txn_validation_handle,
                 _txn_dissemination_handle,
                 _pacemaker_handle,
-                _block_creation_handle,
+                _block_management_handle,
                 _block_dissemination_handle,
-                _block_validation_handle,
                 _decision_handle,
                 _commit_handle,
             },
@@ -153,9 +131,8 @@ impl Node {
         self._txn_validation_handle.await?;
         self._txn_dissemination_handle.await?;
         self._pacemaker_handle.await?;
-        self._block_creation_handle.await?;
+        self._block_management_handle.await?;
         self._block_dissemination_handle.await?;
-        self._block_validation_handle.await?;
         self._decision_handle.await?;
         self._commit_handle.await?;
         Ok(())

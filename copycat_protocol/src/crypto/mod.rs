@@ -2,6 +2,8 @@ mod dummy;
 
 use copycat_utils::CopycatError;
 
+use ring::digest::{Context, SHA256};
+
 pub type Hash = Vec<u8>;
 pub type PrivKey = Vec<u8>;
 pub type PubKey = Vec<u8>;
@@ -29,4 +31,11 @@ impl CryptoScheme {
             CryptoScheme::Dummy => dummy::verify(pubkey, input, signature),
         }
     }
+}
+
+pub fn sha256(input: &[u8]) -> Result<Vec<u8>, CopycatError> {
+    let mut context = Context::new(&SHA256);
+    context.update(input);
+    let digest = context.finish();
+    Ok(Vec::from(digest.as_ref()))
 }

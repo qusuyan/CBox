@@ -263,6 +263,7 @@ dependencies = [
  "clap",
  "copycat_utils",
  "get-size",
+ "ring",
  "serde",
 ]
 
@@ -276,6 +277,7 @@ dependencies = [
  "copycat_protocol",
  "copycat_utils",
  "env_logger",
+ "get-size",
  "lazy_static",
  "log",
  "mailbox_client",
@@ -876,6 +878,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbb5fb1acd8a1a18b3dd5be62d25485eb770e05afb408a9627d14d451bae12da"
 
 [[package]]
+name = "ring"
+version = "0.17.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb0205304757e5d899b9c2e448b867ffd03ae7f988002e47cd24954391394d0b"
+dependencies = [
+ "cc",
+ "getrandom",
+ "libc",
+ "spin",
+ "untrusted",
+ "windows-sys",
+]
+
+[[package]]
 name = "rmp"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -994,6 +1010,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
+
+[[package]]
 name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1077,6 +1099,12 @@ name = "unicode-ident"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
+
+[[package]]
+name = "untrusted"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "utf8parse"

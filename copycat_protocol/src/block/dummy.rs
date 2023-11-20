@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, GetSize)]
 pub struct DummyBlock {
-    txns: Vec<Arc<Txn>>,
+    pub txns: Vec<Arc<Txn>>,
 }
 
 impl DummyBlock {

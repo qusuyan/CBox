@@ -2,7 +2,6 @@ mod composition;
 mod node;
 mod peers;
 mod stage;
-mod state;
 
 use copycat_protocol::transaction::Txn;
 use copycat_protocol::{ChainType, CryptoScheme, DissemPattern};

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::{Hash, PubKey, Signature};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, GetSize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub enum BitcoinTxn {
     Incentive {
         out_utxo: u64,
@@ -18,7 +18,3 @@ pub enum BitcoinTxn {
         sender_signature: Signature, // signature of sender
     },
 }
-
-// since transactions are created and never modified
-unsafe impl Sync for BitcoinTxn {}
-unsafe impl Send for BitcoinTxn {}

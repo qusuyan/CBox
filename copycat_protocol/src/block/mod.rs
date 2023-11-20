@@ -1,5 +1,7 @@
 mod dummy;
 pub use dummy::DummyBlock;
+mod bitcoin;
+pub use bitcoin::BitcoinBlock;
 
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
@@ -17,14 +19,15 @@ pub trait BlockTrait: Sync + Send {
 #[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
 pub enum Block {
     Dummy { blk: DummyBlock },
-    Bitcoin,
+    Bitcoin { blk: BitcoinBlock },
 }
 
 impl Block {
     pub fn fetch_txns(&self) -> Vec<Arc<Txn>> {
         match self {
             Block::Dummy { blk } => blk.fetch_txns(),
-            _ => todo!(),
+            Block::Bitcoin { blk } => blk.fetch_txns(),
+            // _ => todo!(),
         }
     }
 }

@@ -4,7 +4,6 @@ use dummy::DummyTxnValidation;
 mod bitcoin;
 use bitcoin::BitcoinTxnValidation;
 
-use crate::state::ChainState;
 use copycat_protocol::transaction::Txn;
 use copycat_protocol::{ChainType, CryptoScheme};
 use copycat_utils::{CopycatError, NodeId};
@@ -16,32 +15,30 @@ use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait TxnValidation: Send + Sync {
-    async fn validate(&self, txn: &Txn) -> Result<bool, CopycatError>;
+    async fn validate(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError>;
 }
 
 fn get_txn_validation(
     chain_type: ChainType,
-    state: Arc<ChainState>,
     crypto_scheme: CryptoScheme,
 ) -> Box<dyn TxnValidation> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyTxnValidation::new()),
-        ChainType::Bitcoin => Box::new(BitcoinTxnValidation::new(state, crypto_scheme)),
+        ChainType::Bitcoin => Box::new(BitcoinTxnValidation::new(crypto_scheme)),
     }
 }
 
 pub async fn txn_validation_thread(
     id: NodeId,
     chain_type: ChainType,
-    state: Arc<ChainState>,
     crypto_scheme: CryptoScheme,
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Txn>)>,
-    validated_txn_send: mpsc::Sender<(Arc<Txn>, bool)>,
+    validated_txn_send: mpsc::Sender<Arc<Txn>>,
 ) {
     log::trace!("Node {id}: Txn Validation stage starting...");
 
-    let txn_validation_stage = get_txn_validation(chain_type, state, crypto_scheme);
+    let mut txn_validation_stage = get_txn_validation(chain_type, crypto_scheme);
 
     loop {
         let (src, txn) = tokio::select! {
@@ -73,22 +70,21 @@ pub async fn txn_validation_thread(
 
         log::trace!("Node {id}: got from {src} new txn {txn:?}");
 
-        match txn_validation_stage.validate(&txn).await {
+        match txn_validation_stage.validate(txn.clone()).await {
             Ok(valid) => {
                 if !valid {
                     log::warn!("Node {id}: got invalid txn, ignoring...");
-                    continue;
+                    return;
                 }
 
-                let should_disseminate = src == id;
-                if let Err(e) = validated_txn_send.send((txn, should_disseminate)).await {
+                if let Err(e) = validated_txn_send.send(txn).await {
                     log::error!("Node {id}: failed to send to validated_txn pipe: {e:?}");
-                    continue;
+                    return;
                 }
             }
             Err(e) => {
                 log::error!("Node {id}: error validating txn: {e:?}");
-                continue;
+                return;
             }
         }
     }

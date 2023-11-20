@@ -1,11 +1,12 @@
 use copycat_protocol::crypto::Hash;
-use copycat_protocol::transaction::BitcoinTxn;
+use copycat_protocol::transaction::Txn;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 pub struct BitcoinState {
-    pub txn_pool: RwLock<HashMap<Hash, BitcoinTxn>>,
+    pub txn_pool: RwLock<HashMap<Hash, Arc<Txn>>>,
     pub pending_txn: RwLock<Vec<Hash>>,
     pub committed_txns: RwLock<Vec<Hash>>,
 }
