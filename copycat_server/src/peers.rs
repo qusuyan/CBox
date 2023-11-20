@@ -16,7 +16,8 @@ enum SendRequest {
 pub struct PeerMessenger {
     id: NodeId,
     tx_send: mpsc::UnboundedSender<SendRequest>,
-    _messenger_handle: JoinHandle<()>,
+    _peer_sender_handle: JoinHandle<()>,
+    _peer_receiver_handle: JoinHandle<()>,
 }
 
 impl PeerMessenger {
@@ -32,7 +33,7 @@ impl PeerMessenger {
         ),
         CopycatError,
     > {
-        let transport_hub = ClientStub::new(id)?;
+        let transport_hub = Arc::new(ClientStub::new(id)?);
 
         let (tx_send, tx_recv) = mpsc::unbounded_channel();
         let (rx_txn_send, rx_txn_recv) = mpsc::unbounded_channel();
@@ -40,10 +41,12 @@ impl PeerMessenger {
         let (rx_consensus_send, rx_consensus_recv) = mpsc::unbounded_channel();
         let (rx_pmaker_send, rx_pmaker_recv) = mpsc::unbounded_channel();
 
-        let _messenger_handle = tokio::spawn(Self::peer_messenger_thread(
+        let _peer_sender_handle =
+            tokio::spawn(Self::peer_sender_thread(id, transport_hub.clone(), tx_recv));
+
+        let _peer_receiver_handle = tokio::spawn(Self::peer_receiver_thread(
             id,
-            transport_hub,
-            tx_recv,
+            transport_hub.clone(),
             rx_txn_send,
             rx_blk_send,
             rx_consensus_send,
@@ -54,7 +57,8 @@ impl PeerMessenger {
             Self {
                 id,
                 tx_send,
-                _messenger_handle,
+                _peer_sender_handle,
+                _peer_receiver_handle,
             },
             rx_txn_recv,
             rx_blk_recv,
@@ -86,10 +90,9 @@ impl PeerMessenger {
         }
     }
 
-    async fn peer_messenger_thread(
+    async fn peer_receiver_thread(
         id: NodeId,
-        transport_hub: ClientStub<MsgType>,
-        mut tx_recv: mpsc::UnboundedReceiver<SendRequest>,
+        transport_hub: Arc<ClientStub<MsgType>>,
         rx_txn_send: mpsc::UnboundedSender<(NodeId, Arc<Txn>)>,
         rx_blk_send: mpsc::UnboundedSender<(NodeId, Arc<Block>)>,
         rx_consensus_send: mpsc::UnboundedSender<(NodeId, Arc<Vec<u8>>)>,
@@ -98,60 +101,67 @@ impl PeerMessenger {
         log::trace!("Node {id}: peer messenger thread started");
 
         loop {
-            tokio::select! {
-                local_req = tx_recv.recv() => {
-                    match local_req {
-                        Some(req) => {
-                            log::trace!("Node {id}: got request {req:?}");
-                            match req {
-                                SendRequest::Send{dest, msg} => {
-                                    if let Err(e) = transport_hub.send(dest, msg).await {
-                                        log::error!("Node {id}: failed to send message to peer {dest}: {e:?}")
-                                    }
-                                },
-                                SendRequest::Broadcast{msg} => {
-                                    if let Err(e) = transport_hub.broadcast(msg).await {
-                                        log::error!("Node {id}: failed to broadcast message to peers: {e:?}")
-                                    }
-                                },
+            match transport_hub.recv().await {
+                Ok(msg) => {
+                    let (src, content) = msg;
+                    match content {
+                        MsgType::NewTxn { txn } => {
+                            if let Err(e) = rx_txn_send.send((src, Arc::new(txn))) {
+                                log::error!("Node {id}: rx_txn_send failed: {e:?}")
                             }
                         }
-                        None => {
-                            log::error!("Node {id}: peer message channel closed");
+                        MsgType::NewBlock { blk } => {
+                            if let Err(e) = rx_blk_send.send((src, Arc::new(blk))) {
+                                log::error!("Node {id}: rx_blk_send failed: {e:?}")
+                            }
+                        }
+                        MsgType::ConsensusMsg { msg } => {
+                            if let Err(e) = rx_consensus_send.send((src, Arc::new(msg))) {
+                                log::error!("Node {id}: rx_consensus_send failed: {e:?}")
+                            }
+                        }
+                        MsgType::PMakerMsg { msg } => {
+                            if let Err(e) = rx_pmaker_send.send((src, Arc::new(msg))) {
+                                log::error!("Node {id}: rx_pmaker_send failed: {e:?}")
+                            }
                         }
                     }
                 }
-                peer_msg = transport_hub.recv() => {
-                    match peer_msg {
-                        Ok(msg) => {
-                            let (src, content) = msg;
-                            match content {
-                                MsgType::NewTxn{txn} => {
-                                    if let Err(e) = rx_txn_send.send((src, Arc::new(txn))) {
-                                        log::error!("Node {id}: rx_txn_send failed: {e:?}")
-                                    }
-                                },
-                                MsgType::NewBlock{blk} => {
-                                    if let Err(e) = rx_blk_send.send((src, Arc::new(blk))) {
-                                        log::error!("Node {id}: rx_blk_send failed: {e:?}")
-                                    }
-                                },
-                                MsgType::ConsensusMsg{msg} => {
-                                    if let Err(e) = rx_consensus_send.send((src, Arc::new(msg))) {
-                                        log::error!("Node {id}: rx_consensus_send failed: {e:?}")
-                                    }
-                                },
-                                MsgType::PMakerMsg{msg} => {
-                                    if let Err(e) = rx_pmaker_send.send((src, Arc::new(msg))) {
-                                        log::error!("Node {id}: rx_pmaker_send failed: {e:?}")
-                                    }
-                                },
+                Err(e) => {
+                    log::error!("Node {id}: got error listening to peers: {e:?}");
+                }
+            }
+        }
+    }
+
+    async fn peer_sender_thread(
+        id: NodeId,
+        transport_hub: Arc<ClientStub<MsgType>>,
+        mut tx_recv: mpsc::UnboundedReceiver<SendRequest>,
+    ) {
+        loop {
+            match tx_recv.recv().await {
+                Some(req) => {
+                    log::trace!("Node {id}: got request {req:?}");
+                    match req {
+                        SendRequest::Send { dest, msg } => {
+                            if let Err(e) = transport_hub.send(dest, msg).await {
+                                log::error!(
+                                    "Node {id}: failed to send message to peer {dest}: {e:?}"
+                                )
                             }
-                        },
-                        Err(e) => {
-                            log::error!("Node {id}: got error listening to peers: {e:?}");
+                        }
+                        SendRequest::Broadcast { msg } => {
+                            if let Err(e) = transport_hub.broadcast(msg).await {
+                                log::error!(
+                                    "Node {id}: failed to broadcast message to peers: {e:?}"
+                                )
+                            }
                         }
                     }
+                }
+                None => {
+                    log::error!("Node {id}: peer message channel closed");
                 }
             }
         }

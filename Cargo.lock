@@ -577,6 +577,7 @@ dependencies = [
  "ipc-channel",
  "log",
  "mailbox_utils",
+ "parking_lot",
  "serde",
  "tokio",
 ]
