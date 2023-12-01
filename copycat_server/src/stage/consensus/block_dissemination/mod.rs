@@ -33,7 +33,7 @@ pub async fn block_dissemination_thread(
     mut new_block_recv: mpsc::Receiver<Vec<Arc<Block>>>,
     block_ready_send: mpsc::Sender<Vec<Arc<Block>>>,
 ) {
-    log::trace!("Node {id}: block dissemination stage starting...");
+    log::info!("Node {id}: block dissemination stage starting...");
 
     let block_dissemination_stage = get_block_dissemination(dissem_pattern, peer_messenger);
 
@@ -52,7 +52,7 @@ pub async fn block_dissemination_thread(
             None => continue,
         };
 
-        log::trace!("Node {id}: got new block {new_blk:?}");
+        log::debug!("Node {id}: got new block {new_blk:?}");
 
         if let Err(e) = block_dissemination_stage.disseminate(&new_blk).await {
             log::error!("Node {id}: failed to disseminate new block: {e:?}");

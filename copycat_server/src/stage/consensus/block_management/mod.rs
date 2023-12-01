@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 pub trait BlockManagement: Sync + Send {
     async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError>;
     async fn prepare_new_block(&mut self) -> Result<(), CopycatError>;
-    async fn wait_to_propose(&mut self) -> Result<(), CopycatError>;
+    async fn wait_to_propose(&self) -> Result<(), CopycatError>;
     async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError>;
     async fn validate_block(&mut self, block: Arc<Block>) -> Result<Vec<Arc<Block>>, CopycatError>;
     async fn handle_pmaker_msg(&mut self, msg: Arc<Vec<u8>>) -> Result<(), CopycatError>;
@@ -42,7 +42,7 @@ pub async fn block_management_thread(
     mut pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
     new_block_send: mpsc::Sender<Vec<Arc<Block>>>,
 ) {
-    log::trace!("Node {id}: block management stage starting...");
+    log::info!("Node {id}: block management stage starting...");
 
     let mut block_management_stage = get_blk_creation(chain_type, crypto_scheme);
 
@@ -77,7 +77,7 @@ pub async fn block_management_thread(
 
                 match block_management_stage.get_new_block().await {
                     Ok(block) => {
-                        log::trace!("Node {id}: proposing new block {block:?}");
+                        log::debug!("Node {id}: proposing new block {block:?}");
                         if let Err(e) = new_block_send.send(vec![block]).await {
                             log::error!("Node {id}: failed to send to new_block pipe: {e:?}");
                             continue;
@@ -105,7 +105,7 @@ pub async fn block_management_thread(
                     }
                 };
 
-                log::trace!("Node {id}: got from {src} new block {new_block:?}");
+                log::debug!("Node {id}: got from {src} new block {new_block:?}");
 
                 match block_management_stage.validate_block(new_block.clone()).await {
                     Ok(new_tail) => {

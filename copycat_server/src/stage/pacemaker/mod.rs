@@ -33,7 +33,7 @@ pub async fn pacemaker_thread(
     peer_pmaker_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
     should_propose_send: mpsc::Sender<Arc<Vec<u8>>>,
 ) {
-    log::trace!("Node {id}: pacemaker starting...");
+    log::info!("Node {id}: pacemaker starting...");
 
     let pmaker = get_pacemaker(chain_type, peer_messenger, peer_pmaker_recv);
 
@@ -46,7 +46,7 @@ pub async fn pacemaker_thread(
             }
         };
 
-        log::trace!("Node {id}: got pacemaker peer message {propose_msg:?}");
+        log::debug!("Node {id}: got pacemaker peer message {propose_msg:?}");
 
         if let Err(e) = should_propose_send.send(propose_msg).await {
             log::error!("Node {id}: failed to send to should_propose pipe: {e:?}");

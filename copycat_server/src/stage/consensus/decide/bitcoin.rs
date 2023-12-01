@@ -1,5 +1,5 @@
 use super::Decision;
-use copycat_protocol::block::Block;
+use copycat_protocol::block::{Block, BlockHeader};
 use copycat_protocol::crypto::{sha256, Hash};
 use copycat_utils::CopycatError;
 use tokio::sync::Notify;
@@ -31,17 +31,17 @@ impl BitcoinDecision {
 impl Decision for BitcoinDecision {
     async fn new_tail(&mut self, new_tail: Vec<Arc<Block>>) -> Result<(), CopycatError> {
         // find height of first block
-        let (first_block, first_block_height) = match new_tail.first() {
+        let (ancester_hash, first_block_height) = match new_tail.first() {
             Some(blk) => {
-                let bitcoin_blk = match blk.as_ref() {
-                    Block::Bitcoin { blk } => blk,
+                let prev_hash = match &blk.header {
+                    BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
                     _ => unreachable!(),
                 };
-                if bitcoin_blk.prev_hash.is_empty() {
-                    (bitcoin_blk, 1u64) // first block of chain
+                if prev_hash.is_empty() {
+                    (prev_hash, 1u64) // first block of chain
                 } else {
-                    match self.block_pool.get(&bitcoin_blk.prev_hash) {
-                        Some((_, height)) => (bitcoin_blk, height + 1),
+                    match self.block_pool.get(prev_hash) {
+                        Some((_, height)) => (prev_hash, height + 1),
                         None => unimplemented!(),
                     }
                 }
@@ -62,7 +62,7 @@ impl Decision for BitcoinDecision {
                 continue;
             } else if *old_height == first_block_height - 1 {
                 // found the common ancester
-                if old_tail == first_block.prev_hash {
+                if old_tail == *ancester_hash {
                     break;
                 } else {
                     unreachable!("got new tail but its parent does not match existing chain");

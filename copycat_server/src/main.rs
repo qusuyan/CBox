@@ -67,10 +67,7 @@ pub fn main() {
         .build()
         .expect("Creating new runtime failed");
 
-    // let compose = get_chain_compose(args.chain);
-
     runtime.block_on(async {
-        // TODO
         let (node, mut executed): (Node, _) =
             match Node::init(id, args.chain, args.dissem_pattern, args.crypto).await {
                 Ok(node) => node,
@@ -81,31 +78,34 @@ pub fn main() {
             };
 
         // let test_msg = (0..500000).map(|_| id.to_string()).collect::<String>();
-        let mut receiver = 0u128;
-        loop {
-            if let Err(e) = node
-                .send_req(Txn::Bitcoin {
-                    txn: BitcoinTxn::Grant {
-                        out_utxo: 100,
-                        receiver: bincode::serialize(&receiver).unwrap(),
-                    },
-                })
-                .await
-            {
-                log::error!("Node {id}: failed to send txn request: {e:?}");
+        let send_loop = async move {
+            let mut receiver = 0u128;
+            loop {
+                if let Err(e) = node
+                    .send_req(Txn::Bitcoin {
+                        txn: BitcoinTxn::Grant {
+                            out_utxo: 100,
+                            receiver: bincode::serialize(&receiver).unwrap(),
+                        },
+                    })
+                    .await
+                {
+                    log::error!("Node {id}: failed to send txn request: {e:?}");
+                }
+                receiver += 1;
             }
-            receiver += 1;
-        }
+        };
+        tokio::task::spawn(send_loop);
 
-        // loop {
-        //     match executed.recv().await {
-        //         Some(txn) => {
-        //             log::info!("got committed txn {txn:?}")
-        //         }
-        //         None => {
-        //             log::error!("Node {id}: failed to recv executed txns");
-        //         }
-        //     }
-        // }
+        loop {
+            match executed.recv().await {
+                Some(txn) => {
+                    log::info!("got committed txn {txn:?}")
+                }
+                None => {
+                    log::error!("Node {id}: failed to recv executed txns");
+                }
+            }
+        }
     })
 }

@@ -21,8 +21,8 @@ impl DummyCommit {
 #[async_trait]
 impl Commit for DummyCommit {
     async fn commit(&self, block: Arc<Block>) -> Result<(), CopycatError> {
-        for txn in block.fetch_txns() {
-            if let Err(e) = self.executed_send.send(txn).await {
+        for txn in &block.txns {
+            if let Err(e) = self.executed_send.send(txn.clone()).await {
                 return Err(CopycatError(e.to_string()));
             }
         }

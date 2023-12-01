@@ -1,5 +1,5 @@
 use super::BlockManagement;
-use copycat_protocol::block::{Block, DummyBlock};
+use copycat_protocol::block::{Block, BlockHeader};
 use copycat_protocol::transaction::Txn;
 use copycat_utils::CopycatError;
 
@@ -34,7 +34,7 @@ impl BlockManagement for DummyBlockManagement {
         Ok(())
     }
 
-    async fn wait_to_propose(&mut self) -> Result<(), CopycatError> {
+    async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         loop {
             let now = Instant::now();
             if self.mem_pool.get_size() >= 0x1000000
@@ -46,10 +46,9 @@ impl BlockManagement for DummyBlockManagement {
     }
 
     async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError> {
-        let new_block = Arc::new(Block::Dummy {
-            blk: DummyBlock {
-                txns: self.mem_pool.clone(),
-            },
+        let new_block = Arc::new(Block {
+            header: BlockHeader::Dummy,
+            txns: self.mem_pool.clone(),
         });
         self.mem_pool.clear();
         Ok(new_block)

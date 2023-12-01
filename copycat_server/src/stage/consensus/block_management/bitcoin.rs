@@ -1,5 +1,5 @@
 use super::BlockManagement;
-use copycat_protocol::block::{BitcoinBlock, Block};
+use copycat_protocol::block::{Block, BlockHeader};
 use copycat_protocol::crypto::{sha256, Hash, PubKey};
 use copycat_protocol::transaction::{BitcoinTxn, Txn};
 use copycat_protocol::CryptoScheme;
@@ -58,6 +58,35 @@ impl BitcoinBlockManagement {
 }
 
 impl BitcoinBlockManagement {
+    fn get_pow_time(&self) -> Duration {
+        // if we randomly pick a nonce,
+        // the possibility of success is 2^(- self.difficulty)
+        // the code here simulates a timeout with geometric distribution
+        let p = 1f64 - 2f64.powf(-(self.difficulty as f64));
+        let u = rand::thread_rng().gen::<f64>();
+        let mut cdf = 1f64;
+        let mut curr = 0u64;
+        let x = loop {
+            cdf *= p;
+            curr += 1;
+            if cdf < u {
+                break curr;
+            }
+        };
+        let pow_time = Duration::from_secs_f64(
+            HASH_TIME_PER_1MB * (self.block_under_construction.get_size() as f64)
+                / (0x1000000 as f64)
+                * (x as f64),
+        );
+        log::trace!(
+            "POW takes {} sec; p: {p}, u: {u}, x: {x}, block size: {}, block len: {}",
+            pow_time.as_secs_f64(),
+            self.block_under_construction.get_size(),
+            self.block_under_construction.len(),
+        );
+        pow_time
+    }
+
     fn validate_txn(&self, txn: &BitcoinTxn) -> Result<bool, CopycatError> {
         match txn {
             BitcoinTxn::Send {
@@ -197,38 +226,14 @@ impl BlockManagement for BitcoinBlockManagement {
 
         if modified {
             let start_pow = Instant::now();
-            // if we randomly pick a nonce,
-            // the possibility of success is 2^(- self.difficulty)
-            // the code here simulates a timeout with geometric distribution
-            let p = 1f64 - 2f64.powf(-(self.difficulty as f64));
-            let u = rand::thread_rng().gen::<f64>();
-            let mut cdf = 1f64;
-            let mut curr = 0u64;
-            let x = loop {
-                cdf *= p;
-                curr += 1;
-                if cdf < u {
-                    break curr;
-                }
-            };
-            let pow_time = Duration::from_secs_f64(
-                HASH_TIME_PER_1MB * (self.block_under_construction.get_size() as f64)
-                    / (0x1000000 as f64)
-                    * (x as f64),
-            );
+            let pow_time = self.get_pow_time();
             self.block_emit_time = Some(start_pow + pow_time);
-            log::info!(
-                "POW takes {} sec; p: {p}, u: {u}, x: {x}, block size: {}, block len: {}",
-                pow_time.as_secs_f64(),
-                self.block_under_construction.get_size(),
-                self.block_under_construction.len(),
-            );
         }
 
         Ok(())
     }
 
-    async fn wait_to_propose(&mut self) -> Result<(), CopycatError> {
+    async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         loop {
             if let Some(emit_time) = self.block_emit_time {
                 tokio::time::sleep_until(emit_time).await;
@@ -240,16 +245,16 @@ impl BlockManagement for BitcoinBlockManagement {
 
     async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError> {
         // TODO: add incentive txn
-        let block = Arc::new(Block::Bitcoin {
-            blk: BitcoinBlock {
+        let block = Arc::new(Block {
+            header: BlockHeader::Bitcoin {
                 prev_hash: self.chain_tail.clone(),
                 nonce: 1, // use nonce = 1 to indicate valid pow
-                txns: self
-                    .block_under_construction
-                    .drain(0..)
-                    .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone())
-                    .collect(),
             },
+            txns: self
+                .block_under_construction
+                .drain(0..)
+                .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone())
+                .collect(),
         });
 
         let serialized = &bincode::serialize(&block)?;
@@ -275,15 +280,15 @@ impl BlockManagement for BitcoinBlockManagement {
             return Ok(vec![]);
         }
 
-        let bitcoin_block = match block.as_ref() {
-            Block::Bitcoin { blk } => blk,
+        let prev_hash = match &block.header {
+            BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
             _ => unreachable!(),
         };
 
-        let height = if bitcoin_block.prev_hash.is_empty() {
+        let height = if prev_hash.is_empty() {
             1u64
         } else {
-            match self.block_pool.get(&bitcoin_block.prev_hash) {
+            match self.block_pool.get(prev_hash) {
                 Some((_, parent_height)) => parent_height + 1,
                 None => unimplemented!(
                     "currently does not support validating blocks whose parent was not recorded"
@@ -301,14 +306,14 @@ impl BlockManagement for BitcoinBlockManagement {
 
         // TODO: find blocks belonging to the diverging chain up to the common ancestor
         let mut new_chain: Vec<Arc<Block>> = vec![block.clone()];
-        let mut new_tail_ancester = &bitcoin_block.prev_hash;
+        let mut new_tail_ancester = prev_hash;
         let mut new_tail_ancester_height = height - 1;
         while new_tail_ancester_height > chain_length {
             let (parent, parent_height) = self.block_pool.get(new_tail_ancester).unwrap();
             assert!(new_tail_ancester_height == *parent_height);
             new_chain.push(parent.clone());
-            new_tail_ancester = match parent.as_ref() {
-                Block::Bitcoin { blk } => &blk.prev_hash,
+            new_tail_ancester = match &parent.header {
+                BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
                 _ => unreachable!(),
             };
             new_tail_ancester_height -= 1;
@@ -331,11 +336,7 @@ impl BlockManagement for BitcoinBlockManagement {
             assert!(new_tail_parent_height == old_tail_parent_height);
             new_chain.push(new_tail_parent.clone());
             // add old tail parent to undo set
-            let undo_bitcoin_block = match old_tail_parent.as_ref() {
-                Block::Bitcoin { blk } => blk,
-                _ => unreachable!(),
-            };
-            for txn in undo_bitcoin_block.txns.iter().rev() {
+            for txn in old_tail_parent.txns.iter().rev() {
                 // undo_txns.push(txn.clone());
                 let txn_hash = sha256(&bincode::serialize(txn)?)?;
                 match txn.as_ref() {
@@ -377,12 +378,12 @@ impl BlockManagement for BitcoinBlockManagement {
                     _ => unreachable!(),
                 }
             }
-            new_tail_ancester = match new_tail_parent.as_ref() {
-                Block::Bitcoin { blk } => &blk.prev_hash,
+            new_tail_ancester = match &new_tail_parent.header {
+                BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
                 _ => unreachable!(),
             };
-            old_tail_ancester = match old_tail_parent.as_ref() {
-                Block::Bitcoin { blk } => &blk.prev_hash,
+            old_tail_ancester = match &old_tail_parent.header {
+                BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
                 _ => unreachable!(),
             };
         }
@@ -394,23 +395,23 @@ impl BlockManagement for BitcoinBlockManagement {
         let mut utxos_spent = undo_new_utxo;
         let mut txns_applied: HashSet<Hash> = HashSet::new();
         for new_block in new_chain.iter() {
-            let bitcoin_blk = match new_block.as_ref() {
-                Block::Bitcoin { blk } => blk,
+            let nonce = match new_block.header {
+                BlockHeader::Bitcoin { nonce, .. } => nonce,
                 _ => unreachable!(),
             };
             // hash verification
             tokio::time::sleep(Duration::from_secs_f64(
-                HASH_TIME_PER_1MB * bitcoin_blk.get_size() as f64 / 0x1000000 as f64,
+                HASH_TIME_PER_1MB * new_block.get_size() as f64 / 0x1000000 as f64,
             ))
             .await;
-            if bitcoin_blk.nonce != 1 {
+            if nonce != 1 {
                 return Ok(vec![]); // invalid POW
             }
 
             // TODO: add merkle tree proof
 
             // TODO: check if all transactions are valid and if double spending occurs
-            for txn in bitcoin_blk.txns.iter() {
+            for txn in new_block.txns.iter() {
                 let txn_hash = sha256(&bincode::serialize(txn)?)?;
                 let bitcoin_txn = match txn.as_ref() {
                     Txn::Bitcoin { txn } => txn,

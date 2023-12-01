@@ -29,7 +29,7 @@ pub async fn commit_thread(
     mut commit_recv: mpsc::Receiver<Arc<Block>>,
     executed_send: mpsc::Sender<Arc<Txn>>,
 ) {
-    log::trace!("Node {id}: commit stage starting...");
+    log::info!("Node {id}: commit stage starting...");
 
     let commit_stage = get_commit(chain_type, executed_send);
 
@@ -42,7 +42,7 @@ pub async fn commit_thread(
             }
         };
 
-        log::trace!("Node {id}: got new block {block:?}");
+        log::debug!("Node {id}: got new block {block:?}");
 
         if let Err(e) = commit_stage.commit(block).await {
             log::error!("Node {id}: failed to commit: {e:?}");

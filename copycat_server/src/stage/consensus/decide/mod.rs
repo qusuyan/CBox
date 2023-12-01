@@ -39,14 +39,14 @@ pub async fn decision_thread(
     mut block_ready_recv: mpsc::Receiver<Vec<Arc<Block>>>,
     commit_send: mpsc::Sender<Arc<Block>>,
 ) {
-    log::trace!("Node {id}: decision stage starting...");
+    log::info!("Node {id}: decision stage starting...");
 
     let mut decision_stage = get_decision(chain_type, peer_messenger, peer_consensus_recv);
 
     loop {
         tokio::select! {
             new_tail = block_ready_recv.recv() => {
-                log::trace!("Node {id}: got new chain tail: {new_tail:?}");
+                log::debug!("Node {id}: got new chain tail: {new_tail:?}");
                 let new_tail = match new_tail {
                     Some(tail) => tail,
                     None => {
@@ -74,7 +74,7 @@ pub async fn decision_thread(
                     }
                 };
 
-                log::trace!("Node {id}: committing new block {block_to_commit:?}");
+                log::debug!("Node {id}: committing new block {block_to_commit:?}");
 
                 if let Err(e) = commit_send.send(block_to_commit).await {
                                     log::error!("Node {id}: failed to send to commit pipe: {e:?}");
