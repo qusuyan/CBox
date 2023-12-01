@@ -16,7 +16,8 @@ pub enum BlockHeader {
     Dummy,
     Bitcoin {
         prev_hash: Hash, // vec![] if first block of chain
-        nonce: u32,      // https://en.bitcoin.it/wiki/Nonce
+        merkle_root: Hash,
+        nonce: u32, // https://en.bitcoin.it/wiki/Nonce
     },
 }
 

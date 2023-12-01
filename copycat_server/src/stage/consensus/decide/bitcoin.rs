@@ -73,7 +73,7 @@ impl Decision for BitcoinDecision {
         }
 
         for (idx, blk) in new_tail.iter().enumerate() {
-            let serialized = bincode::serialize(blk)?;
+            let serialized = bincode::serialize(&blk.header)?;
             let blk_hash = sha256(&serialized)?;
             let blk_height = first_block_height + idx as u64;
             self.block_pool

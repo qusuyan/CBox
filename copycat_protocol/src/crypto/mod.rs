@@ -12,6 +12,7 @@ pub type Signature = Vec<u8>;
 #[derive(Copy, Clone, Debug, clap::ValueEnum)]
 pub enum CryptoScheme {
     Dummy,
+    // TODO: add ECDSA for bitcoin
 }
 
 impl CryptoScheme {

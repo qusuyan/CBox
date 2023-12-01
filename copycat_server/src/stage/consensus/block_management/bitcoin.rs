@@ -245,19 +245,21 @@ impl BlockManagement for BitcoinBlockManagement {
 
     async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError> {
         // TODO: add incentive txn
+        let txns = self
+            .block_under_construction
+            .drain(0..)
+            .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone())
+            .collect();
         let block = Arc::new(Block {
             header: BlockHeader::Bitcoin {
                 prev_hash: self.chain_tail.clone(),
+                merkle_root: sha256(&bincode::serialize(&txns)?)?, // TODO
                 nonce: 1, // use nonce = 1 to indicate valid pow
             },
-            txns: self
-                .block_under_construction
-                .drain(0..)
-                .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone())
-                .collect(),
+            txns,
         });
 
-        let serialized = &bincode::serialize(&block)?;
+        let serialized = &bincode::serialize(&block.header)?;
         let hash = sha256(&serialized)?;
         let chain_length = self.get_chain_length();
         self.block_pool
@@ -273,7 +275,7 @@ impl BlockManagement for BitcoinBlockManagement {
     }
 
     async fn validate_block(&mut self, block: Arc<Block>) -> Result<Vec<Arc<Block>>, CopycatError> {
-        let serialized = bincode::serialize(&block)?;
+        let serialized = bincode::serialize(&block.header)?;
         let block_hash = sha256(&serialized)?;
         if self.block_pool.contains_key(&block_hash) {
             // duplicate, do nothing
