@@ -83,6 +83,7 @@ impl Node {
         let _block_management_handle = tokio::spawn(block_management_thread(
             id,
             chain_type,
+            crypto_scheme,
             peer_blk_recv,
             txn_ready_recv,
             pacemaker_recv,

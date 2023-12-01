@@ -3,7 +3,7 @@ mod node;
 mod peers;
 mod stage;
 
-use copycat_protocol::transaction::Txn;
+use copycat_protocol::transaction::{BitcoinTxn, Txn};
 use copycat_protocol::{ChainType, CryptoScheme, DissemPattern};
 use copycat_utils::log::colored_level;
 use node::Node;
@@ -80,21 +80,32 @@ pub fn main() {
                 }
             };
 
-        let test_msg = (0..500000).map(|_| id.to_string()).collect::<String>();
-
-        if let Err(e) = node.send_req(Txn::Dummy { txn: test_msg }).await {
-            log::error!("Node {id}: failed to send txn request: {e:?}");
-        }
-
+        // let test_msg = (0..500000).map(|_| id.to_string()).collect::<String>();
+        let mut receiver = 0u128;
         loop {
-            match executed.recv().await {
-                Some(txn) => {
-                    log::info!("got committed txn {txn:?}")
-                }
-                None => {
-                    log::error!("Node {id}: failed to recv executed txns");
-                }
+            if let Err(e) = node
+                .send_req(Txn::Bitcoin {
+                    txn: BitcoinTxn::Grant {
+                        out_utxo: 100,
+                        receiver: bincode::serialize(&receiver).unwrap(),
+                    },
+                })
+                .await
+            {
+                log::error!("Node {id}: failed to send txn request: {e:?}");
             }
+            receiver += 1;
         }
+
+        // loop {
+        //     match executed.recv().await {
+        //         Some(txn) => {
+        //             log::info!("got committed txn {txn:?}")
+        //         }
+        //         None => {
+        //             log::error!("Node {id}: failed to recv executed txns");
+        //         }
+        //     }
+        // }
     })
 }

@@ -25,9 +25,9 @@ impl DummyBlockManagement {
 
 #[async_trait]
 impl BlockManagement for DummyBlockManagement {
-    async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<(), CopycatError> {
+    async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError> {
         self.mem_pool.push(txn);
-        Ok(())
+        Ok(true)
     }
 
     async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
@@ -55,8 +55,8 @@ impl BlockManagement for DummyBlockManagement {
         Ok(new_block)
     }
 
-    async fn validate_block(&mut self, _block: &Block) -> Result<bool, CopycatError> {
-        Ok(true)
+    async fn validate_block(&mut self, block: Arc<Block>) -> Result<Vec<Arc<Block>>, CopycatError> {
+        Ok(vec![block])
     }
 
     async fn handle_pmaker_msg(&mut self, _msg: Arc<Vec<u8>>) -> Result<(), CopycatError> {

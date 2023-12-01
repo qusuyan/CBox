@@ -7,21 +7,26 @@ use copycat_utils::CopycatError;
 
 use async_trait::async_trait;
 use get_size::GetSize;
+use rand::Rng;
 
-use std::collections::{HashMap, HashSet};
+use tokio::time::{Duration, Instant};
+
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use tokio::time::Instant;
+
+// sha256 in rust takes ~ 0.045s / 1MB
+const HASH_TIME_PER_1MB: f64 = 0.045;
 
 pub struct BitcoinBlockManagement {
     crypto_scheme: CryptoScheme,
     txn_pool: HashMap<Hash, Arc<Txn>>,
-    block_pool: HashMap<Hash, Arc<Block>>,
+    block_pool: HashMap<Hash, (Arc<Block>, u64)>,
     utxo: HashSet<(Hash, PubKey)>,
     chain_tail: Hash,
     difficulty: u8, // hash has at most 256 bits
     // fields for constructing new block
-    pending_txns: Vec<Hash>,
-    block_under_construction: Vec<Arc<Txn>>,
+    pending_txns: VecDeque<Hash>,
+    block_under_construction: Vec<Hash>,
     utxo_spent: HashSet<(Hash, PubKey)>,
     block_emit_time: Option<Instant>,
 }
@@ -35,111 +40,454 @@ impl BitcoinBlockManagement {
             utxo: HashSet::new(),
             chain_tail: vec![],
             difficulty: 10,
-            pending_txns: vec![],
+            pending_txns: VecDeque::new(),
             block_under_construction: vec![],
             utxo_spent: HashSet::new(),
             block_emit_time: None,
         }
     }
+
+    pub fn get_chain_length(&self) -> u64 {
+        if self.chain_tail.is_empty() {
+            0u64
+        } else {
+            let (_, chain_tail_height) = self.block_pool.get(&self.chain_tail).unwrap();
+            *chain_tail_height
+        }
+    }
+}
+
+impl BitcoinBlockManagement {
+    fn validate_txn(&self, txn: &BitcoinTxn) -> Result<bool, CopycatError> {
+        match txn {
+            BitcoinTxn::Send {
+                sender: txn_sender,
+                in_utxo: txn_in_utxo,
+                out_utxo: txn_out_utxo,
+                remainder: txn_remainder,
+                ..
+            } => {
+                let mut input_value = 0;
+                for in_utxo_hash in txn_in_utxo.iter() {
+                    // first check that input transactions exists, we can check for double spend later as a block
+                    // add values together to find total input value
+                    let utxo = match self.txn_pool.get(in_utxo_hash) {
+                        Some(txn) => match txn.as_ref() {
+                            Txn::Bitcoin { txn } => txn,
+                            _ => unreachable!(),
+                        },
+                        None => return Ok(false), // invalid utxo
+                    };
+
+                    let value = match utxo {
+                        BitcoinTxn::Incentive { out_utxo, receiver } => {
+                            if receiver == txn_sender {
+                                out_utxo
+                            } else {
+                                return Ok(false); // utxo does not belong to sender
+                            }
+                        }
+                        BitcoinTxn::Grant { out_utxo, receiver } => {
+                            if receiver == txn_sender {
+                                out_utxo
+                            } else {
+                                return Ok(false); // utxo does not belong to sender
+                            }
+                        }
+                        BitcoinTxn::Send {
+                            sender,
+                            in_utxo: _,
+                            receiver,
+                            out_utxo,
+                            remainder,
+                            sender_signature: _,
+                        } => {
+                            if receiver == txn_sender {
+                                out_utxo
+                            } else if sender == txn_sender {
+                                remainder
+                            } else {
+                                return Ok(false); // utxo does not belong to sender
+                            }
+                        }
+                    };
+                    input_value += value;
+                }
+
+                // check if the input values match output values
+                if input_value != txn_out_utxo + txn_remainder {
+                    return Ok(false); // input and output utxo values do not match
+                }
+            }
+            BitcoinTxn::Grant { .. } => {
+                // bypass txn validity checks
+            }
+            BitcoinTxn::Incentive { .. } => unreachable!(),
+        }
+
+        Ok(true)
+    }
 }
 
 #[async_trait]
 impl BlockManagement for BitcoinBlockManagement {
-    async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<(), CopycatError> {
+    async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError> {
         let txn_hash = sha256(&bincode::serialize(txn.as_ref())?)?;
-        self.txn_pool.insert(txn_hash.clone(), txn);
-        self.pending_txns.push(txn_hash);
+        // ignore duplicate txns
+        if self.txn_pool.contains_key(&txn_hash) {
+            return Ok(false);
+        }
+
+        let bitcoin_txn = match txn.as_ref() {
+            Txn::Bitcoin { txn } => txn,
+            _ => unreachable!(),
+        };
+
+        if !self.validate_txn(bitcoin_txn)? {
+            return Ok(false);
+        }
+
+        self.txn_pool.insert(txn_hash.clone(), txn.clone());
+        self.pending_txns.push_back(txn_hash);
+        Ok(true)
+    }
+
+    async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
+        let mut modified = false;
+
+        // if block is not full yet, try adding new txns
+        loop {
+            // block is large enough
+            if self.block_under_construction.get_size() > 0x1000000 {
+                break;
+            }
+
+            let txn_hash = match self.pending_txns.pop_front() {
+                Some(hash) => hash,
+                None => break, // no pending transactions
+            };
+
+            // check for double spending
+            let txn = self.txn_pool.get(&txn_hash).unwrap();
+            match txn.as_ref() {
+                Txn::Bitcoin { txn: bitcoin_txn } => match bitcoin_txn {
+                    BitcoinTxn::Send {
+                        sender,
+                        in_utxo: in_utxos,
+                        ..
+                    } => {
+                        for in_utxo in in_utxos {
+                            let key = (in_utxo.clone(), sender.clone());
+                            // if a transaction causes conflict, we only need to keep one of them even if the block is dropped
+                            if self.utxo.contains(&key) && !self.utxo_spent.contains(&key) {
+                                self.block_under_construction.push(txn_hash.clone());
+                                modified = true;
+                            }
+                        }
+                    }
+                    BitcoinTxn::Grant { .. } => {
+                        self.block_under_construction.push(txn_hash.clone());
+                        modified = true;
+                    }
+                    BitcoinTxn::Incentive { .. } => unreachable!(),
+                },
+                _ => unreachable!(),
+            };
+        }
+
+        if modified {
+            let start_pow = Instant::now();
+            // if we randomly pick a nonce,
+            // the possibility of success is 2^(- self.difficulty)
+            // the code here simulates a timeout with geometric distribution
+            let p = 1f64 - 2f64.powf(-(self.difficulty as f64));
+            let u = rand::thread_rng().gen::<f64>();
+            let mut cdf = 1f64;
+            let mut curr = 0u64;
+            let x = loop {
+                cdf *= p;
+                curr += 1;
+                if cdf < u {
+                    break curr;
+                }
+            };
+            let pow_time = Duration::from_secs_f64(
+                HASH_TIME_PER_1MB * (self.block_under_construction.get_size() as f64)
+                    / (0x1000000 as f64)
+                    * (x as f64),
+            );
+            self.block_emit_time = Some(start_pow + pow_time);
+            log::info!(
+                "POW takes {} sec; p: {p}, u: {u}, x: {x}, block size: {}, block len: {}",
+                pow_time.as_secs_f64(),
+                self.block_under_construction.get_size(),
+                self.block_under_construction.len(),
+            );
+        }
+
         Ok(())
     }
 
-    // this method may get canceled in the middle
-    async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
-        // let mut modified = false;
-
-        // // got a new chain tail, start over
-        // if self.block_under_construction.prev_hash != self.chain_tail {
-        //     self.block_emit_time = None;
-        //     self.utxo_spent.clear();
-        //     self.block_under_construction.txns.clear();
-        //     self.block_under_construction.prev_hash = self.chain_tail.clone();
-        //     modified = true;
-        // }
-
-        // let last_txn_in_block = self.block_under_construction.txns.last();
-        // if self.pending_txns.len() > 0
-        //     && last_txn_in_block.is_some()
-        //     && self
-        //         .txn_pool
-        //         .get(self.pending_txns.first().unwrap())
-        //         .unwrap()
-        //         == last_txn_in_block.clone().unwrap()
-        // {
-        //     // the pending transaction is already in block
-
-        //     // first add the utxos spent to utxo_spent
-        //     let (sender, in_utxos) = match last_txn_in_block.unwrap().as_ref() {
-        //         Txn::Bitcoin { txn } => match txn {
-        //             BitcoinTxn::Send {
-        //                 sender, in_utxo, ..
-        //             } => (sender, in_utxo),
-        //             _ => unreachable!(),
-        //         },
-        //         _ => unreachable!(),
-        //     };
-        //     for in_utxo in in_utxos {
-        //         self.utxo_spent.insert((in_utxo.clone(), sender.clone()));
-        //     }
-
-        //     // then move on
-        //     self.pending_txns.remove(0);
-        // }
-
-        // // if block is not full yet, try adding new txns
-        // loop {
-        //     // block is large enough
-        //     if self.block_under_construction.get_size() > 0x1000000 {
-        //         break;
-        //     }
-        //     // all transactions are included in block
-        //     if self.pending_txns.is_empty() {
-        //         break;
-        //     }
-
-        //     // check for double spending
-        //     let txn_hash = self.pending_txns.first().unwrap();
-        //     let txn = self.txn_pool.get(txn_hash).unwrap();
-        //     let (sender, in_utxos) = match txn.as_ref() {
-        //         Txn::Bitcoin { txn } => match txn {
-        //             BitcoinTxn::Send {
-        //                 sender, in_utxo, ..
-        //             } => (sender, in_utxo),
-        //             _ => unreachable!(),
-        //         },
-        //         _ => unreachable!(),
-        //     };
-
-        //     for in_utxo in in_utxos {
-        //         let key = (in_utxo.clone(), sender.clone());
-        //         if self.utxo.contains(&key) && !self.utxo_spent.contains(&key) {
-        //             self.block_under_construction.txns.push(txn.clone());
-        //             modified = true;
-        //         }
-        //     }
-        // }
-
-        todo!()
-    }
-
     async fn wait_to_propose(&mut self) -> Result<(), CopycatError> {
-        todo!()
+        loop {
+            if let Some(emit_time) = self.block_emit_time {
+                tokio::time::sleep_until(emit_time).await;
+                return Ok(());
+            }
+            tokio::task::yield_now().await;
+        }
     }
 
     async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError> {
-        todo!()
+        // TODO: add incentive txn
+        let block = Arc::new(Block::Bitcoin {
+            blk: BitcoinBlock {
+                prev_hash: self.chain_tail.clone(),
+                nonce: 1, // use nonce = 1 to indicate valid pow
+                txns: self
+                    .block_under_construction
+                    .drain(0..)
+                    .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone())
+                    .collect(),
+            },
+        });
+
+        let serialized = &bincode::serialize(&block)?;
+        let hash = sha256(&serialized)?;
+        let chain_length = self.get_chain_length();
+        self.block_pool
+            .insert(hash.clone(), (block.clone(), chain_length + 1));
+        self.chain_tail = hash;
+
+        for utxo in self.utxo_spent.drain() {
+            self.utxo.remove(&utxo);
+        }
+        self.block_emit_time = None;
+
+        Ok(block)
     }
 
-    async fn validate_block(&mut self, block: &Block) -> Result<bool, CopycatError> {
-        todo!()
+    async fn validate_block(&mut self, block: Arc<Block>) -> Result<Vec<Arc<Block>>, CopycatError> {
+        let serialized = bincode::serialize(&block)?;
+        let block_hash = sha256(&serialized)?;
+        if self.block_pool.contains_key(&block_hash) {
+            // duplicate, do nothing
+            return Ok(vec![]);
+        }
+
+        let bitcoin_block = match block.as_ref() {
+            Block::Bitcoin { blk } => blk,
+            _ => unreachable!(),
+        };
+
+        let height = if bitcoin_block.prev_hash.is_empty() {
+            1u64
+        } else {
+            match self.block_pool.get(&bitcoin_block.prev_hash) {
+                Some((_, parent_height)) => parent_height + 1,
+                None => unimplemented!(
+                    "currently does not support validating blocks whose parent was not recorded"
+                ),
+            }
+        };
+        self.block_pool
+            .insert(block_hash.clone(), (block.clone(), height));
+
+        // the new block is the tail of a shorter chain, do nothing
+        let chain_length = self.get_chain_length();
+        if height <= chain_length {
+            return Ok(vec![]);
+        }
+
+        // TODO: find blocks belonging to the diverging chain up to the common ancestor
+        let mut new_chain: Vec<Arc<Block>> = vec![block.clone()];
+        let mut new_tail_ancester = &bitcoin_block.prev_hash;
+        let mut new_tail_ancester_height = height - 1;
+        while new_tail_ancester_height > chain_length {
+            let (parent, parent_height) = self.block_pool.get(new_tail_ancester).unwrap();
+            assert!(new_tail_ancester_height == *parent_height);
+            new_chain.push(parent.clone());
+            new_tail_ancester = match parent.as_ref() {
+                Block::Bitcoin { blk } => &blk.prev_hash,
+                _ => unreachable!(),
+            };
+            new_tail_ancester_height -= 1;
+        }
+
+        let mut old_tail_ancester = &self.chain_tail;
+        let mut undo_utxo_spent: HashSet<(Hash, PubKey)> = HashSet::new();
+        let mut undo_new_utxo: HashSet<(Hash, PubKey)> = HashSet::new();
+        let mut undo_txns: HashSet<Hash> = HashSet::new();
+        loop {
+            if new_tail_ancester == old_tail_ancester {
+                // found a common ancester, break
+                break;
+            }
+
+            let (new_tail_parent, new_tail_parent_height) =
+                self.block_pool.get(new_tail_ancester).unwrap();
+            let (old_tail_parent, old_tail_parent_height) =
+                self.block_pool.get(old_tail_ancester).unwrap();
+            assert!(new_tail_parent_height == old_tail_parent_height);
+            new_chain.push(new_tail_parent.clone());
+            // add old tail parent to undo set
+            let undo_bitcoin_block = match old_tail_parent.as_ref() {
+                Block::Bitcoin { blk } => blk,
+                _ => unreachable!(),
+            };
+            for txn in undo_bitcoin_block.txns.iter().rev() {
+                // undo_txns.push(txn.clone());
+                let txn_hash = sha256(&bincode::serialize(txn)?)?;
+                match txn.as_ref() {
+                    Txn::Bitcoin { txn } => match txn {
+                        BitcoinTxn::Send {
+                            sender,
+                            in_utxo,
+                            receiver,
+                            ..
+                        } => {
+                            for utxo in in_utxo {
+                                undo_utxo_spent.insert((utxo.clone(), sender.clone()));
+                            }
+                            let new_utxo_received = (txn_hash.clone(), receiver.clone());
+                            if !undo_utxo_spent.remove(&new_utxo_received) {
+                                undo_new_utxo.insert(new_utxo_received);
+                            }
+                            let new_utxo_remainder = (txn_hash.clone(), sender.clone());
+                            if !undo_utxo_spent.remove(&new_utxo_remainder) {
+                                undo_new_utxo.insert(new_utxo_remainder);
+                            }
+                            undo_txns.insert(txn_hash);
+                        }
+                        BitcoinTxn::Grant { receiver, .. } => {
+                            let new_utxo = (txn_hash.clone(), receiver.clone());
+                            if !undo_utxo_spent.remove(&new_utxo) {
+                                undo_new_utxo.insert(new_utxo);
+                            }
+                            undo_txns.insert(txn_hash);
+                        }
+                        BitcoinTxn::Incentive { receiver, .. } => {
+                            let new_utxo = (txn_hash, receiver.clone());
+                            if !undo_utxo_spent.remove(&new_utxo) {
+                                undo_new_utxo.insert(new_utxo);
+                            }
+                            // incentive txns should not be returned back to pending txns
+                        }
+                    },
+                    _ => unreachable!(),
+                }
+            }
+            new_tail_ancester = match new_tail_parent.as_ref() {
+                Block::Bitcoin { blk } => &blk.prev_hash,
+                _ => unreachable!(),
+            };
+            old_tail_ancester = match old_tail_parent.as_ref() {
+                Block::Bitcoin { blk } => &blk.prev_hash,
+                _ => unreachable!(),
+            };
+        }
+        // reverse the new tail so that it goes in order
+        new_chain.reverse();
+
+        // apply transactions of the new chain and check if this chain is valid
+        let mut new_utxos = undo_utxo_spent;
+        let mut utxos_spent = undo_new_utxo;
+        let mut txns_applied: HashSet<Hash> = HashSet::new();
+        for new_block in new_chain.iter() {
+            let bitcoin_blk = match new_block.as_ref() {
+                Block::Bitcoin { blk } => blk,
+                _ => unreachable!(),
+            };
+            // hash verification
+            tokio::time::sleep(Duration::from_secs_f64(
+                HASH_TIME_PER_1MB * bitcoin_blk.get_size() as f64 / 0x1000000 as f64,
+            ))
+            .await;
+            if bitcoin_blk.nonce != 1 {
+                return Ok(vec![]); // invalid POW
+            }
+
+            // TODO: add merkle tree proof
+
+            // TODO: check if all transactions are valid and if double spending occurs
+            for txn in bitcoin_blk.txns.iter() {
+                let txn_hash = sha256(&bincode::serialize(txn)?)?;
+                let bitcoin_txn = match txn.as_ref() {
+                    Txn::Bitcoin { txn } => txn,
+                    _ => unreachable!(),
+                };
+
+                // validate transaction
+                if !self.txn_pool.contains_key(&txn_hash) {
+                    if let BitcoinTxn::Send {
+                        sender,
+                        in_utxo,
+                        sender_signature,
+                        ..
+                    } = bitcoin_txn
+                    {
+                        let serialized_in_utxo = bincode::serialize(in_utxo)?;
+                        if !self.crypto_scheme.verify(
+                            sender,
+                            &serialized_in_utxo,
+                            sender_signature,
+                        )? {
+                            return Ok(vec![]);
+                        }
+                    }
+                    if !self.validate_txn(bitcoin_txn)? {
+                        return Ok(vec![]);
+                    }
+                    self.txn_pool.insert(txn_hash.clone(), txn.clone());
+                }
+
+                // check for double spending
+                if let BitcoinTxn::Send {
+                    sender, in_utxo, ..
+                } = bitcoin_txn
+                {
+                    for in_txn_hash in in_utxo {
+                        let utxo = (in_txn_hash.clone(), sender.clone());
+                        if self.utxo.contains(&utxo) && !utxos_spent.contains(&utxo) {
+                            // good case, using existing utxo that has not been spent
+                            utxos_spent.insert(utxo);
+                        } else {
+                            if new_utxos.contains(&utxo) {
+                                // good case, using new utxos created but not committed yet
+                                new_utxos.remove(&utxo);
+                            } else {
+                                return Ok(vec![]);
+                            }
+                        }
+                    }
+                }
+
+                // add to txns_applied so that they will be removed from pending_txns
+                if !matches!(bitcoin_txn, BitcoinTxn::Incentive { .. }) {
+                    if !undo_txns.remove(&txn_hash) {
+                        txns_applied.insert(txn_hash);
+                    }
+                }
+            }
+        }
+
+        // the new block is the tail of the longer chain, move over
+        self.block_emit_time = None;
+        self.pending_txns
+            .append(&mut self.block_under_construction.drain(0..).collect());
+        self.utxo_spent.clear();
+        self.chain_tail = block_hash;
+
+        // add new_utxos and remove utxo_spent from self.utxo
+        self.utxo.extend(new_utxos);
+        self.utxo.retain(|utxo| !utxos_spent.contains(utxo));
+
+        // add undo_txns back in pending_txns and remove txns_applied from pending_txns
+        self.pending_txns.extend(undo_txns);
+        self.pending_txns
+            .retain(|txn_hash| !txns_applied.contains(txn_hash));
+
+        Ok(new_chain)
     }
 
     async fn handle_pmaker_msg(&mut self, msg: Arc<Vec<u8>>) -> Result<(), CopycatError> {

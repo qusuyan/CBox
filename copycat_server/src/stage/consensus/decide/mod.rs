@@ -1,5 +1,7 @@
 mod dummy;
 use dummy::DummyDecision;
+mod bitcoin;
+use bitcoin::BitcoinDecision;
 
 use crate::peers::PeerMessenger;
 use copycat_protocol::block::Block;
@@ -13,7 +15,9 @@ use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait Decision: Sync + Send {
-    async fn decide(&self, block: &Block) -> Result<bool, CopycatError>;
+    async fn new_tail(&mut self, new_tail: Vec<Arc<Block>>) -> Result<(), CopycatError>;
+    async fn commit_ready(&self) -> Result<(), CopycatError>;
+    async fn next_to_commit(&mut self) -> Result<Arc<Block>, CopycatError>;
 }
 
 fn get_decision(
@@ -23,7 +27,7 @@ fn get_decision(
 ) -> Box<dyn Decision> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyDecision::new()),
-        ChainType::Bitcoin => todo!(),
+        ChainType::Bitcoin => Box::new(BitcoinDecision::new()),
     }
 }
 
@@ -32,40 +36,52 @@ pub async fn decision_thread(
     chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger>,
     peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
-    mut block_ready_recv: mpsc::Receiver<Arc<Block>>,
+    mut block_ready_recv: mpsc::Receiver<Vec<Arc<Block>>>,
     commit_send: mpsc::Sender<Arc<Block>>,
 ) {
-    log::trace!("Node {id}: Decision stage starting...");
+    log::trace!("Node {id}: decision stage starting...");
 
-    let decision_stage = get_decision(chain_type, peer_messenger, peer_consensus_recv);
+    let mut decision_stage = get_decision(chain_type, peer_messenger, peer_consensus_recv);
 
     loop {
-        let block = match block_ready_recv.recv().await {
-            Some(blk) => blk,
-            None => {
-                log::error!("Node {id}: block_ready pipe closed unexpectedly");
-                continue;
-            }
-        };
+        tokio::select! {
+            new_tail = block_ready_recv.recv() => {
+                log::trace!("Node {id}: got new chain tail: {new_tail:?}");
+                let new_tail = match new_tail {
+                    Some(tail) => tail,
+                    None => {
+                        log::error!("Node {id}: block_ready pipe closed unexpectedly");
+                        continue;
+                    }
+                };
 
-        log::trace!("Node {id}: got new block {block:?}");
-
-        match decision_stage.decide(&block).await {
-            Ok(decision) => {
-                if !decision {
-                    log::trace!("Node {id}: block should not commit, ignoring...");
+                if let Err(e) = decision_stage.new_tail(new_tail).await {
+                    log::error!("Node {id}: failed to record new chain tail: {e:?}");
+                    continue;
+                }
+            },
+            commit_ready = decision_stage.commit_ready() => {
+                if let Err(e) = commit_ready {
+                    log::error!("Node {id}: waiting for commit ready block failed: {e:?}");
                     continue;
                 }
 
-                if let Err(e) = commit_send.send(block).await {
-                    log::error!("Node {id}: failed to send to commit pipe: {e:?}");
-                    continue;
-                }
-            }
-            Err(e) => {
-                log::error!("Node {id}: failed to make decision: {e:?}");
-                continue;
-            }
+                let block_to_commit = match decision_stage.next_to_commit().await {
+                    Ok(blk) => blk,
+                    Err(e) => {
+                        log::error!("Node {id}: getting commit ready block failed: {e:?}");
+                        continue;
+                    }
+                };
+
+                log::trace!("Node {id}: committing new block {block_to_commit:?}");
+
+                if let Err(e) = commit_send.send(block_to_commit).await {
+                                    log::error!("Node {id}: failed to send to commit pipe: {e:?}");
+                                    continue;
+                                }
+
+            },
         }
     }
 }

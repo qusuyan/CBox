@@ -33,7 +33,7 @@ pub async fn txn_dissemination_thread(
     mut validated_txn_recv: mpsc::Receiver<Arc<Txn>>,
     txn_ready_send: mpsc::Sender<Arc<Txn>>,
 ) {
-    log::trace!("Node {id}: Txn Dissemination stage starting...");
+    log::trace!("Node {id}: txn dissemination stage starting...");
 
     let txn_dissemination_stage = get_txn_dissemination(dissem_pattern, peer_messenger);
 

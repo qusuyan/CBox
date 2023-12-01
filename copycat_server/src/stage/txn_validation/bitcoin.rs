@@ -31,77 +31,35 @@ impl TxnValidation for BitcoinTxnValidation {
             _ => unreachable!(),
         };
 
-        let (txn_sender, txn_in_utxo, txn_out_utxo, txn_remainder, txn_sender_signature) =
-            match bitcoin_txn {
-                BitcoinTxn::Send {
-                    sender,
-                    in_utxo,
-                    receiver: _,
-                    out_utxo,
-                    remainder,
-                    sender_signature,
-                } => (sender, in_utxo, out_utxo, remainder, sender_signature),
-                BitcoinTxn::Incentive { .. } => return Ok(false),
-            };
+        let (txn_sender, txn_in_utxo, txn_sender_signature) = match bitcoin_txn {
+            BitcoinTxn::Send {
+                sender,
+                in_utxo,
+                sender_signature,
+                ..
+            } => (sender, in_utxo, sender_signature),
+            BitcoinTxn::Grant { .. } => {
+                let hash = sha256(&bincode::serialize(&txn)?)?;
+                self.txns_pool.insert(hash, txn);
+                return Ok(true);
+            }
+            BitcoinTxn::Incentive { .. } => return Ok(false),
+        };
 
-        // first check if the signature is valid
-        let serialized = bincode::serialize(txn_in_utxo)?;
-        if !self
-            .crypto_scheme
-            .verify(txn_sender, &serialized, txn_sender_signature)?
-        {
-            return Ok(false);
-        }
-
-        let hash = sha256(&serialized)?;
+        let serialized_txn = bincode::serialize(&txn)?;
+        let hash = sha256(&serialized_txn)?;
 
         if self.txns_pool.get(&hash) != None {
             // txn has already been seem, ignoring...
             return Ok(false);
         }
 
-        let mut input_value = 0;
-        for in_utxo_hash in txn_in_utxo.iter() {
-            // first check that input transactions exists, we can check for double spend later as a block
-            // add values together to find total input value
-            let utxo = match self.txns_pool.get(in_utxo_hash) {
-                Some(txn) => match txn.as_ref() {
-                    Txn::Bitcoin { txn } => txn,
-                    _ => unreachable!(),
-                },
-                None => return Ok(false),
-            };
-
-            let value = match utxo {
-                BitcoinTxn::Incentive { out_utxo, receiver } => {
-                    if receiver == txn_sender {
-                        out_utxo
-                    } else {
-                        return Ok(false);
-                    }
-                }
-                BitcoinTxn::Send {
-                    sender,
-                    in_utxo: _,
-                    receiver,
-                    out_utxo,
-                    remainder,
-                    sender_signature: _,
-                } => {
-                    if receiver == txn_sender {
-                        out_utxo
-                    } else if sender == txn_sender {
-                        remainder
-                    } else {
-                        return Ok(false);
-                    }
-                }
-            };
-            input_value += value;
-        }
-
-        // check if the input values match output values
-        if input_value != txn_out_utxo + txn_remainder {
+        // first check if the signature is valid
+        let serialized_in_txo = bincode::serialize(txn_in_utxo)?;
+        if !self
+            .crypto_scheme
+            .verify(txn_sender, &serialized_in_txo, txn_sender_signature)?
+        {
             return Ok(false);
         }
 

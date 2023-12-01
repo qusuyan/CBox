@@ -17,4 +17,9 @@ pub enum BitcoinTxn {
         remainder: u64,              // how much money left
         sender_signature: Signature, // signature of sender
     },
+    // used only for setup
+    Grant {
+        out_utxo: u64,
+        receiver: PubKey,
+    }
 }

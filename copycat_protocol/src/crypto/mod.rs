@@ -33,7 +33,7 @@ impl CryptoScheme {
     }
 }
 
-pub fn sha256(input: &[u8]) -> Result<Vec<u8>, CopycatError> {
+pub fn sha256(input: &[u8]) -> Result<Hash, CopycatError> {
     let mut context = Context::new(&SHA256);
     context.update(input);
     let digest = context.finish();

@@ -22,7 +22,7 @@ fn get_pacemaker(
 ) -> Box<dyn Pacemaker> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyPacemaker {}),
-        ChainType::Bitcoin => todo!(),
+        ChainType::Bitcoin => Box::new(DummyPacemaker {}), // TODO
     }
 }
 

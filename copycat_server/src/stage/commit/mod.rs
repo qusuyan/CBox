@@ -19,7 +19,7 @@ pub trait Commit: Sync + Send {
 pub fn get_commit(chain_type: ChainType, executed_send: mpsc::Sender<Arc<Txn>>) -> Box<dyn Commit> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyCommit::new(executed_send)),
-        ChainType::Bitcoin => todo!(),
+        ChainType::Bitcoin => Box::new(DummyCommit::new(executed_send)), // TODO:
     }
 }
 
@@ -29,7 +29,7 @@ pub async fn commit_thread(
     mut commit_recv: mpsc::Receiver<Arc<Block>>,
     executed_send: mpsc::Sender<Arc<Txn>>,
 ) {
-    log::trace!("Node {id}: Txn Validation stage starting...");
+    log::trace!("Node {id}: commit stage starting...");
 
     let commit_stage = get_commit(chain_type, executed_send);
 

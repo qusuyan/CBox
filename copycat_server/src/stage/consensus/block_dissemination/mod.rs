@@ -30,20 +30,26 @@ pub async fn block_dissemination_thread(
     id: NodeId,
     dissem_pattern: DissemPattern,
     peer_messenger: Arc<PeerMessenger>,
-    mut new_block_recv: mpsc::Receiver<Arc<Block>>,
-    block_ready_send: mpsc::Sender<Arc<Block>>,
+    mut new_block_recv: mpsc::Receiver<Vec<Arc<Block>>>,
+    block_ready_send: mpsc::Sender<Vec<Arc<Block>>>,
 ) {
-    log::trace!("Node {id}: Txn Validation stage starting...");
+    log::trace!("Node {id}: block dissemination stage starting...");
 
     let block_dissemination_stage = get_block_dissemination(dissem_pattern, peer_messenger);
 
     loop {
-        let new_blk = match new_block_recv.recv().await {
+        let new_tail = match new_block_recv.recv().await {
             Some(blk) => blk,
             None => {
                 log::error!("Node {id}: new_block pipe closed unexpectedly");
                 continue;
             }
+        };
+
+        // only disseminate the last block
+        let new_blk = match new_tail.last() {
+            Some(blk) => blk,
+            None => continue,
         };
 
         log::trace!("Node {id}: got new block {new_blk:?}");
@@ -53,7 +59,7 @@ pub async fn block_dissemination_thread(
             continue;
         }
 
-        if let Err(e) = block_ready_send.send(new_blk).await {
+        if let Err(e) = block_ready_send.send(new_tail).await {
             log::error!("Node {id}: failed to send to block_ready pipe: {e:?}");
             continue;
         }

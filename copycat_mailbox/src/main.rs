@@ -1,7 +1,7 @@
 use mailbox_utils;
 use mailbox_utils::{config, MachineId};
 
-use copycat_protocol::{ChainType, MsgType};
+use copycat_protocol::MsgType;
 
 use tokio::runtime::Builder;
 
@@ -27,10 +27,6 @@ struct Args {
     /// Number of threads
     #[clap(long, short = 't', default_value_t = 8)]
     num_threads: u64,
-
-    /// The type of blockchain under testing
-    #[clap(long, short = 'c', default_value = "dummy")]
-    chain: ChainType,
 }
 
 fn main() {
@@ -77,8 +73,6 @@ fn main() {
         8
     };
 
-    let chain_type = args.chain;
-
     let runtime = Builder::new_multi_thread()
         .enable_all()
         .worker_threads(num_threads as usize)
@@ -87,10 +81,7 @@ fn main() {
         .expect("Creating new runtime failed");
 
     runtime.block_on(async {
-        if let Err(e) = match chain_type {
-            ChainType::Dummy => mailbox::init::<MsgType>(id, machine_list, pipe_info).await,
-            ChainType::Bitcoin => todo!(),
-        } {
+        if let Err(e) = mailbox::init::<MsgType>(id, machine_list, pipe_info).await {
             log::error!("Ipc Server failed with error {:?}", e);
         }
     })

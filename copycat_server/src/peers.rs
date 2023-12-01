@@ -81,13 +81,12 @@ impl PeerMessenger {
     pub async fn broadcast(&self, msg: MsgType) -> Result<(), CopycatError> {
         log::trace!("Node {}: broadcasting {msg:?}", self.id);
         if let Err(e) = self.tx_send.send(SendRequest::Broadcast { msg }) {
-            Err(CopycatError(format!(
+            return Err(CopycatError(format!(
                 "Node {}: broadcast failed: {e:?}",
                 self.id
-            )))
-        } else {
-            Ok(())
+            )));
         }
+        Ok(())
     }
 
     async fn peer_receiver_thread(

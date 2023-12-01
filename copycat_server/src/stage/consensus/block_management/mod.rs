@@ -1,10 +1,11 @@
 mod dummy;
 use dummy::DummyBlockManagement;
 mod bitcoin;
+use bitcoin::BitcoinBlockManagement;
 
-use copycat_protocol::block::Block;
 use copycat_protocol::transaction::Txn;
 use copycat_protocol::ChainType;
+use copycat_protocol::{block::Block, CryptoScheme};
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -14,32 +15,36 @@ use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait BlockManagement: Sync + Send {
-    async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<(), CopycatError>;
+    async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError>;
     async fn prepare_new_block(&mut self) -> Result<(), CopycatError>;
     async fn wait_to_propose(&mut self) -> Result<(), CopycatError>;
     async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError>;
-    async fn validate_block(&mut self, block: &Block) -> Result<bool, CopycatError>;
+    async fn validate_block(&mut self, block: Arc<Block>) -> Result<Vec<Arc<Block>>, CopycatError>;
     async fn handle_pmaker_msg(&mut self, msg: Arc<Vec<u8>>) -> Result<(), CopycatError>;
 }
 
-fn get_blk_creation(chain_type: ChainType) -> Box<dyn BlockManagement> {
+fn get_blk_creation(
+    chain_type: ChainType,
+    crypto_scheme: CryptoScheme,
+) -> Box<dyn BlockManagement> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyBlockManagement::new()),
-        ChainType::Bitcoin => todo!(),
+        ChainType::Bitcoin => Box::new(BitcoinBlockManagement::new(crypto_scheme)),
     }
 }
 
 pub async fn block_management_thread(
     id: NodeId,
     chain_type: ChainType,
+    crypto_scheme: CryptoScheme,
     mut peer_blk_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Block>)>,
     mut txn_ready_recv: mpsc::Receiver<Arc<Txn>>,
     mut pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
-    new_block_send: mpsc::Sender<Arc<Block>>,
+    new_block_send: mpsc::Sender<Vec<Arc<Block>>>,
 ) {
-    log::trace!("Node {id}: Txn Validation stage starting...");
+    log::trace!("Node {id}: block management stage starting...");
 
-    let mut block_management_stage = get_blk_creation(chain_type);
+    let mut block_management_stage = get_blk_creation(chain_type, crypto_scheme);
 
     loop {
         // first try to construct / add-on to block to be proposed
@@ -73,7 +78,7 @@ pub async fn block_management_thread(
                 match block_management_stage.get_new_block().await {
                     Ok(block) => {
                         log::trace!("Node {id}: proposing new block {block:?}");
-                        if let Err(e) = new_block_send.send(block).await {
+                        if let Err(e) = new_block_send.send(vec![block]).await {
                             log::error!("Node {id}: failed to send to new_block pipe: {e:?}");
                             continue;
                         }
@@ -102,16 +107,13 @@ pub async fn block_management_thread(
 
                 log::trace!("Node {id}: got from {src} new block {new_block:?}");
 
-                match block_management_stage.validate_block(&new_block).await {
-                    Ok(valid) => {
-                        if !valid {
-                            log::warn!("Node {id}: got invalid block from {src}, ignoring...");
-                            continue;
-                        }
-
-                        if let Err(e) = new_block_send.send(new_block).await {
-                            log::error!("Node {id}: failed to send to block_ready pipe: {e:?}");
-                            continue;
+                match block_management_stage.validate_block(new_block.clone()).await {
+                    Ok(new_tail) => {
+                        if !new_tail.is_empty() {
+                            if let Err(e) = new_block_send.send(new_tail).await {
+                                log::error!("Node {id}: failed to send to block_ready pipe: {e:?}");
+                                continue;
+                            }
                         }
                     }
                     Err(e) => {
