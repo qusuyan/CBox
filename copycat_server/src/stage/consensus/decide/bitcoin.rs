@@ -37,7 +37,7 @@ impl Decision for BitcoinDecision {
                     BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
                     _ => unreachable!(),
                 };
-                if prev_hash.is_empty() {
+                if prev_hash.is_zero() {
                     (prev_hash, 1u64) // first block of chain
                 } else {
                     match self.block_pool.get(prev_hash) {

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::{Hash, PubKey, Signature};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BitcoinTxn {
     Incentive {
         out_utxo: u64,
@@ -21,5 +21,7 @@ pub enum BitcoinTxn {
     Grant {
         out_utxo: u64,
         receiver: PubKey,
-    }
+    },
 }
+
+impl GetSize for BitcoinTxn {}

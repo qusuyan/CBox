@@ -11,7 +11,7 @@ use crate::transaction::Txn;
 
 // TODO: for better accuracy, we should implement GetSize manually so that message size
 // matches the size after marshalling.
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BlockHeader {
     Dummy,
     Bitcoin {
@@ -20,6 +20,8 @@ pub enum BlockHeader {
         nonce: u32, // https://en.bitcoin.it/wiki/Nonce
     },
 }
+
+impl GetSize for BlockHeader {}
 
 #[derive(Clone, Serialize, Deserialize, GetSize)]
 pub struct Block {

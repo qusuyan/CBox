@@ -7,6 +7,7 @@ use copycat_utils::CopycatError;
 
 use async_trait::async_trait;
 use get_size::GetSize;
+use primitive_types::U256;
 use rand::Rng;
 
 use tokio::time::{Duration, Instant};
@@ -27,8 +28,10 @@ pub struct BitcoinBlockManagement {
     // fields for constructing new block
     pending_txns: VecDeque<Hash>,
     block_under_construction: Vec<Hash>,
+    block_size: usize,
     utxo_spent: HashSet<(Hash, PubKey)>,
     block_emit_time: Option<Instant>,
+    pow_time: Option<Duration>, // for debugging
 }
 
 impl BitcoinBlockManagement {
@@ -38,17 +41,19 @@ impl BitcoinBlockManagement {
             txn_pool: HashMap::new(),
             block_pool: HashMap::new(),
             utxo: HashSet::new(),
-            chain_tail: vec![],
+            chain_tail: U256::zero(),
             difficulty: 10,
             pending_txns: VecDeque::new(),
             block_under_construction: vec![],
+            block_size: 0,
             utxo_spent: HashSet::new(),
             block_emit_time: None,
+            pow_time: None,
         }
     }
 
     pub fn get_chain_length(&self) -> u64 {
-        if self.chain_tail.is_empty() {
+        if self.chain_tail.is_zero() {
             0u64
         } else {
             let (_, chain_tail_height) = self.block_pool.get(&self.chain_tail).unwrap();
@@ -74,14 +79,12 @@ impl BitcoinBlockManagement {
             }
         };
         let pow_time = Duration::from_secs_f64(
-            HASH_TIME_PER_1MB * (self.block_under_construction.get_size() as f64)
-                / (0x1000000 as f64)
-                * (x as f64),
+            HASH_TIME_PER_1MB * (self.block_size as f64) / (0x1000000 as f64) * (x as f64),
         );
         log::trace!(
             "POW takes {} sec; p: {p}, u: {u}, x: {x}, block size: {}, block len: {}",
             pow_time.as_secs_f64(),
-            self.block_under_construction.get_size(),
+            self.block_size,
             self.block_under_construction.len(),
         );
         pow_time
@@ -187,7 +190,7 @@ impl BlockManagement for BitcoinBlockManagement {
         // if block is not full yet, try adding new txns
         loop {
             // block is large enough
-            if self.block_under_construction.get_size() > 0x1000000 {
+            if self.block_size > 0x100000 {
                 break;
             }
 
@@ -210,12 +213,14 @@ impl BlockManagement for BitcoinBlockManagement {
                             // if a transaction causes conflict, we only need to keep one of them even if the block is dropped
                             if self.utxo.contains(&key) && !self.utxo_spent.contains(&key) {
                                 self.block_under_construction.push(txn_hash.clone());
+                                self.block_size += txn.get_size();
                                 modified = true;
                             }
                         }
                     }
                     BitcoinTxn::Grant { .. } => {
                         self.block_under_construction.push(txn_hash.clone());
+                        self.block_size += txn.get_size();
                         modified = true;
                     }
                     BitcoinTxn::Incentive { .. } => unreachable!(),
@@ -227,8 +232,11 @@ impl BlockManagement for BitcoinBlockManagement {
         if modified {
             let start_pow = Instant::now();
             let pow_time = self.get_pow_time();
+            self.pow_time = Some(pow_time);
             self.block_emit_time = Some(start_pow + pow_time);
         }
+
+        log::debug!("block_size: {}", self.block_size);
 
         Ok(())
     }
@@ -269,7 +277,19 @@ impl BlockManagement for BitcoinBlockManagement {
         for utxo in self.utxo_spent.drain() {
             self.utxo.remove(&utxo);
         }
+        log::debug!(
+            "Block emitted at {:?}, pow takes {} sec, actual block size is {}+{}={}, block len is {}, block_size is {}",
+            self.block_emit_time.unwrap(),
+            self.pow_time.unwrap().as_secs_f64(),
+            block.header.get_size(),
+            block.txns.get_size(),
+            block.get_size(),
+            block.txns.len(),
+            self.block_size,
+        );
         self.block_emit_time = None;
+        self.pow_time = None;
+        self.block_size = 0;
 
         Ok(block)
     }
@@ -287,7 +307,7 @@ impl BlockManagement for BitcoinBlockManagement {
             _ => unreachable!(),
         };
 
-        let height = if prev_hash.is_empty() {
+        let height = if prev_hash.is_zero() {
             1u64
         } else {
             match self.block_pool.get(prev_hash) {
@@ -403,7 +423,7 @@ impl BlockManagement for BitcoinBlockManagement {
             };
             // hash verification
             tokio::time::sleep(Duration::from_secs_f64(
-                HASH_TIME_PER_1MB * new_block.get_size() as f64 / 0x1000000 as f64,
+                HASH_TIME_PER_1MB * new_block.get_size() as f64 / 0x100000 as f64,
             ))
             .await;
             if nonce != 1 {
@@ -476,8 +496,10 @@ impl BlockManagement for BitcoinBlockManagement {
 
         // the new block is the tail of the longer chain, move over
         self.block_emit_time = None;
+        self.pow_time = None;
         self.pending_txns
             .append(&mut self.block_under_construction.drain(0..).collect());
+        self.block_size = 0;
         self.utxo_spent.clear();
         self.chain_tail = block_hash;
 
@@ -501,5 +523,30 @@ impl BlockManagement for BitcoinBlockManagement {
         }
         self.difficulty = msg[0];
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod bitcoin_block_management_test {
+    use copycat_utils::CopycatError;
+
+    #[test]
+    fn test_pow() -> Result<(), CopycatError> {
+        let p = 1f64 - 2f64.powf(-(10 as f64));
+        let u = p.powf(2000f64);
+        let mut cdf = 1f64;
+        let mut curr = 0u64;
+        let x = loop {
+            cdf *= p;
+            curr += 1;
+            if cdf < u {
+                break curr;
+            }
+        };
+        if x == 2000 {
+            Ok(())
+        } else {
+            Err(CopycatError(format!("expected x to be 2000, actual: {x}")))
+        }
     }
 }

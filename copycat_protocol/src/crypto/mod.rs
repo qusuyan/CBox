@@ -4,7 +4,9 @@ use copycat_utils::CopycatError;
 
 use ring::digest::{Context, SHA256};
 
-pub type Hash = Vec<u8>;
+use primitive_types::U256;
+
+pub type Hash = U256;
 pub type PrivKey = Vec<u8>;
 pub type PubKey = Vec<u8>;
 pub type Signature = Vec<u8>;
@@ -38,5 +40,5 @@ pub fn sha256(input: &[u8]) -> Result<Hash, CopycatError> {
     let mut context = Context::new(&SHA256);
     context.update(input);
     let digest = context.finish();
-    Ok(Vec::from(digest.as_ref()))
+    Ok(U256::from_little_endian(digest.as_ref()))
 }
