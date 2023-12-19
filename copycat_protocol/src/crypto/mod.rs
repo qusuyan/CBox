@@ -7,8 +7,8 @@ use ring::digest::{Context, SHA256};
 use primitive_types::U256;
 
 pub type Hash = U256;
-pub type PrivKey = Vec<u8>;
-pub type PubKey = Vec<u8>;
+pub type PrivKey = [u8; 32];
+pub type PubKey = [u8; 32]; //TODO: 33 bytes but rust serde only support up to 32 bytes
 pub type Signature = Vec<u8>;
 
 #[derive(Copy, Clone, Debug, clap::ValueEnum)]

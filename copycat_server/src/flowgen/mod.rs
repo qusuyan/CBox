@@ -1,0 +1,31 @@
+mod dummy;
+
+mod bitcoin;
+pub use bitcoin::BitcoinFlowGen;
+
+use async_trait::async_trait;
+use copycat_protocol::{transaction::Txn, ChainType};
+use copycat_utils::CopycatError;
+
+use std::sync::Arc;
+
+pub struct Stats {
+    pub latency: f64,
+    pub num_committed: u64,
+}
+
+#[async_trait]
+pub trait FlowGen {
+    async fn setup_txns(&self) -> Result<Vec<Arc<Txn>>, CopycatError>;
+    async fn wait_next(&self) -> Result<(), CopycatError>;
+    async fn next_txn(&mut self) -> Result<Arc<Txn>, CopycatError>;
+    async fn txn_committed(&mut self, txn: Arc<Txn>) -> Result<(), CopycatError>;
+    fn get_stats(&self) -> Stats;
+}
+
+pub fn get_flow_gen(chain: ChainType) -> Box<dyn FlowGen> {
+    match chain {
+        ChainType::Bitcoin => Box::new(BitcoinFlowGen::new()),
+        _ => todo!(),
+    }
+}

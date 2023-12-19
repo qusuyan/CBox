@@ -139,8 +139,8 @@ impl Node {
         Ok(())
     }
 
-    pub async fn send_req(&self, txn: Txn) -> Result<(), CopycatError> {
-        if let Err(e) = self.req_send.send(Arc::new(txn)).await {
+    pub async fn send_req(&self, txn: Arc<Txn>) -> Result<(), CopycatError> {
+        if let Err(e) = self.req_send.send(txn).await {
             return Err(CopycatError(format!("{e:?}")));
         }
         Ok(())

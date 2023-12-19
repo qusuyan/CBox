@@ -52,17 +52,20 @@ impl Decision for BitcoinDecision {
         loop {
             // the entire new tail has been pruned
             if self.chain_tail.is_empty() {
+                log::warn!(
+                    "entire undecided chain pruned, a committed block might need to be undone"
+                );
                 break;
             }
 
-            let old_tail = self.chain_tail.pop_back().unwrap();
+            let old_tail = self.chain_tail.back().unwrap();
             let (_, old_height) = self.block_pool.get(&old_tail).unwrap();
             if *old_height >= first_block_height {
                 // old tail get overwritten
-                continue;
+                self.chain_tail.pop_back();
             } else if *old_height == first_block_height - 1 {
                 // found the common ancester
-                if old_tail == *ancester_hash {
+                if old_tail == ancester_hash {
                     break;
                 } else {
                     unreachable!("got new tail but its parent does not match existing chain");
@@ -80,6 +83,12 @@ impl Decision for BitcoinDecision {
                 .insert(blk_hash.clone(), (blk.clone(), blk_height));
             self.chain_tail.push_back(blk_hash);
         }
+
+        log::debug!(
+            "Current chain length: {}, # blocks waiting to be committed: {}",
+            first_block_height + new_tail.len() as u64,
+            self.chain_tail.len()
+        );
 
         Ok(())
     }

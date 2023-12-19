@@ -1,15 +1,19 @@
 mod composition;
+mod flowgen;
 mod node;
 mod peers;
 mod stage;
 
-use copycat_protocol::transaction::{BitcoinTxn, Txn};
 use copycat_protocol::{ChainType, CryptoScheme, DissemPattern};
 use copycat_utils::log::colored_level;
+
+use flowgen::get_flow_gen;
 use node::Node;
 
 use std::io::Write;
+
 use tokio::runtime::Builder;
+use tokio::time::{Duration, Instant};
 
 use clap::Parser;
 
@@ -77,33 +81,55 @@ pub fn main() {
                 }
             };
 
-        // let test_msg = (0..500000).map(|_| id.to_string()).collect::<String>();
-        let send_loop = async move {
-            let mut receiver = 0u128;
-            loop {
-                if let Err(e) = node
-                    .send_req(Txn::Bitcoin {
-                        txn: BitcoinTxn::Grant {
-                            out_utxo: 100,
-                            receiver: bincode::serialize(&receiver).unwrap(),
-                        },
-                    })
-                    .await
-                {
-                    log::error!("Node {id}: failed to send txn request: {e:?}");
-                }
-                receiver += 1;
-            }
-        };
-        tokio::task::spawn(send_loop);
+        let mut flow_gen = get_flow_gen(args.chain);
+        let start_time = Instant::now();
+        let mut report_time = start_time + Duration::from_secs(60);
 
         loop {
-            match executed.recv().await {
-                Some(txn) => {
-                    log::info!("got committed txn {txn:?}")
+            tokio::select! {
+                wait_next_req = flow_gen.wait_next() => {
+                    if let Err(e) = wait_next_req {
+                        log::error!("Node {id}: wait for next available request failed: {e:?}");
+                        continue;
+                    }
+
+                    let next_req = match flow_gen.next_txn().await {
+                        Ok(txn) => txn,
+                        Err(e) => {
+                            log::error!("Node {id}: get available request failed: {e:?}");
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = node.send_req(next_req).await {
+                        log::error!("Node {id}: sending next request failed: {e:?}");
+                        continue;
+                    }
                 }
-                None => {
-                    log::error!("Node {id}: failed to recv executed txns");
+
+                committed_txn = executed.recv() => {
+                    let txn = match committed_txn {
+                        Some(txn) => txn,
+                        None => {
+                            log::error!("Node {id}: committed_txn closed unexpectedly");
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = flow_gen.txn_committed(txn).await {
+                        log::error!("Node {id}: flow gen failed to record committed transaction: {e:?}");
+                        continue;
+                    }
+                }
+
+                _ = tokio::time::sleep_until(report_time) => {
+                    let stats = flow_gen.get_stats();
+                    log::info!(
+                        "Node {id}: Throughput: {} txn/s, Average Latency: {} s", 
+                        stats.num_committed / (report_time - start_time).as_secs(),
+                        stats.latency
+                    );
+                    report_time += Duration::from_secs(60);
                 }
             }
         }

@@ -1,8 +1,6 @@
 use mailbox_utils;
 use mailbox_utils::{config, MachineId};
 
-use copycat_protocol::MsgType;
-
 use tokio::runtime::Builder;
 
 use std::io::Write;
@@ -81,7 +79,7 @@ fn main() {
         .expect("Creating new runtime failed");
 
     runtime.block_on(async {
-        if let Err(e) = mailbox::init::<MsgType>(id, machine_list, pipe_info).await {
+        if let Err(e) = mailbox::init(id, machine_list, pipe_info).await {
             log::error!("Ipc Server failed with error {:?}", e);
         }
     })

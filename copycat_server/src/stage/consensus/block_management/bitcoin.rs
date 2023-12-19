@@ -79,7 +79,7 @@ impl BitcoinBlockManagement {
             }
         };
         let pow_time = Duration::from_secs_f64(
-            HASH_TIME_PER_1MB * (self.block_size as f64) / (0x1000000 as f64) * (x as f64),
+            HASH_TIME_PER_1MB * (self.block_size as f64) / (0x100000 as f64) * (x as f64),
         );
         log::trace!(
             "POW takes {} sec; p: {p}, u: {u}, x: {x}, block size: {}, block len: {}",
@@ -235,8 +235,6 @@ impl BlockManagement for BitcoinBlockManagement {
             self.pow_time = Some(pow_time);
             self.block_emit_time = Some(start_pow + pow_time);
         }
-
-        log::debug!("block_size: {}", self.block_size);
 
         Ok(())
     }
