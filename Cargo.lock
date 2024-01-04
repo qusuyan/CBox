@@ -653,6 +653,7 @@ checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 [[package]]
 name = "mailbox"
 version = "0.1.0"
+source = "git+ssh://git@github.com/qusuyan/mailbox.git#c6b6c3547a30fbd06b38e71022a2afbefdcef1dc"
 dependencies = [
  "bincode",
  "bytes",
@@ -669,6 +670,7 @@ dependencies = [
 [[package]]
 name = "mailbox_client"
 version = "0.1.0"
+source = "git+ssh://git@github.com/qusuyan/mailbox.git#c6b6c3547a30fbd06b38e71022a2afbefdcef1dc"
 dependencies = [
  "bincode",
  "env_logger",
@@ -683,6 +685,7 @@ dependencies = [
 [[package]]
 name = "mailbox_utils"
 version = "0.1.0"
+source = "git+ssh://git@github.com/qusuyan/mailbox.git#c6b6c3547a30fbd06b38e71022a2afbefdcef1dc"
 dependencies = [
  "bincode",
  "bytes",

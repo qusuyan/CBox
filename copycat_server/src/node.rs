@@ -37,7 +37,7 @@ impl Node {
         dissem_pattern: DissemPattern,
         crypto_scheme: CryptoScheme,
     ) -> Result<(Self, mpsc::Receiver<Arc<Txn>>), CopycatError> {
-        log::trace!("starting node {id}: {chain_type:?}");
+        log::trace!("starting: {chain_type:?}");
 
         // let state = Arc::new(ChainState::new(chain_type));
 
@@ -65,7 +65,6 @@ impl Node {
         ));
 
         let _txn_dissemination_handle = tokio::spawn(txn_dissemination_thread(
-            id,
             dissem_pattern,
             peer_messenger.clone(),
             validated_txn_recv,
@@ -73,7 +72,6 @@ impl Node {
         ));
 
         let _pacemaker_handle = tokio::spawn(pacemaker_thread(
-            id,
             chain_type,
             peer_messenger.clone(),
             peer_pmaker_recv,
@@ -91,7 +89,6 @@ impl Node {
         ));
 
         let _block_dissemination_handle = tokio::spawn(block_dissemination_thread(
-            id,
             dissem_pattern,
             peer_messenger.clone(),
             new_block_recv,
@@ -99,7 +96,6 @@ impl Node {
         ));
 
         let _decision_handle = tokio::spawn(decision_thread(
-            id,
             chain_type,
             peer_messenger.clone(),
             peer_consensus_recv,
@@ -107,10 +103,9 @@ impl Node {
             commit_send,
         ));
 
-        let _commit_handle =
-            tokio::spawn(commit_thread(id, chain_type, commit_recv, executed_send));
+        let _commit_handle = tokio::spawn(commit_thread(chain_type, commit_recv, executed_send));
 
-        log::trace!("Node {id}: stages started");
+        log::info!("stages started");
 
         Ok((
             Self {

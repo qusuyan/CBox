@@ -4,7 +4,7 @@ use dummy::DummyCommit;
 use copycat_protocol::block::Block;
 use copycat_protocol::transaction::Txn;
 use copycat_protocol::ChainType;
-use copycat_utils::{CopycatError, NodeId};
+use copycat_utils::CopycatError;
 
 use async_trait::async_trait;
 
@@ -24,12 +24,11 @@ pub fn get_commit(chain_type: ChainType, executed_send: mpsc::Sender<Arc<Txn>>) 
 }
 
 pub async fn commit_thread(
-    id: NodeId,
     chain_type: ChainType,
     mut commit_recv: mpsc::Receiver<Arc<Block>>,
     executed_send: mpsc::Sender<Arc<Txn>>,
 ) {
-    log::info!("Node {id}: commit stage starting...");
+    log::info!("commit stage starting...");
 
     let commit_stage = get_commit(chain_type, executed_send);
 
@@ -37,15 +36,15 @@ pub async fn commit_thread(
         let block = match commit_recv.recv().await {
             Some(blk) => blk,
             None => {
-                log::error!("Node {id}: commit pipe closed unexpectedly");
-                continue;
+                log::error!("commit pipe closed unexpectedly");
+                return;
             }
         };
 
-        log::debug!("Node {id}: got new block {block:?}");
+        log::debug!("got new block {block:?}");
 
         if let Err(e) = commit_stage.commit(block).await {
-            log::error!("Node {id}: failed to commit: {e:?}");
+            log::error!("failed to commit: {e:?}");
             continue;
         }
     }

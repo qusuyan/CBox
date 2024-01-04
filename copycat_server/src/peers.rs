@@ -14,7 +14,6 @@ enum SendRequest {
 }
 
 pub struct PeerMessenger {
-    id: NodeId,
     tx_send: mpsc::UnboundedSender<SendRequest>,
     _peer_sender_handle: JoinHandle<()>,
     _peer_receiver_handle: JoinHandle<()>,
@@ -42,10 +41,9 @@ impl PeerMessenger {
         let (rx_pmaker_send, rx_pmaker_recv) = mpsc::unbounded_channel();
 
         let _peer_sender_handle =
-            tokio::spawn(Self::peer_sender_thread(id, transport_hub.clone(), tx_recv));
+            tokio::spawn(Self::peer_sender_thread(transport_hub.clone(), tx_recv));
 
         let _peer_receiver_handle = tokio::spawn(Self::peer_receiver_thread(
-            id,
             transport_hub.clone(),
             rx_txn_send,
             rx_blk_send,
@@ -55,7 +53,6 @@ impl PeerMessenger {
 
         Ok((
             Self {
-                id,
                 tx_send,
                 _peer_sender_handle,
                 _peer_receiver_handle,
@@ -69,35 +66,31 @@ impl PeerMessenger {
 
     pub async fn send(&self, dest: NodeId, msg: MsgType) -> Result<(), CopycatError> {
         if let Err(e) = self.tx_send.send(SendRequest::Send { dest, msg }) {
-            Err(CopycatError(format!(
-                "Node {}: send to {dest} failed: {e:?}",
-                self.id
-            )))
+            Err(CopycatError(format!("send to {dest} failed: {e:?}")))
         } else {
             Ok(())
         }
     }
 
     pub async fn broadcast(&self, msg: MsgType) -> Result<(), CopycatError> {
-        log::trace!("Node {}: broadcasting {msg:?}", self.id);
+        log::trace!("broadcasting {msg:?}");
+        if let MsgType::NewBlock { blk } = &msg {
+            log::debug!("broadcasting {blk:?}");
+        }
         if let Err(e) = self.tx_send.send(SendRequest::Broadcast { msg }) {
-            return Err(CopycatError(format!(
-                "Node {}: broadcast failed: {e:?}",
-                self.id
-            )));
+            return Err(CopycatError(format!("broadcast failed: {e:?}")));
         }
         Ok(())
     }
 
     async fn peer_receiver_thread(
-        id: NodeId,
         transport_hub: Arc<ClientStub<MsgType>>,
         rx_txn_send: mpsc::UnboundedSender<(NodeId, Arc<Txn>)>,
         rx_blk_send: mpsc::UnboundedSender<(NodeId, Arc<Block>)>,
         rx_consensus_send: mpsc::UnboundedSender<(NodeId, Arc<Vec<u8>>)>,
         rx_pmaker_send: mpsc::UnboundedSender<(NodeId, Arc<Vec<u8>>)>,
     ) {
-        log::trace!("Node {id}: peer messenger thread started");
+        log::trace!("peer messenger thread started");
 
         loop {
             match transport_hub.recv().await {
@@ -106,61 +99,59 @@ impl PeerMessenger {
                     match content {
                         MsgType::NewTxn { txn } => {
                             if let Err(e) = rx_txn_send.send((src, Arc::new(txn))) {
-                                log::error!("Node {id}: rx_txn_send failed: {e:?}")
+                                log::error!("rx_txn_send failed: {e:?}")
                             }
                         }
                         MsgType::NewBlock { blk } => {
                             if let Err(e) = rx_blk_send.send((src, Arc::new(blk))) {
-                                log::error!("Node {id}: rx_blk_send failed: {e:?}")
+                                log::error!("rx_blk_send failed: {e:?}")
                             }
                         }
                         MsgType::ConsensusMsg { msg } => {
                             if let Err(e) = rx_consensus_send.send((src, Arc::new(msg))) {
-                                log::error!("Node {id}: rx_consensus_send failed: {e:?}")
+                                log::error!("rx_consensus_send failed: {e:?}")
                             }
                         }
                         MsgType::PMakerMsg { msg } => {
                             if let Err(e) = rx_pmaker_send.send((src, Arc::new(msg))) {
-                                log::error!("Node {id}: rx_pmaker_send failed: {e:?}")
+                                log::error!("rx_pmaker_send failed: {e:?}")
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    log::error!("Node {id}: got error listening to peers: {e:?}");
+                    log::error!("got error listening to peers: {e:?}");
                 }
             }
         }
     }
 
     async fn peer_sender_thread(
-        id: NodeId,
         transport_hub: Arc<ClientStub<MsgType>>,
         mut tx_recv: mpsc::UnboundedReceiver<SendRequest>,
     ) {
         loop {
             match tx_recv.recv().await {
                 Some(req) => {
-                    log::trace!("Node {id}: got request {req:?}");
+                    log::trace!("got request {req:?}");
                     match req {
                         SendRequest::Send { dest, msg } => {
                             if let Err(e) = transport_hub.send(dest, msg).await {
-                                log::error!(
-                                    "Node {id}: failed to send message to peer {dest}: {e:?}"
-                                )
+                                log::error!("failed to send message to peer {dest}: {e:?}")
                             }
                         }
                         SendRequest::Broadcast { msg } => {
+                            if let MsgType::NewBlock { blk } = &msg {
+                                log::debug!("broadcasting block {blk:?}");
+                            }
                             if let Err(e) = transport_hub.broadcast(msg).await {
-                                log::error!(
-                                    "Node {id}: failed to broadcast message to peers: {e:?}"
-                                )
+                                log::error!("failed to broadcast message to peers: {e:?}")
                             }
                         }
                     }
                 }
                 None => {
-                    log::error!("Node {id}: peer message channel closed");
+                    log::error!("peer message channel closed");
                 }
             }
         }

@@ -21,6 +21,7 @@ impl BroadcastBlockDissemination {
 #[async_trait]
 impl BlockDissemination for BroadcastBlockDissemination {
     async fn disseminate(&self, blk: &Block) -> Result<(), CopycatError> {
+        log::debug!("broadcasting new block {blk:?}");
         self.peer_messenger
             .broadcast(MsgType::NewBlock { blk: blk.clone() })
             .await

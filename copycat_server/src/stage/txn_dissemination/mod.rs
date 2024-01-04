@@ -4,7 +4,7 @@ use broadcast::BroadcastTxnDissemination;
 use crate::peers::PeerMessenger;
 use copycat_protocol::transaction::Txn;
 use copycat_protocol::DissemPattern;
-use copycat_utils::{CopycatError, NodeId};
+use copycat_utils::CopycatError;
 
 use async_trait::async_trait;
 
@@ -27,13 +27,12 @@ fn get_txn_dissemination(
 }
 
 pub async fn txn_dissemination_thread(
-    id: NodeId,
     dissem_pattern: DissemPattern,
     peer_messenger: Arc<PeerMessenger>,
     mut validated_txn_recv: mpsc::Receiver<Arc<Txn>>,
     txn_ready_send: mpsc::Sender<Arc<Txn>>,
 ) {
-    log::info!("Node {id}: txn dissemination stage starting...");
+    log::info!("txn dissemination stage starting...");
 
     let txn_dissemination_stage = get_txn_dissemination(dissem_pattern, peer_messenger);
 
@@ -41,20 +40,20 @@ pub async fn txn_dissemination_thread(
         let txn = match validated_txn_recv.recv().await {
             Some(txn) => txn,
             None => {
-                log::error!("Node {id}: validated_txn pipe closed unexpectedly");
-                continue;
+                log::error!("validated_txn pipe closed unexpectedly");
+                return;
             }
         };
 
-        log::trace!("Node {id}: got new txn {txn:?}");
+        log::trace!("got new txn {txn:?}");
 
         if let Err(e) = txn_dissemination_stage.disseminate(&txn).await {
-            log::error!("Node {id}: failed to disseminate txn: {e:?}");
+            log::error!("failed to disseminate txn: {e:?}");
             continue;
         }
 
         if let Err(e) = txn_ready_send.send(txn).await {
-            log::error!("Node {id}: failed to send to txn_ready pipe: {e:?}");
+            log::error!("failed to send to txn_ready pipe: {e:?}");
             continue;
         }
     }

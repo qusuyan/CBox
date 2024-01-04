@@ -29,6 +29,7 @@ pub struct BitcoinBlockManagement {
     pending_txns: VecDeque<Hash>,
     block_under_construction: Vec<Hash>,
     block_size: usize,
+    new_utxo: HashSet<(Hash, PubKey)>,
     utxo_spent: HashSet<(Hash, PubKey)>,
     block_emit_time: Option<Instant>,
     pow_time: Option<Duration>, // for debugging
@@ -46,6 +47,7 @@ impl BitcoinBlockManagement {
             pending_txns: VecDeque::new(),
             block_under_construction: vec![],
             block_size: 0,
+            new_utxo: HashSet::new(),
             utxo_spent: HashSet::new(),
             block_emit_time: None,
             pow_time: None,
@@ -206,20 +208,43 @@ impl BlockManagement for BitcoinBlockManagement {
                     BitcoinTxn::Send {
                         sender,
                         in_utxo: in_utxos,
+                        receiver,
+                        out_utxo,
+                        remainder,
                         ..
                     } => {
+                        let mut valid: bool = true;
                         for in_utxo in in_utxos {
                             let key = (in_utxo.clone(), sender.clone());
                             // if a transaction causes conflict, we only need to keep one of them even if the block is dropped
-                            if self.utxo.contains(&key) && !self.utxo_spent.contains(&key) {
-                                self.block_under_construction.push(txn_hash.clone());
-                                self.block_size += txn.get_size();
-                                modified = true;
+                            if (self.utxo.contains(&key) || self.new_utxo.contains(&key))
+                                && !self.utxo_spent.contains(&key)
+                            {
+                                // valid transaction
+                            } else {
+                                valid = false; // double spending occurs here
+                                break;
                             }
                         }
+                        if valid {
+                            self.block_under_construction.push(txn_hash.clone());
+                            for in_utxo in in_utxos {
+                                self.utxo_spent.insert((in_utxo.clone(), sender.clone()));
+                            }
+                            if *out_utxo > 0 {
+                                self.new_utxo.insert((txn_hash.clone(), receiver.clone()));
+                            }
+                            if *remainder > 0 {
+                                self.new_utxo.insert((txn_hash.clone(), sender.clone()));
+                            }
+                            self.block_size += txn.get_size();
+                            modified = true;
+                        }
                     }
-                    BitcoinTxn::Grant { .. } => {
+                    BitcoinTxn::Grant { receiver, .. } => {
+                        // bypass double spending check
                         self.block_under_construction.push(txn_hash.clone());
+                        self.new_utxo.insert((txn_hash.clone(), receiver.clone()));
                         self.block_size += txn.get_size();
                         modified = true;
                     }
@@ -272,6 +297,9 @@ impl BlockManagement for BitcoinBlockManagement {
             .insert(hash.clone(), (block.clone(), chain_length + 1));
         self.chain_tail = hash;
 
+        for utxo in self.new_utxo.drain() {
+            self.utxo.insert(utxo);
+        }
         for utxo in self.utxo_spent.drain() {
             self.utxo.remove(&utxo);
         }
@@ -430,7 +458,6 @@ impl BlockManagement for BitcoinBlockManagement {
 
             // TODO: add merkle tree proof
 
-            // TODO: check if all transactions are valid and if double spending occurs
             for txn in new_block.txns.iter() {
                 let txn_hash = sha256(&bincode::serialize(txn)?)?;
                 let bitcoin_txn = match txn.as_ref() {
@@ -499,6 +526,7 @@ impl BlockManagement for BitcoinBlockManagement {
             .append(&mut self.block_under_construction.drain(0..).collect());
         self.block_size = 0;
         self.utxo_spent.clear();
+        self.new_utxo.clear();
         self.chain_tail = block_hash;
 
         // add new_utxos and remove utxo_spent from self.utxo

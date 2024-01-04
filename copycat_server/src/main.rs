@@ -53,17 +53,17 @@ pub fn main() {
     let mut args = CliArgs::parse();
     args.validate();
 
+    let id = args.id;
     env_logger::builder()
         .format(move |buf, record| {
             let mut style = buf.style();
             let level = colored_level(&mut style, record.level());
             let mut style = buf.style();
             let target = style.set_bold(true).value(record.target());
-            writeln!(buf, "{level} {target}: {}", record.args())
+            writeln!(buf, "Node{id} {level} {target}: {}", record.args())
         })
         .init();
 
-    let id = args.id;
     let runtime = Builder::new_multi_thread()
         .enable_all()
         .worker_threads(args.num_threads)
@@ -76,12 +76,21 @@ pub fn main() {
             match Node::init(id, args.chain, args.dissem_pattern, args.crypto).await {
                 Ok(node) => node,
                 Err(e) => {
-                    log::error!("Node {id}: failed to start node: {e:?}");
+                    log::error!("failed to start node: {e:?}");
                     return;
                 }
             };
 
-        let mut flow_gen = get_flow_gen(args.chain);
+        let mut flow_gen = get_flow_gen(args.chain, args.crypto);
+        let init_txns = flow_gen.setup_txns().await.unwrap();
+        for txn in init_txns {
+            if let Err(e) = node.send_req(txn).await {
+                log::error!("failed to send setup txns: {e}");
+                return;
+            }
+        }
+        log::info!("setup txns sent");
+
         let start_time = Instant::now();
         let mut report_time = start_time + Duration::from_secs(60);
 
@@ -89,20 +98,20 @@ pub fn main() {
             tokio::select! {
                 wait_next_req = flow_gen.wait_next() => {
                     if let Err(e) = wait_next_req {
-                        log::error!("Node {id}: wait for next available request failed: {e:?}");
+                        log::error!("wait for next available request failed: {e:?}");
                         continue;
                     }
 
                     let next_req = match flow_gen.next_txn().await {
                         Ok(txn) => txn,
                         Err(e) => {
-                            log::error!("Node {id}: get available request failed: {e:?}");
+                            log::error!("get available request failed: {e:?}");
                             continue;
                         }
                     };
 
                     if let Err(e) = node.send_req(next_req).await {
-                        log::error!("Node {id}: sending next request failed: {e:?}");
+                        log::error!("sending next request failed: {e:?}");
                         continue;
                     }
                 }
@@ -111,13 +120,13 @@ pub fn main() {
                     let txn = match committed_txn {
                         Some(txn) => txn,
                         None => {
-                            log::error!("Node {id}: committed_txn closed unexpectedly");
-                            continue;
+                            log::error!("committed_txn closed unexpectedly");
+                            return;
                         }
                     };
 
                     if let Err(e) = flow_gen.txn_committed(txn).await {
-                        log::error!("Node {id}: flow gen failed to record committed transaction: {e:?}");
+                        log::error!("flow gen failed to record committed transaction: {e:?}");
                         continue;
                     }
                 }
@@ -125,7 +134,7 @@ pub fn main() {
                 _ = tokio::time::sleep_until(report_time) => {
                     let stats = flow_gen.get_stats();
                     log::info!(
-                        "Node {id}: Throughput: {} txn/s, Average Latency: {} s", 
+                        "Throughput: {} txn/s, Average Latency: {} s",
                         stats.num_committed / (report_time - start_time).as_secs(),
                         stats.latency
                     );

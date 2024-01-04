@@ -7,7 +7,7 @@ members = [
 ]
 resolver = "2"
 
-[patch.'ssh://git@github.com/qusuyan/mailbox.git']
-mailbox_client = { path="../mailbox/mailbox_client" }
-mailbox_utils = { path="../mailbox/mailbox_utils" }
-mailbox = {path="../mailbox"}
+# [patch.'ssh://git@github.com/qusuyan/mailbox.git']
+# mailbox_client = { path="../mailbox/mailbox_client" }
+# mailbox_utils = { path="../mailbox/mailbox_utils" }
+# mailbox = {path="../mailbox"}

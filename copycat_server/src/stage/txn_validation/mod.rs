@@ -36,7 +36,7 @@ pub async fn txn_validation_thread(
     mut peer_txn_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Txn>)>,
     validated_txn_send: mpsc::Sender<Arc<Txn>>,
 ) {
-    log::info!("Node {id}: txn validation stage starting...");
+    log::info!("txn validation stage starting...");
 
     let mut txn_validation_stage = get_txn_validation(chain_type, crypto_scheme);
 
@@ -46,7 +46,7 @@ pub async fn txn_validation_thread(
                 match new_txn {
                     Some(txn) => (id, txn),
                     None => {
-                        log::error!("Node {id}: request pipe closed");
+                        log::error!("request pipe closed");
                         continue;
                     }
                 }
@@ -61,29 +61,29 @@ pub async fn txn_validation_thread(
                         (src, txn)
                     },
                     None => {
-                        log::error!("Node {id}: peer_txn pipe closed");
+                        log::error!("peer_txn pipe closed");
                         continue;
                     },
                 }
             }
         };
 
-        log::trace!("Node {id}: got from {src} new txn {txn:?}");
+        log::trace!("got from {src} new txn {txn:?}");
 
         match txn_validation_stage.validate(txn.clone()).await {
             Ok(valid) => {
                 if !valid {
-                    log::warn!("Node {id}: got invalid txn, ignoring...");
+                    log::warn!("got invalid txn, ignoring...");
                     return;
                 }
 
                 if let Err(e) = validated_txn_send.send(txn).await {
-                    log::error!("Node {id}: failed to send to validated_txn pipe: {e:?}");
+                    log::error!("failed to send to validated_txn pipe: {e:?}");
                     return;
                 }
             }
             Err(e) => {
-                log::error!("Node {id}: error validating txn: {e:?}");
+                log::error!("error validating txn: {e:?}");
                 return;
             }
         }

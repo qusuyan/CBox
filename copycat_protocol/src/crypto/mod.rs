@@ -18,6 +18,12 @@ pub enum CryptoScheme {
 }
 
 impl CryptoScheme {
+    pub fn gen_key_pair(&self, seed: u64) -> (PubKey, PrivKey) {
+        match self {
+            CryptoScheme::Dummy => dummy::gen_key_pair(seed),
+        }
+    }
+
     pub fn sign(&self, privkey: &PrivKey, input: &[u8]) -> Result<Signature, CopycatError> {
         match self {
             CryptoScheme::Dummy => dummy::sign(privkey, input),

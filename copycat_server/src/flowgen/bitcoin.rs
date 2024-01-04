@@ -1,29 +1,43 @@
 use super::{FlowGen, Stats};
-use copycat_protocol::crypto::{sha256, Hash};
+use copycat_protocol::crypto::{sha256, Hash, PrivKey, PubKey};
 use copycat_protocol::transaction::{BitcoinTxn, Txn};
+use copycat_protocol::CryptoScheme;
 use copycat_utils::CopycatError;
 
 use async_trait::async_trait;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
 const MAX_INFLIGHT: usize = 100000;
+const MAX_ACCOUNTS: usize = 10000;
 
 pub struct BitcoinFlowGen {
+    crypto: CryptoScheme,
+    utxos: HashMap<PubKey, VecDeque<(Hash, u64)>>,
+    accounts: Vec<(PubKey, PrivKey)>,
     in_flight: HashMap<Hash, Instant>,
-    num_accounts: u128,
     num_completed_txns: u64,
     total_committed_txns: u64,
     total_time_sec: f64,
 }
 
 impl BitcoinFlowGen {
-    pub fn new() -> Self {
+    pub fn new(crypto: CryptoScheme) -> Self {
+        let mut accounts = Vec::new();
+        let mut utxos = HashMap::new();
+        for i in 0..MAX_ACCOUNTS as u64 {
+            let (pubkey, privkey) = crypto.gen_key_pair(i);
+            utxos.insert(pubkey.clone(), VecDeque::new());
+            accounts.push((pubkey, privkey));
+        }
+
         Self {
+            crypto,
+            utxos,
+            accounts,
             in_flight: HashMap::new(),
-            num_accounts: 0,
             num_completed_txns: 0,
             total_time_sec: 0.0,
             total_committed_txns: 0,
@@ -33,8 +47,22 @@ impl BitcoinFlowGen {
 
 #[async_trait]
 impl FlowGen for BitcoinFlowGen {
-    async fn setup_txns(&self) -> Result<Vec<Arc<Txn>>, CopycatError> {
-        todo!();
+    async fn setup_txns(&mut self) -> Result<Vec<Arc<Txn>>, CopycatError> {
+        let mut txns = Vec::new();
+        for (account, utxos) in self.utxos.iter_mut() {
+            let txn = Txn::Bitcoin {
+                txn: BitcoinTxn::Grant {
+                    out_utxo: 100,
+                    receiver: *account,
+                },
+            };
+            let serialized = bincode::serialize(&txn)?;
+            let hash = sha256(&serialized)?;
+            utxos.push_back((hash, 100));
+            txns.push(Arc::new(txn));
+        }
+
+        Ok(txns)
     }
 
     async fn wait_next(&self) -> Result<(), CopycatError> {
@@ -47,19 +75,52 @@ impl FlowGen for BitcoinFlowGen {
     }
 
     async fn next_txn(&mut self) -> Result<Arc<Txn>, CopycatError> {
-        let mut receiver_key = [0u8; 32];
-        receiver_key[..16].clone_from_slice(&self.num_accounts.to_ne_bytes());
-        self.num_accounts += 1;
-        let txn = Txn::Bitcoin {
-            txn: BitcoinTxn::Grant {
-                out_utxo: 100,
-                receiver: receiver_key,
-            },
+        let (sender, remainder, recver, out_utxo, txn) = loop {
+            let sender = rand::random::<usize>() % self.accounts.len();
+            let receiver = rand::random::<usize>() % self.accounts.len();
+            if sender == receiver {
+                continue; // retry
+            }
+
+            let (sender_pk, sender_sk) = self.accounts.get(sender).unwrap();
+            let (recver_pk, _) = self.accounts.get(receiver).unwrap();
+            let sender_utxos = self.utxos.get_mut(sender_pk).unwrap();
+            if sender_utxos.is_empty() {
+                continue; // retry
+            }
+
+            let (in_utxo_raw, amount) = sender_utxos.pop_front().unwrap();
+            let in_utxo = vec![in_utxo_raw];
+            let serialized_in_utxo = bincode::serialize(&in_utxo)?;
+            let sender_signature = self.crypto.sign(sender_sk, &serialized_in_utxo)?;
+            let out_utxo = std::cmp::min(amount, 10);
+            let remainder = amount - out_utxo;
+            let txn = Arc::new(Txn::Bitcoin {
+                txn: BitcoinTxn::Send {
+                    sender: *sender_pk,
+                    in_utxo,
+                    receiver: *recver_pk,
+                    out_utxo,
+                    remainder,
+                    sender_signature,
+                },
+            });
+            break (sender_pk, remainder, recver_pk, out_utxo, txn);
         };
-        let serialized = bincode::serialize(&txn)?;
-        let hash = sha256(&serialized)?;
-        self.in_flight.insert(hash, Instant::now());
-        Ok(Arc::new(txn))
+
+        let serialized_txn = bincode::serialize(txn.as_ref())?;
+        let txn_hash = sha256(&serialized_txn)?;
+        if remainder > 0 {
+            let sender_utxos = self.utxos.get_mut(sender).unwrap();
+            sender_utxos.push_back((txn_hash.clone(), remainder));
+        }
+        if out_utxo > 0 {
+            let recver_utxos = self.utxos.get_mut(recver).unwrap();
+            recver_utxos.push_back((txn_hash.clone(), out_utxo));
+        }
+
+        self.in_flight.insert(txn_hash, Instant::now());
+        Ok(txn)
     }
 
     async fn txn_committed(&mut self, txn: Arc<Txn>) -> Result<(), CopycatError> {

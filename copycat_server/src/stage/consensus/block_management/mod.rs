@@ -42,49 +42,49 @@ pub async fn block_management_thread(
     mut pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
     new_block_send: mpsc::Sender<Vec<Arc<Block>>>,
 ) {
-    log::info!("Node {id}: block management stage starting...");
+    log::info!("block management stage starting...");
 
     let mut block_management_stage = get_blk_creation(chain_type, crypto_scheme);
 
     loop {
         // first try to construct / add-on to block to be proposed
         if let Err(e) = block_management_stage.prepare_new_block().await {
-            log::error!("Node {id}: failed to prepare new block: {e:?}");
+            log::error!("failed to prepare new block: {e:?}");
         }
 
         tokio::select! {
             new_txn = txn_ready_recv.recv() => {
                 match new_txn {
                     Some(txn) => {
-                        log::trace!("Node {id}: got new txn {txn:?}");
+                        log::trace!("got new txn {txn:?}");
                         if let Err(e) = block_management_stage.record_new_txn(txn).await {
-                            log::error!("Node {id}: failed to record new txn: {e:?}");
+                            log::error!("failed to record new txn: {e:?}");
                             continue;
                         }
                     },
                     None => {
-                        log::error!("Node {id}: txn_ready pipe closed unexpectedly");
-                        continue;
+                        log::error!("txn_ready pipe closed unexpectedly");
+                        return;
                     }
                 }
             },
 
             wait_result = block_management_stage.wait_to_propose() => {
                 if let Err(e) = wait_result {
-                    log::error!("Node {id}: wait to propose failed: {e:?}");
+                    log::error!("wait to propose failed: {e:?}");
                     continue;
                 }
 
                 match block_management_stage.get_new_block().await {
                     Ok(block) => {
-                        log::debug!("Node {id}: proposing new block {block:?}");
+                        log::debug!("proposing new block {block:?}");
                         if let Err(e) = new_block_send.send(vec![block]).await {
-                            log::error!("Node {id}: failed to send to new_block pipe: {e:?}");
+                            log::error!("failed to send to new_block pipe: {e:?}");
                             continue;
                         }
                     },
                     Err(e) => {
-                        log::error!("Node {id}: error creating new block: {e:?}");
+                        log::error!("error creating new block: {e:?}");
                         continue;
                     }
                 }
@@ -100,24 +100,24 @@ pub async fn block_management_thread(
                         (src, blk)
                     }
                     None => {
-                        log::error!("Node {id}: peer_blk pipe closed unexpectedly");
-                        continue;
+                        log::error!("peer_blk pipe closed unexpectedly");
+                        return;
                     }
                 };
 
-                log::debug!("Node {id}: got from {src} new block {new_block:?}");
+                log::debug!("got from {src} new block {new_block:?}");
 
                 match block_management_stage.validate_block(new_block.clone()).await {
                     Ok(new_tail) => {
                         if !new_tail.is_empty() {
                             if let Err(e) = new_block_send.send(new_tail).await {
-                                log::error!("Node {id}: failed to send to block_ready pipe: {e:?}");
+                                log::error!("failed to send to block_ready pipe: {e:?}");
                                 continue;
                             }
                         }
                     }
                     Err(e) => {
-                        log::error!("Node {id}: failed to validate block: {e:?}");
+                        log::error!("failed to validate block: {e:?}");
                         continue;
                     }
                 }
@@ -127,13 +127,13 @@ pub async fn block_management_thread(
                 match pmaker_msg {
                     Some(msg) => {
                         if let Err(e) = block_management_stage.handle_pmaker_msg(msg).await {
-                            log::error!("Node {id}: failed to handle pacemaker message: {e:?}");
+                            log::error!("failed to handle pacemaker message: {e:?}");
                             continue;
                         }
                     },
                     None => {
-                        log::error!("Node {id}: pacemaker pipe closed unexpectedly");
-                        continue;
+                        log::error!("pacemaker pipe closed unexpectedly");
+                        return;
                     }
                 }
 

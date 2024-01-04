@@ -32,52 +32,51 @@ fn get_decision(
 }
 
 pub async fn decision_thread(
-    id: NodeId,
     chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger>,
     peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
     mut block_ready_recv: mpsc::Receiver<Vec<Arc<Block>>>,
     commit_send: mpsc::Sender<Arc<Block>>,
 ) {
-    log::info!("Node {id}: decision stage starting...");
+    log::info!("decision stage starting...");
 
     let mut decision_stage = get_decision(chain_type, peer_messenger, peer_consensus_recv);
 
     loop {
         tokio::select! {
             new_tail = block_ready_recv.recv() => {
-                log::debug!("Node {id}: got new chain tail: {new_tail:?}");
+                log::debug!("got new chain tail: {new_tail:?}");
                 let new_tail = match new_tail {
                     Some(tail) => tail,
                     None => {
-                        log::error!("Node {id}: block_ready pipe closed unexpectedly");
-                        continue;
+                        log::error!("block_ready pipe closed unexpectedly");
+                        return;
                     }
                 };
 
                 if let Err(e) = decision_stage.new_tail(new_tail).await {
-                    log::error!("Node {id}: failed to record new chain tail: {e:?}");
+                    log::error!("failed to record new chain tail: {e:?}");
                     continue;
                 }
             },
             commit_ready = decision_stage.commit_ready() => {
                 if let Err(e) = commit_ready {
-                    log::error!("Node {id}: waiting for commit ready block failed: {e:?}");
+                    log::error!("waiting for commit ready block failed: {e:?}");
                     continue;
                 }
 
                 let block_to_commit = match decision_stage.next_to_commit().await {
                     Ok(blk) => blk,
                     Err(e) => {
-                        log::error!("Node {id}: getting commit ready block failed: {e:?}");
+                        log::error!("getting commit ready block failed: {e:?}");
                         continue;
                     }
                 };
 
-                log::debug!("Node {id}: committing new block {block_to_commit:?}");
+                log::debug!("committing new block {block_to_commit:?}");
 
                 if let Err(e) = commit_send.send(block_to_commit).await {
-                                    log::error!("Node {id}: failed to send to commit pipe: {e:?}");
+                                    log::error!("failed to send to commit pipe: {e:?}");
                                     continue;
                                 }
 
