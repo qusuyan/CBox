@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use copycat_protocol::crypto::{sha256, Hash, PrivKey, PubKey};
 use copycat_protocol::transaction::{BitcoinTxn, Txn};
 use copycat_protocol::CryptoScheme;
-use copycat_utils::CopycatError;
+use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
@@ -10,10 +10,8 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
-const MAX_INFLIGHT: usize = 100000;
-const MAX_ACCOUNTS: usize = 10000;
-
 pub struct BitcoinFlowGen {
+    max_inflight: usize,
     crypto: CryptoScheme,
     utxos: HashMap<PubKey, VecDeque<(Hash, u64)>>,
     accounts: Vec<(PubKey, PrivKey)>,
@@ -24,16 +22,18 @@ pub struct BitcoinFlowGen {
 }
 
 impl BitcoinFlowGen {
-    pub fn new(crypto: CryptoScheme) -> Self {
+    pub fn new(id: NodeId, num_accounts: usize, max_inflight: usize, crypto: CryptoScheme) -> Self {
         let mut accounts = Vec::new();
         let mut utxos = HashMap::new();
-        for i in 0..MAX_ACCOUNTS as u64 {
-            let (pubkey, privkey) = crypto.gen_key_pair(i);
+        for i in 0..num_accounts as u64 {
+            let seed = ((id as u128) << 64) | i as u128;
+            let (pubkey, privkey) = crypto.gen_key_pair(seed);
             utxos.insert(pubkey.clone(), VecDeque::new());
             accounts.push((pubkey, privkey));
         }
 
         Self {
+            max_inflight,
             crypto,
             utxos,
             accounts,
@@ -67,7 +67,7 @@ impl FlowGen for BitcoinFlowGen {
 
     async fn wait_next(&self) -> Result<(), CopycatError> {
         loop {
-            if self.in_flight.len() < MAX_INFLIGHT {
+            if self.in_flight.len() < self.max_inflight {
                 return Ok(());
             }
             tokio::task::yield_now().await;

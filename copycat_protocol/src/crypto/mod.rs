@@ -18,7 +18,7 @@ pub enum CryptoScheme {
 }
 
 impl CryptoScheme {
-    pub fn gen_key_pair(&self, seed: u64) -> (PubKey, PrivKey) {
+    pub fn gen_key_pair(&self, seed: u128) -> (PubKey, PrivKey) {
         match self {
             CryptoScheme::Dummy => dummy::gen_key_pair(seed),
         }

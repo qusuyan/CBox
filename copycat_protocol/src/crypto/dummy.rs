@@ -1,9 +1,9 @@
 use super::{PrivKey, PubKey, Signature};
 use copycat_utils::CopycatError;
 
-pub fn gen_key_pair(seed: u64) -> (PubKey, PrivKey) {
+pub fn gen_key_pair(seed: u128) -> (PubKey, PrivKey) {
     let mut pubkey = [0u8; 32];
-    pubkey[..8].clone_from_slice(&seed.to_le_bytes());
+    pubkey[..16].clone_from_slice(&seed.to_le_bytes());
     let privkey = pubkey.clone();
     (pubkey, privkey)
 }

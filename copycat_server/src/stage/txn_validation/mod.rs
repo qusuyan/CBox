@@ -33,7 +33,7 @@ pub async fn txn_validation_thread(
     chain_type: ChainType,
     crypto_scheme: CryptoScheme,
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
-    mut peer_txn_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Txn>)>,
+    mut peer_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
     validated_txn_send: mpsc::Sender<Arc<Txn>>,
 ) {
     log::info!("txn validation stage starting...");

@@ -39,6 +39,14 @@ struct CliArgs {
     /// Cryptography scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
     crypto: CryptoScheme,
+
+    /// Number of user accounts for flow generation
+    #[arg(long, short = 'a', default_value = "10000")]
+    accounts: usize,
+
+    /// Maximum number of inflight transaction requests
+    #[arg(long, short = 'f', default_value = "100000")]
+    max_inflight: usize,
 }
 
 impl CliArgs {
@@ -81,7 +89,13 @@ pub fn main() {
                 }
             };
 
-        let mut flow_gen = get_flow_gen(args.chain, args.crypto);
+        let mut flow_gen = get_flow_gen(
+            id,
+            args.accounts,
+            args.max_inflight,
+            args.chain,
+            args.crypto,
+        );
         let init_txns = flow_gen.setup_txns().await.unwrap();
         for txn in init_txns {
             if let Err(e) = node.send_req(txn).await {
@@ -90,6 +104,11 @@ pub fn main() {
             }
         }
         log::info!("setup txns sent");
+        // wait when setup txns are propogated over the network
+        let notify = tokio::sync::Notify::new();
+        notify.notified().await;
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        log::info!("flow generation starts");
 
         let start_time = Instant::now();
         let mut report_time = start_time + Duration::from_secs(60);

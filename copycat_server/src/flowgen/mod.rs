@@ -5,7 +5,7 @@ pub use bitcoin::BitcoinFlowGen;
 
 use async_trait::async_trait;
 use copycat_protocol::{transaction::Txn, ChainType, CryptoScheme};
-use copycat_utils::CopycatError;
+use copycat_utils::{CopycatError, NodeId};
 
 use std::sync::Arc;
 
@@ -23,9 +23,15 @@ pub trait FlowGen {
     fn get_stats(&self) -> Stats;
 }
 
-pub fn get_flow_gen(chain: ChainType, crypto: CryptoScheme) -> Box<dyn FlowGen> {
+pub fn get_flow_gen(
+    id: NodeId,
+    num_accounts: usize,
+    max_inflight: usize,
+    chain: ChainType,
+    crypto: CryptoScheme,
+) -> Box<dyn FlowGen> {
     match chain {
-        ChainType::Bitcoin => Box::new(BitcoinFlowGen::new(crypto)),
+        ChainType::Bitcoin => Box::new(BitcoinFlowGen::new(id, num_accounts, max_inflight, crypto)),
         _ => todo!(),
     }
 }

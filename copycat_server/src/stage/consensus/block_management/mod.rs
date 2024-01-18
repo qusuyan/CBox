@@ -37,7 +37,7 @@ pub async fn block_management_thread(
     id: NodeId,
     chain_type: ChainType,
     crypto_scheme: CryptoScheme,
-    mut peer_blk_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Block>)>,
+    mut peer_blk_recv: mpsc::Receiver<(NodeId, Arc<Block>)>,
     mut txn_ready_recv: mpsc::Receiver<Arc<Txn>>,
     mut pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
     new_block_send: mpsc::Sender<Vec<Arc<Block>>>,

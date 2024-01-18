@@ -1,3 +1,7 @@
 /target
 *.json
 log*
+
+# perf data
+*.data
+*.svg

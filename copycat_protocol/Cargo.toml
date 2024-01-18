@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.4.2", features = ["derive"] }
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 get-size = { version = "0.1.4", features = ["derive"]}
 copycat_utils = { path = "../copycat_utils" }
 ring = "0.17.5"

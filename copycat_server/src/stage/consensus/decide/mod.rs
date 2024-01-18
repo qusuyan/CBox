@@ -23,7 +23,7 @@ pub trait Decision: Sync + Send {
 fn get_decision(
     chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger>,
-    peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
+    peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
 ) -> Box<dyn Decision> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyDecision::new()),
@@ -34,7 +34,7 @@ fn get_decision(
 pub async fn decision_thread(
     chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger>,
-    peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
+    peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
     mut block_ready_recv: mpsc::Receiver<Vec<Arc<Block>>>,
     commit_send: mpsc::Sender<Arc<Block>>,
 ) {

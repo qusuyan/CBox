@@ -18,7 +18,7 @@ pub trait Pacemaker: Sync + Send {
 fn get_pacemaker(
     chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger>,
-    mut peer_pmaker_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
+    mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
 ) -> Box<dyn Pacemaker> {
     match chain_type {
         ChainType::Dummy => Box::new(DummyPacemaker {}),
@@ -29,7 +29,7 @@ fn get_pacemaker(
 pub async fn pacemaker_thread(
     chain_type: ChainType,
     peer_messenger: Arc<PeerMessenger>,
-    peer_pmaker_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
+    peer_pmaker_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
     should_propose_send: mpsc::Sender<Arc<Vec<u8>>>,
 ) {
     log::info!("pacemaker starting...");
