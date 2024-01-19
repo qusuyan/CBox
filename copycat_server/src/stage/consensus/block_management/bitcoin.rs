@@ -437,8 +437,6 @@ impl BlockManagement for BitcoinBlockManagement {
         // reverse the new tail so that it goes in order
         new_chain.reverse();
 
-        log::debug!("found new chain {new_chain:?}");
-
         // apply transactions of the new chain and check if this chain is valid
         let mut new_utxos = undo_utxo_spent;
         let mut utxos_spent = undo_new_utxo;
@@ -449,10 +447,7 @@ impl BlockManagement for BitcoinBlockManagement {
                 _ => unreachable!(),
             };
             // hash verification
-            tokio::time::sleep(Duration::from_secs_f64(
-                HASH_TIME_PER_1MB * new_block.get_size() as f64 / 0x100000 as f64,
-            ))
-            .await;
+            tokio::time::sleep(Duration::from_secs_f64(HASH_TIME_PER_1MB)).await;
             if nonce != 1 {
                 return Ok(vec![]); // invalid POW
             }
@@ -485,7 +480,6 @@ impl BlockManagement for BitcoinBlockManagement {
                         }
                     }
                     if !self.validate_txn(bitcoin_txn)? {
-                        log::debug!("invalid txn");
                         return Ok(vec![]);
                     }
                     self.txn_pool.insert(txn_hash.clone(), txn.clone());
@@ -501,15 +495,28 @@ impl BlockManagement for BitcoinBlockManagement {
                         if self.utxo.contains(&utxo) && !utxos_spent.contains(&utxo) {
                             // good case, using existing utxo that has not been spent
                             utxos_spent.insert(utxo);
+                        } else if new_utxos.contains(&utxo) {
+                            // good case, using new utxos created but not committed yet
+                            new_utxos.remove(&utxo);
                         } else {
-                            if new_utxos.contains(&utxo) {
-                                // good case, using new utxos created but not committed yet
-                                new_utxos.remove(&utxo);
-                            } else {
-                                log::debug!("double spending");
-                                return Ok(vec![]);
-                            }
+                            // log::debug!("double spending - in utxo ({}): {}, in utxo_spent ({}): {}, in new_utxos ({}): {}", self.utxo.len(), self.utxo.contains(&utxo), utxos_spent.len(), utxos_spent.contains(&utxo), new_utxos.len(), new_utxos.contains(&utxo));
+                            return Ok(vec![]);
                         }
+                    }
+                }
+
+                match bitcoin_txn {
+                    BitcoinTxn::Send {
+                        sender, receiver, ..
+                    } => {
+                        new_utxos.insert((txn_hash.clone(), sender.clone()));
+                        new_utxos.insert((txn_hash.clone(), receiver.clone()));
+                    }
+                    BitcoinTxn::Grant { receiver, .. } => {
+                        new_utxos.insert((txn_hash.clone(), receiver.clone()));
+                    }
+                    BitcoinTxn::Incentive { receiver, .. } => {
+                        new_utxos.insert((txn_hash.clone(), receiver.clone()));
                     }
                 }
 
