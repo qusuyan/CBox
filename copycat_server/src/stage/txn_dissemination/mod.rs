@@ -4,7 +4,7 @@ use broadcast::BroadcastTxnDissemination;
 use crate::peers::PeerMessenger;
 use copycat_protocol::transaction::Txn;
 use copycat_protocol::DissemPattern;
-use copycat_utils::CopycatError;
+use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
@@ -13,31 +13,33 @@ use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait TxnDissemination: Send + Sync {
-    async fn disseminate(&self, txn: &Txn) -> Result<(), CopycatError>;
+    async fn disseminate(&self, src: NodeId, txn: &Txn) -> Result<(), CopycatError>;
 }
 
 fn get_txn_dissemination(
+    id: NodeId,
     dissem_pattern: DissemPattern,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn TxnDissemination> {
     match dissem_pattern {
-        DissemPattern::Broadcast => Box::new(BroadcastTxnDissemination::new(peer_messenger)),
+        DissemPattern::Broadcast => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)),
         _ => todo!(),
     }
 }
 
 pub async fn txn_dissemination_thread(
+    id: NodeId,
     dissem_pattern: DissemPattern,
     peer_messenger: Arc<PeerMessenger>,
-    mut validated_txn_recv: mpsc::Receiver<Arc<Txn>>,
+    mut validated_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
     txn_ready_send: mpsc::Sender<Arc<Txn>>,
 ) {
     log::info!("txn dissemination stage starting...");
 
-    let txn_dissemination_stage = get_txn_dissemination(dissem_pattern, peer_messenger);
+    let txn_dissemination_stage = get_txn_dissemination(id, dissem_pattern, peer_messenger);
 
     loop {
-        let txn = match validated_txn_recv.recv().await {
+        let (src, txn) = match validated_txn_recv.recv().await {
             Some(txn) => txn,
             None => {
                 log::error!("validated_txn pipe closed unexpectedly");
@@ -45,9 +47,9 @@ pub async fn txn_dissemination_thread(
             }
         };
 
-        log::trace!("got new txn {txn:?}");
+        log::trace!("got from {src} new txn {txn:?}");
 
-        if let Err(e) = txn_dissemination_stage.disseminate(&txn).await {
+        if let Err(e) = txn_dissemination_stage.disseminate(src, &txn).await {
             log::error!("failed to disseminate txn: {e:?}");
             continue;
         }

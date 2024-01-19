@@ -34,7 +34,7 @@ pub async fn txn_validation_thread(
     crypto_scheme: CryptoScheme,
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
-    validated_txn_send: mpsc::Sender<Arc<Txn>>,
+    validated_txn_send: mpsc::Sender<(NodeId, Arc<Txn>)>,
 ) {
     log::info!("txn validation stage starting...");
 
@@ -73,18 +73,15 @@ pub async fn txn_validation_thread(
         match txn_validation_stage.validate(txn.clone()).await {
             Ok(valid) => {
                 if !valid {
-                    log::warn!("got invalid txn, ignoring...");
-                    return;
+                    log::warn!("got invalid txn {txn:?}, ignoring...");
                 }
 
-                if let Err(e) = validated_txn_send.send(txn).await {
+                if let Err(e) = validated_txn_send.send((src, txn)).await {
                     log::error!("failed to send to validated_txn pipe: {e:?}");
-                    return;
                 }
             }
             Err(e) => {
                 log::error!("error validating txn: {e:?}");
-                return;
             }
         }
     }

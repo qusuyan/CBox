@@ -65,6 +65,7 @@ impl Node {
         ));
 
         let _txn_dissemination_handle = tokio::spawn(txn_dissemination_thread(
+            id,
             dissem_pattern,
             peer_messenger.clone(),
             validated_txn_recv,
@@ -89,6 +90,7 @@ impl Node {
         ));
 
         let _block_dissemination_handle = tokio::spawn(block_dissemination_thread(
+            id,
             dissem_pattern,
             peer_messenger.clone(),
             new_block_recv,

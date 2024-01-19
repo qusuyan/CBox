@@ -40,7 +40,7 @@ pub async fn block_management_thread(
     mut peer_blk_recv: mpsc::Receiver<(NodeId, Arc<Block>)>,
     mut txn_ready_recv: mpsc::Receiver<Arc<Txn>>,
     mut pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
-    new_block_send: mpsc::Sender<Vec<Arc<Block>>>,
+    new_block_send: mpsc::Sender<(NodeId, Vec<Arc<Block>>)>,
 ) {
     log::info!("block management stage starting...");
 
@@ -78,7 +78,7 @@ pub async fn block_management_thread(
                 match block_management_stage.get_new_block().await {
                     Ok(block) => {
                         log::debug!("proposing new block {block:?}");
-                        if let Err(e) = new_block_send.send(vec![block]).await {
+                        if let Err(e) = new_block_send.send((id, vec![block])).await {
                             log::error!("failed to send to new_block pipe: {e:?}");
                             continue;
                         }
@@ -110,7 +110,7 @@ pub async fn block_management_thread(
                 match block_management_stage.validate_block(new_block.clone()).await {
                     Ok(new_tail) => {
                         if !new_tail.is_empty() {
-                            if let Err(e) = new_block_send.send(new_tail).await {
+                            if let Err(e) = new_block_send.send((src, new_tail)).await {
                                 log::error!("failed to send to block_ready pipe: {e:?}");
                                 continue;
                             }

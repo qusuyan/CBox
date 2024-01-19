@@ -72,10 +72,13 @@ pub fn main() {
         })
         .init();
 
+    // if id == 0 {
+    //     console_subscriber::init();
+    // }
     let runtime = Builder::new_multi_thread()
         .enable_all()
         .worker_threads(args.num_threads)
-        .thread_name("tokio-worker-replica")
+        .thread_name("copycat-server-thread")
         .build()
         .expect("Creating new runtime failed");
 
@@ -105,8 +108,6 @@ pub fn main() {
         }
         log::info!("setup txns sent");
         // wait when setup txns are propogated over the network
-        let notify = tokio::sync::Notify::new();
-        notify.notified().await;
         tokio::time::sleep(Duration::from_secs(30)).await;
         log::info!("flow generation starts");
 

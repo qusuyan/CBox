@@ -74,7 +74,7 @@ fn main() {
     let runtime = Builder::new_multi_thread()
         .enable_all()
         .worker_threads(num_threads as usize)
-        .thread_name("tokio-worker-replica")
+        .thread_name("copycat-mailbox-thread")
         .build()
         .expect("Creating new runtime failed");
 

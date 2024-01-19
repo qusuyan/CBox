@@ -347,6 +347,7 @@ impl BlockManagement for BitcoinBlockManagement {
         // the new block is the tail of a shorter chain, do nothing
         let chain_length = self.get_chain_length();
         if height <= chain_length {
+            log::debug!("new chain is shorter: new chain {height} vs old chain {chain_length}");
             return Ok(vec![]);
         }
 
@@ -436,6 +437,8 @@ impl BlockManagement for BitcoinBlockManagement {
         // reverse the new tail so that it goes in order
         new_chain.reverse();
 
+        log::debug!("found new chain {new_chain:?}");
+
         // apply transactions of the new chain and check if this chain is valid
         let mut new_utxos = undo_utxo_spent;
         let mut utxos_spent = undo_new_utxo;
@@ -482,6 +485,7 @@ impl BlockManagement for BitcoinBlockManagement {
                         }
                     }
                     if !self.validate_txn(bitcoin_txn)? {
+                        log::debug!("invalid txn");
                         return Ok(vec![]);
                     }
                     self.txn_pool.insert(txn_hash.clone(), txn.clone());
@@ -502,6 +506,7 @@ impl BlockManagement for BitcoinBlockManagement {
                                 // good case, using new utxos created but not committed yet
                                 new_utxos.remove(&utxo);
                             } else {
+                                log::debug!("double spending");
                                 return Ok(vec![]);
                             }
                         }
