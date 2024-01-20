@@ -1,4 +1,5 @@
 mod composition;
+mod config;
 mod flowgen;
 mod node;
 mod peers;
@@ -7,6 +8,7 @@ mod stage;
 use copycat_protocol::{ChainType, CryptoScheme, DissemPattern};
 use copycat_utils::log::colored_level;
 
+use config::Config;
 use flowgen::get_flow_gen;
 use node::Node;
 
@@ -47,6 +49,10 @@ struct CliArgs {
     /// Maximum number of inflight transaction requests
     #[arg(long, short = 'f', default_value = "100000")]
     max_inflight: usize,
+
+    /// Blockchain specific configuration string in TOML format
+    #[arg(long, default_value_t = String::from(""))]
+    config: String,
 }
 
 impl CliArgs {
@@ -82,9 +88,21 @@ pub fn main() {
         .build()
         .expect("Creating new runtime failed");
 
+    let config = if args.config.is_empty() {
+        Config::from_str(args.chain, None).unwrap()
+    } else {
+        match Config::from_str(args.chain, Some(&args.config)) {
+            Ok(config) => config,
+            Err(e) => {
+                log::warn!("Invalid config string ({e:?}), fall back to default");
+                Config::from_str(args.chain, None).unwrap()
+            }
+        }
+    };
+
     runtime.block_on(async {
         let (node, mut executed): (Node, _) =
-            match Node::init(id, args.chain, args.dissem_pattern, args.crypto).await {
+            match Node::init(id, args.chain, args.dissem_pattern, args.crypto, config).await {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("failed to start node: {e:?}");

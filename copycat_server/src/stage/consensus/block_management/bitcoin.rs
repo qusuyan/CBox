@@ -1,3 +1,5 @@
+use crate::config::BitcoinConfig;
+
 use super::BlockManagement;
 use copycat_protocol::block::{Block, BlockHeader};
 use copycat_protocol::crypto::{sha256, Hash, PubKey};
@@ -15,8 +17,8 @@ use tokio::time::{Duration, Instant};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-// sha256 in rust takes ~ 0.045s / 1MB
-const HASH_TIME_PER_1MB: f64 = 0.045;
+// sha256 in rust takes ~ 1.9 us for a 80 byte block header
+const HEADER_HASH_TIME: f64 = 0.0000019;
 
 pub struct BitcoinBlockManagement {
     crypto_scheme: CryptoScheme,
@@ -36,14 +38,14 @@ pub struct BitcoinBlockManagement {
 }
 
 impl BitcoinBlockManagement {
-    pub fn new(crypto_scheme: CryptoScheme) -> Self {
+    pub fn new(crypto_scheme: CryptoScheme, config: BitcoinConfig) -> Self {
         Self {
             crypto_scheme,
             txn_pool: HashMap::new(),
             block_pool: HashMap::new(),
             utxo: HashSet::new(),
             chain_tail: U256::zero(),
-            difficulty: 10,
+            difficulty: config.difficulty,
             pending_txns: VecDeque::new(),
             block_under_construction: vec![],
             block_size: 0,
@@ -71,16 +73,8 @@ impl BitcoinBlockManagement {
         // the code here simulates a timeout with geometric distribution
         let p = 1f64 - 2f64.powf(-(self.difficulty as f64));
         let u = rand::thread_rng().gen::<f64>();
-        let mut cdf = 1f64;
-        let mut curr = 0u64;
-        let x = loop {
-            cdf *= p;
-            curr += 1;
-            if cdf < u {
-                break curr;
-            }
-        };
-        let pow_time = Duration::from_secs_f64(HASH_TIME_PER_1MB * (x as f64));
+        let x = u.log(p);
+        let pow_time = Duration::from_secs_f64(HEADER_HASH_TIME * x);
         log::trace!(
             "POW takes {} sec; p: {p}, u: {u}, x: {x}, block size: {}, block len: {}",
             pow_time.as_secs_f64(),
@@ -447,7 +441,7 @@ impl BlockManagement for BitcoinBlockManagement {
                 _ => unreachable!(),
             };
             // hash verification
-            tokio::time::sleep(Duration::from_secs_f64(HASH_TIME_PER_1MB)).await;
+            tokio::time::sleep(Duration::from_secs_f64(HEADER_HASH_TIME)).await;
             if nonce != 1 {
                 return Ok(vec![]); // invalid POW
             }

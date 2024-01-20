@@ -5,7 +5,7 @@ mod bitcoin;
 use bitcoin::BitcoinTxnValidation;
 
 use copycat_protocol::transaction::Txn;
-use copycat_protocol::{ChainType, CryptoScheme};
+use copycat_protocol::CryptoScheme;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -13,24 +13,23 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+use crate::config::Config;
+
 #[async_trait]
 pub trait TxnValidation: Send + Sync {
     async fn validate(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError>;
 }
 
-fn get_txn_validation(
-    chain_type: ChainType,
-    crypto_scheme: CryptoScheme,
-) -> Box<dyn TxnValidation> {
-    match chain_type {
-        ChainType::Dummy => Box::new(DummyTxnValidation::new()),
-        ChainType::Bitcoin => Box::new(BitcoinTxnValidation::new(crypto_scheme)),
+fn get_txn_validation(config: Config, crypto_scheme: CryptoScheme) -> Box<dyn TxnValidation> {
+    match config {
+        Config::Dummy => Box::new(DummyTxnValidation::new()),
+        Config::Bitcoin { .. } => Box::new(BitcoinTxnValidation::new(crypto_scheme)),
     }
 }
 
 pub async fn txn_validation_thread(
     id: NodeId,
-    chain_type: ChainType,
+    config: Config,
     crypto_scheme: CryptoScheme,
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
@@ -38,7 +37,7 @@ pub async fn txn_validation_thread(
 ) {
     log::info!("txn validation stage starting...");
 
-    let mut txn_validation_stage = get_txn_validation(chain_type, crypto_scheme);
+    let mut txn_validation_stage = get_txn_validation(config, crypto_scheme);
 
     loop {
         let (src, txn) = tokio::select! {

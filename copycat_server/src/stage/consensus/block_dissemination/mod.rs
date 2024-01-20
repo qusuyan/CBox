@@ -1,7 +1,7 @@
 mod broadcast;
 use broadcast::BroadcastBlockDissemination;
 
-use crate::peers::PeerMessenger;
+use crate::{config::Config, peers::PeerMessenger};
 use copycat_protocol::block::Block;
 use copycat_protocol::DissemPattern;
 use copycat_utils::{CopycatError, NodeId};
@@ -19,6 +19,7 @@ pub trait BlockDissemination: Sync + Send {
 fn get_block_dissemination(
     id: NodeId,
     dissem_pattern: DissemPattern,
+    _config: Config,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockDissemination> {
     match dissem_pattern {
@@ -30,13 +31,15 @@ fn get_block_dissemination(
 pub async fn block_dissemination_thread(
     id: NodeId,
     dissem_pattern: DissemPattern,
+    config: Config,
     peer_messenger: Arc<PeerMessenger>,
     mut new_block_recv: mpsc::Receiver<(NodeId, Vec<Arc<Block>>)>,
     block_ready_send: mpsc::Sender<Vec<Arc<Block>>>,
 ) {
     log::info!("block dissemination stage starting...");
 
-    let block_dissemination_stage = get_block_dissemination(id, dissem_pattern, peer_messenger);
+    let block_dissemination_stage =
+        get_block_dissemination(id, dissem_pattern, config, peer_messenger);
 
     loop {
         let (src, new_tail) = match new_block_recv.recv().await {

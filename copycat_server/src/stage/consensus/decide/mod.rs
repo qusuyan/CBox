@@ -3,9 +3,8 @@ use dummy::DummyDecision;
 mod bitcoin;
 use bitcoin::BitcoinDecision;
 
-use crate::peers::PeerMessenger;
+use crate::{config::Config, peers::PeerMessenger};
 use copycat_protocol::block::Block;
-use copycat_protocol::ChainType;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -21,18 +20,18 @@ pub trait Decision: Sync + Send {
 }
 
 fn get_decision(
-    chain_type: ChainType,
+    config: Config,
     peer_messenger: Arc<PeerMessenger>,
     peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
 ) -> Box<dyn Decision> {
-    match chain_type {
-        ChainType::Dummy => Box::new(DummyDecision::new()),
-        ChainType::Bitcoin => Box::new(BitcoinDecision::new()),
+    match config {
+        Config::Dummy => Box::new(DummyDecision::new()),
+        Config::Bitcoin { .. } => Box::new(BitcoinDecision::new()),
     }
 }
 
 pub async fn decision_thread(
-    chain_type: ChainType,
+    config: Config,
     peer_messenger: Arc<PeerMessenger>,
     peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
     mut block_ready_recv: mpsc::Receiver<Vec<Arc<Block>>>,
@@ -40,7 +39,7 @@ pub async fn decision_thread(
 ) {
     log::info!("decision stage starting...");
 
-    let mut decision_stage = get_decision(chain_type, peer_messenger, peer_consensus_recv);
+    let mut decision_stage = get_decision(config, peer_messenger, peer_consensus_recv);
 
     loop {
         tokio::select! {

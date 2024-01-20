@@ -1,8 +1,7 @@
 mod dummy;
 use dummy::DummyPacemaker;
 
-use crate::peers::PeerMessenger;
-use copycat_protocol::ChainType;
+use crate::{config::Config, peers::PeerMessenger};
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -16,25 +15,25 @@ pub trait Pacemaker: Sync + Send {
 }
 
 fn get_pacemaker(
-    chain_type: ChainType,
+    config: Config,
     peer_messenger: Arc<PeerMessenger>,
     mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
 ) -> Box<dyn Pacemaker> {
-    match chain_type {
-        ChainType::Dummy => Box::new(DummyPacemaker {}),
-        ChainType::Bitcoin => Box::new(DummyPacemaker {}), // TODO
+    match config {
+        Config::Dummy => Box::new(DummyPacemaker {}),
+        Config::Bitcoin { .. } => Box::new(DummyPacemaker {}), // TODO
     }
 }
 
 pub async fn pacemaker_thread(
-    chain_type: ChainType,
+    config: Config,
     peer_messenger: Arc<PeerMessenger>,
     peer_pmaker_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
     should_propose_send: mpsc::Sender<Arc<Vec<u8>>>,
 ) {
     log::info!("pacemaker starting...");
 
-    let pmaker = get_pacemaker(chain_type, peer_messenger, peer_pmaker_recv);
+    let pmaker = get_pacemaker(config, peer_messenger, peer_pmaker_recv);
 
     loop {
         let propose_msg = match pmaker.wait_to_propose().await {

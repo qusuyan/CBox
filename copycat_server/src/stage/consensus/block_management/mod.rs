@@ -4,7 +4,6 @@ mod bitcoin;
 use bitcoin::BitcoinBlockManagement;
 
 use copycat_protocol::transaction::Txn;
-use copycat_protocol::ChainType;
 use copycat_protocol::{block::Block, CryptoScheme};
 use copycat_utils::{CopycatError, NodeId};
 
@@ -12,6 +11,8 @@ use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
+
+use crate::config::Config;
 
 #[async_trait]
 pub trait BlockManagement: Sync + Send {
@@ -23,19 +24,16 @@ pub trait BlockManagement: Sync + Send {
     async fn handle_pmaker_msg(&mut self, msg: Arc<Vec<u8>>) -> Result<(), CopycatError>;
 }
 
-fn get_blk_creation(
-    chain_type: ChainType,
-    crypto_scheme: CryptoScheme,
-) -> Box<dyn BlockManagement> {
-    match chain_type {
-        ChainType::Dummy => Box::new(DummyBlockManagement::new()),
-        ChainType::Bitcoin => Box::new(BitcoinBlockManagement::new(crypto_scheme)),
+fn get_blk_creation(config: Config, crypto_scheme: CryptoScheme) -> Box<dyn BlockManagement> {
+    match config {
+        Config::Dummy => Box::new(DummyBlockManagement::new()),
+        Config::Bitcoin { config } => Box::new(BitcoinBlockManagement::new(crypto_scheme, config)),
     }
 }
 
 pub async fn block_management_thread(
     id: NodeId,
-    chain_type: ChainType,
+    config: Config,
     crypto_scheme: CryptoScheme,
     mut peer_blk_recv: mpsc::Receiver<(NodeId, Arc<Block>)>,
     mut txn_ready_recv: mpsc::Receiver<Arc<Txn>>,
@@ -44,7 +42,7 @@ pub async fn block_management_thread(
 ) {
     log::info!("block management stage starting...");
 
-    let mut block_management_stage = get_blk_creation(chain_type, crypto_scheme);
+    let mut block_management_stage = get_blk_creation(config, crypto_scheme);
 
     loop {
         // first try to construct / add-on to block to be proposed

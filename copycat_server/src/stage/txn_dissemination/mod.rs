@@ -1,7 +1,7 @@
 mod broadcast;
 use broadcast::BroadcastTxnDissemination;
 
-use crate::peers::PeerMessenger;
+use crate::{config::Config, peers::PeerMessenger};
 use copycat_protocol::transaction::Txn;
 use copycat_protocol::DissemPattern;
 use copycat_utils::{CopycatError, NodeId};
@@ -19,6 +19,7 @@ pub trait TxnDissemination: Send + Sync {
 fn get_txn_dissemination(
     id: NodeId,
     dissem_pattern: DissemPattern,
+    _config: Config,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn TxnDissemination> {
     match dissem_pattern {
@@ -30,13 +31,14 @@ fn get_txn_dissemination(
 pub async fn txn_dissemination_thread(
     id: NodeId,
     dissem_pattern: DissemPattern,
+    config: Config,
     peer_messenger: Arc<PeerMessenger>,
     mut validated_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
     txn_ready_send: mpsc::Sender<Arc<Txn>>,
 ) {
     log::info!("txn dissemination stage starting...");
 
-    let txn_dissemination_stage = get_txn_dissemination(id, dissem_pattern, peer_messenger);
+    let txn_dissemination_stage = get_txn_dissemination(id, dissem_pattern, config, peer_messenger);
 
     loop {
         let (src, txn) = match validated_txn_recv.recv().await {

@@ -6,6 +6,7 @@ use copycat_utils::{CopycatError, NodeId};
 
 use tokio::{sync::mpsc, task::JoinHandle};
 
+use crate::config::Config;
 use crate::peers::PeerMessenger;
 use crate::stage::commit::commit_thread;
 use crate::stage::consensus::block_dissemination::block_dissemination_thread;
@@ -36,6 +37,7 @@ impl Node {
         chain_type: ChainType,
         dissem_pattern: DissemPattern,
         crypto_scheme: CryptoScheme,
+        config: Config,
     ) -> Result<(Self, mpsc::Receiver<Arc<Txn>>), CopycatError> {
         log::trace!("starting: {chain_type:?}");
 
@@ -57,7 +59,7 @@ impl Node {
 
         let _txn_validation_handle = tokio::spawn(txn_validation_thread(
             id,
-            chain_type,
+            config.clone(),
             crypto_scheme,
             req_recv,
             peer_txn_recv,
@@ -67,13 +69,14 @@ impl Node {
         let _txn_dissemination_handle = tokio::spawn(txn_dissemination_thread(
             id,
             dissem_pattern,
+            config.clone(),
             peer_messenger.clone(),
             validated_txn_recv,
             txn_ready_send,
         ));
 
         let _pacemaker_handle = tokio::spawn(pacemaker_thread(
-            chain_type,
+            config.clone(),
             peer_messenger.clone(),
             peer_pmaker_recv,
             pacemaker_send,
@@ -81,7 +84,7 @@ impl Node {
 
         let _block_management_handle = tokio::spawn(block_management_thread(
             id,
-            chain_type,
+            config.clone(),
             crypto_scheme,
             peer_blk_recv,
             txn_ready_recv,
@@ -92,20 +95,22 @@ impl Node {
         let _block_dissemination_handle = tokio::spawn(block_dissemination_thread(
             id,
             dissem_pattern,
+            config.clone(),
             peer_messenger.clone(),
             new_block_recv,
             block_ready_send,
         ));
 
         let _decision_handle = tokio::spawn(decision_thread(
-            chain_type,
+            config.clone(),
             peer_messenger.clone(),
             peer_consensus_recv,
             block_ready_recv,
             commit_send,
         ));
 
-        let _commit_handle = tokio::spawn(commit_thread(chain_type, commit_recv, executed_send));
+        let _commit_handle =
+            tokio::spawn(commit_thread(config.clone(), commit_recv, executed_send));
 
         log::info!("stages started");
 
