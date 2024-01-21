@@ -32,7 +32,7 @@ impl PeerMessenger {
         ),
         CopycatError,
     > {
-        let (send_half, recv_half) = mailbox_client::new_stub(id)?;
+        let (send_half, recv_half) = mailbox_client::new_stub(id).await?;
 
         let (rx_txn_send, rx_txn_recv) = mpsc::channel(0x1000000);
         let (rx_blk_send, rx_blk_recv) = mpsc::channel(0x100000);
