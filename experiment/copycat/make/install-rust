@@ -1,0 +1,10 @@
+#! /bin/bash
+
+# remove any previous install
+rm -rf ~/.cargo
+rm -rf ~/.rustup
+
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup-init
+sh ./rustup-init -y
+
+source $HOME/.cargo/env

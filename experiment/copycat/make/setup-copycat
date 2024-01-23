@@ -1,0 +1,28 @@
+#! /bin/bash
+
+BRANCH=$1
+BUILDTYPE=$2
+
+GITHUB_ORG=qusuyan
+PROJECT_NAME=blockchain_copycat
+
+if [[ ! -e ${PROJECT_NAME} ]]; then
+    ssh-keyscan github.com >> ~/.ssh/known_hosts
+    git clone git@github.com:${GITHUB_ORG}/${PROJECT_NAME}.git
+fi
+
+if [[ $BUILDTYPE == "release" ]]; then
+    BUILD_FLAGS="--release"
+else
+    BUILD_FLAGS=""
+fi
+
+cd ${PROJECT_NAME}
+git pull --ff
+
+echo "Using branch '${BRANCH}'"
+git checkout ${BRANCH}
+
+cargo build --workspace ${BUILD_FLAGS}
+
+exit 0

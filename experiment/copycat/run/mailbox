@@ -1,0 +1,9 @@
+#! /bin/bash
+
+export RUST_LOG=info
+export RUST_BACKTRACE=1
+
+BUILDTYPE=$1
+ID=$2
+
+./blockchain_copycat/target/${BUILDTYPE}/copycat_mailbox -i ${ID} -m bench_machines.json -n bench_network.json

@@ -1,0 +1,25 @@
+[config]
+default-engine = "home-runner"
+required-machine-classes = ["machines"]
+required-packages = ["python3"]
+
+[engines]
+home-runner = []
+
+[make-targets]
+install-rust = []
+setup-copycat = [["branch", "main"], ["build_type", "release"]]
+setup-mailbox = [["branch", "main"]]
+
+[run-targets]
+cleanup = []
+mailbox = [["build_type", "release"], ["id", "@POS"]]
+node = [
+  ["build_type", "release"],
+  ["machine_id", "@POS"],
+  ["local_id", "0"],
+  ["chain_type", "bitcoin"],
+  ["accounts", "10000"],
+  ["max_inflight", "100000"],
+  ["config", ""],
+]
