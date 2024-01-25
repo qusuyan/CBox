@@ -11,6 +11,7 @@ use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::time::{Duration, Instant};
 
 use crate::config::Config;
 
@@ -43,13 +44,9 @@ pub async fn block_management_thread(
     log::info!("block management stage starting...");
 
     let mut block_management_stage = get_blk_creation(config, crypto_scheme);
+    let mut batch_prepare_time = Instant::now() + Duration::from_millis(100);
 
     loop {
-        // first try to construct / add-on to block to be proposed
-        if let Err(e) = block_management_stage.prepare_new_block().await {
-            log::error!("failed to prepare new block: {e:?}");
-        }
-
         tokio::select! {
             new_txn = txn_ready_recv.recv() => {
                 match new_txn {
@@ -65,6 +62,14 @@ pub async fn block_management_thread(
                         return;
                     }
                 }
+            },
+
+            _ = tokio::time::sleep_until(batch_prepare_time) => {
+                if let Err(e) = block_management_stage.prepare_new_block().await {
+                    log::error!("failed to prepare new block: {e:?}");
+                }
+
+                batch_prepare_time = Instant::now() + Duration::from_millis(100);
             },
 
             wait_result = block_management_stage.wait_to_propose() => {

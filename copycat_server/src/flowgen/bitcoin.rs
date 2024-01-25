@@ -5,13 +5,17 @@ use copycat_protocol::CryptoScheme;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
+use rand::Rng;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::Instant;
+use tokio::time::{Duration, Instant};
+
+const UNSET: usize = 0;
 
 pub struct BitcoinFlowGen {
     max_inflight: usize,
+    frequency: usize,
     crypto: CryptoScheme,
     utxos: HashMap<PubKey, VecDeque<(Hash, u64)>>,
     accounts: Vec<(PubKey, PrivKey)>,
@@ -22,7 +26,13 @@ pub struct BitcoinFlowGen {
 }
 
 impl BitcoinFlowGen {
-    pub fn new(id: NodeId, num_accounts: usize, max_inflight: usize, crypto: CryptoScheme) -> Self {
+    pub fn new(
+        id: NodeId,
+        num_accounts: usize,
+        max_inflight: usize,
+        frequency: usize,
+        crypto: CryptoScheme,
+    ) -> Self {
         let mut accounts = Vec::new();
         let mut utxos = HashMap::new();
         for i in 0..num_accounts as u64 {
@@ -34,6 +44,7 @@ impl BitcoinFlowGen {
 
         Self {
             max_inflight,
+            frequency,
             crypto,
             utxos,
             accounts,
@@ -67,7 +78,16 @@ impl FlowGen for BitcoinFlowGen {
 
     async fn wait_next(&self) -> Result<(), CopycatError> {
         loop {
-            if self.in_flight.len() < self.max_inflight {
+            if self.max_inflight == UNSET || self.in_flight.len() < self.max_inflight {
+                if self.frequency != UNSET {
+                    // poisson interarrival time
+                    let interarrival_time = {
+                        let mut rng = rand::thread_rng();
+                        let u: f64 = rng.gen();
+                        -(1f64 - u).ln() / self.frequency as f64
+                    };
+                    tokio::time::sleep(Duration::from_secs_f64(interarrival_time)).await
+                }
                 return Ok(());
             }
             tokio::task::yield_now().await;

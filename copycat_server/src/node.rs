@@ -130,16 +130,16 @@ impl Node {
         ))
     }
 
-    pub async fn wait_completion(self) -> Result<(), CopycatError> {
-        self._txn_validation_handle.await?;
-        self._txn_dissemination_handle.await?;
-        self._pacemaker_handle.await?;
-        self._block_management_handle.await?;
-        self._block_dissemination_handle.await?;
-        self._decision_handle.await?;
-        self._commit_handle.await?;
-        Ok(())
-    }
+    // pub async fn wait_completion(self) -> Result<(), CopycatError> {
+    //     self._txn_validation_handle.await?;
+    //     self._txn_dissemination_handle.await?;
+    //     self._pacemaker_handle.await?;
+    //     self._block_management_handle.await?;
+    //     self._block_dissemination_handle.await?;
+    //     self._decision_handle.await?;
+    //     self._commit_handle.await?;
+    //     Ok(())
+    // }
 
     pub async fn send_req(&self, txn: Arc<Txn>) -> Result<(), CopycatError> {
         if let Err(e) = self.req_send.send(txn).await {

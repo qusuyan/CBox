@@ -27,11 +27,18 @@ pub fn get_flow_gen(
     id: NodeId,
     num_accounts: usize,
     max_inflight: usize,
+    frequency: usize,
     chain: ChainType,
     crypto: CryptoScheme,
 ) -> Box<dyn FlowGen> {
     match chain {
-        ChainType::Bitcoin => Box::new(BitcoinFlowGen::new(id, num_accounts, max_inflight, crypto)),
+        ChainType::Bitcoin => Box::new(BitcoinFlowGen::new(
+            id,
+            num_accounts,
+            max_inflight,
+            frequency,
+            crypto,
+        )),
         _ => todo!(),
     }
 }

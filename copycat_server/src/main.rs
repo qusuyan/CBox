@@ -50,6 +50,10 @@ struct CliArgs {
     #[arg(long, short = 'f', default_value = "100000")]
     max_inflight: usize,
 
+    /// Frequency at which transactions are generated
+    #[arg(long, short = 'q', value_enum, default_value = "0")]
+    frequency: usize,
+
     /// Blockchain specific configuration string in TOML format
     #[arg(long, default_value_t = String::from(""))]
     config: String,
@@ -59,6 +63,11 @@ impl CliArgs {
     pub fn validate(&mut self) {
         if self.num_threads < 8 {
             self.num_threads = 8;
+        }
+
+        if self.frequency == 0 && self.max_inflight == 0 {
+            log::warn!("neither frequency nor max_inflight is set, restore to default");
+            self.max_inflight = 100000;
         }
     }
 }
@@ -114,6 +123,7 @@ pub fn main() {
             id,
             args.accounts,
             args.max_inflight,
+            args.frequency,
             args.chain,
             args.crypto,
         );
