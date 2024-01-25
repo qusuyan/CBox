@@ -2,3 +2,4 @@
 num_iterations = 1
 
 [parameters]
+num-nodes = 7

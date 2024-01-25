@@ -42,7 +42,6 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     for (idx, addr) in enumerate(addrs):
         base = idx << 12
         node_list = [base + id for id in range(num_nodes_per_machine)]
-        logger.print(node_list)
         machine_config[idx] = {
             "addr": f"{addr}:15500",
             "node_list": node_list,
@@ -66,6 +65,8 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     mailbox_task = exp_machines.run_background(config, "mailbox", args=[params["build-type"], "@POS"], engine=ENGINE, verbose=verbose)
     tasks.append(mailbox_task)
 
+    time.sleep(5)
+
     for local_id in range(num_nodes_per_machine):
         run_args = [params["build-type"], "@POS", local_id, params["chain-type"], int(params["num-accounts"] / params["num-nodes"]), int(params["max-inflight-txns"] / params["num-nodes"]), ""]
         node_task = exp_machines.run_background(config, "node", args=run_args, engine=ENGINE, verbose=verbose)
@@ -86,9 +87,9 @@ if __name__ == "__main__":
     DEFAULT_PARAMS = {
         "build-type": "release",
         "num-nodes": 4,
-        "num-machines": 2,
+        "num-machines": 1,
         "network-delay": 150, # in millis
-        "network-bw": 200000000, # in B/s
+        "network-bw": 5000000, # in B/s
         "chain-type": "bitcoin",
         "exp-time": 300, # in s
         "num-accounts": 10000,

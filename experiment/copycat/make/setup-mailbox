@@ -16,6 +16,4 @@ git pull --ff
 echo "Using branch '${BRANCH}'"
 git checkout ${BRANCH}
 
-mkdir /dev/shm/mailbox
-
 exit 0
