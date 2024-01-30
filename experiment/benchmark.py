@@ -68,7 +68,10 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     time.sleep(5)
 
     for local_id in range(num_nodes_per_machine):
-        run_args = [params["build-type"], "@POS", local_id, params["chain-type"], int(params["num-accounts"] / params["num-nodes"]), int(params["max-inflight-txns"] / params["num-nodes"]), ""]
+        run_args = [params["build-type"], "@POS", local_id, params["chain-type"], 
+                    int(params["num-accounts"] / params["num-nodes"]), 
+                    int(params["max-inflight-txns"] / params["num-nodes"]), 
+                    int(params["frequency"] / params["num-nodes"]), params["config"]]
         node_task = exp_machines.run_background(config, "node", args=run_args, engine=ENGINE, verbose=verbose)
         tasks.append(node_task)
 
@@ -89,11 +92,13 @@ if __name__ == "__main__":
         "num-nodes": 4,
         "num-machines": 1,
         "network-delay": 150, # in millis
-        "network-bw": 5000000, # in B/s
+        "network-bw": 25000000, # in B/s
         "chain-type": "bitcoin",
         "exp-time": 300, # in s
         "num-accounts": 10000,
         "max-inflight-txns": 100000,
+        "frequency": 0,
+        "config": "",
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

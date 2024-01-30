@@ -9,7 +9,8 @@ LOCAL_ID=$3
 CHAIN_TYPE=$4
 ACCOUNTS=$5
 MAX_INFLIGHT=$6
-CONFIG=$7
+FREQUENCY=$7
+CONFIG=$8
 
 if [[ $CONFIG == "" ]]; then
     CONFIG_ARG=""
@@ -18,5 +19,5 @@ else
 fi
 
 ID=$(( ($MACHINE_ID << 12) + $LOCAL_ID ))
-./blockchain_copycat/target/${BUILDTYPE}/copycat_server -i ${ID} -c ${CHAIN_TYPE} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} ${CONFIG_ARG}
+./blockchain_copycat/target/${BUILDTYPE}/copycat_server -i ${ID} -c ${CHAIN_TYPE} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} ${CONFIG_ARG}
 
