@@ -109,6 +109,12 @@ pub fn main() {
         }
     };
 
+    let mut stats_file = std::fs::File::create(format!("/tmp/copycat_node_{}.csv", id))
+        .expect("stats file creation failed");
+    stats_file
+        .write(b"Throughput (txn/s), Avg Latency (s)\n")
+        .expect("write stats failed");
+
     runtime.block_on(async {
         let (node, mut executed): (Node, _) =
             match Node::init(id, args.chain, args.dissem_pattern, args.crypto, config).await {
@@ -181,11 +187,15 @@ pub fn main() {
 
                 _ = tokio::time::sleep_until(report_time) => {
                     let stats = flow_gen.get_stats();
+                    let tput = stats.num_committed / (report_time - start_time).as_secs();
                     log::info!(
                         "Throughput: {} txn/s, Average Latency: {} s",
-                        stats.num_committed / (report_time - start_time).as_secs(),
+                        tput,
                         stats.latency
                     );
+                    stats_file
+                        .write_fmt(format_args!("{},{}\n", tput, stats.latency))
+                        .expect("write stats failed");
                     report_time += Duration::from_secs(60);
                 }
             }

@@ -7,4 +7,4 @@ exp-time = 2700
 frequency = 3000
 max-inflight-txns = 100000
 num-machines = 1
-num-nodes = 1
+num-nodes = 8

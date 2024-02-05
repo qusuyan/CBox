@@ -1,6 +1,6 @@
 #! /bin/python3
 
-import json, time, sys, signal
+import json, time, sys, signal, datetime, os
 
 from dist_make import Cluster, Configuration, Experiment
 from dist_make.logging import MetaLogger
@@ -12,13 +12,24 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
               result_printer, verbose=False):
     assert params["num-nodes"] >= params["num-machines"]
 
+    exp_name = f"Experiment-{datetime.now()}"
+    os.makedirs(f"./results/{exp_name}")
+
     tasks = []
     def cleanup():
         ''' Cleanup function that shuts down all running tasks '''
         for task in tasks:
-            if task:
+            if task and task.is_alive():
                 task.terminate()
                 task.join()
+
+    def quit(signum, frame):
+        logger.print("got exit signal, exiting...")
+        cleanup()
+        sys.exit(1)
+        
+    for sig in ('TERM', 'HUP', 'INT'):
+        signal.signal(getattr(signal, 'SIG'+sig), quit)
 
     cluster = Cluster()
     config = Configuration(cluster, "copycat")
@@ -76,15 +87,15 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         tasks.append(node_task)
 
     # wait for timeout
-    def quit(signum, frame):
-        logger.print("got exit signal, exiting...")
-        cleanup()
-        sys.exit(1)
-        
-    for sig in ('TERM', 'HUP', 'INT'):
-        signal.signal(getattr(signal, 'SIG'+sig), quit)
     time.sleep(params["exp-time"])
     cleanup()
+
+    # collect stats
+    for machine in machine_config:
+        for node in machine["node_list"]:
+            stats_file = f"copycat_node_{node}.csv"
+            cluster.copy_from(machine["addr"], f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
+
 
 if __name__ == "__main__":
     DEFAULT_PARAMS = {
