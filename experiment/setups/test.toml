@@ -3,7 +3,7 @@ num_iterations = 1
 
 [parameters]
 config = "difficulty=27+commit_depth=0"
-exp-time = 1200
+exp-time = 1800
 frequency = 3000
 max-inflight-txns = 100000
 num-machines = 1

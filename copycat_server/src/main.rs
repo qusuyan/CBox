@@ -143,12 +143,11 @@ pub fn main() {
             }
         }
         log::info!("setup txns sent");
-        // wait when setup txns are propogated over the network
-        tokio::time::sleep(Duration::from_secs(30)).await;
-        log::info!("flow generation starts");
-
         let start_time = Instant::now();
         let mut report_time = start_time + Duration::from_secs(60);
+        // wait when setup txns are propogated over the network
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        log::info!("flow generation starts");
 
         loop {
             tokio::select! {
