@@ -108,6 +108,7 @@ pub fn main() {
             }
         }
     };
+    log::info!("Node config: {:?}", config);
 
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_node_{}.csv", id))
         .expect("stats file creation failed");

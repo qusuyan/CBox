@@ -1,3 +1,5 @@
+use crate::config::BitcoinConfig;
+
 use super::Decision;
 use copycat_protocol::block::{Block, BlockHeader};
 use copycat_protocol::crypto::{sha256, Hash};
@@ -9,17 +11,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-const COMMITTED_LENGTH: usize = 6;
-
 pub struct BitcoinDecision {
+    commit_len: u8,
     block_pool: HashMap<Hash, (Arc<Block>, u64)>,
     chain_tail: VecDeque<Hash>,
     notify: Notify,
 }
 
 impl BitcoinDecision {
-    pub fn new() -> Self {
+    pub fn new(config: BitcoinConfig) -> Self {
         Self {
+            commit_len: config.commit_depth,
             block_pool: HashMap::new(),
             chain_tail: VecDeque::new(),
             notify: Notify::new(),
@@ -95,7 +97,7 @@ impl Decision for BitcoinDecision {
 
     async fn commit_ready(&self) -> Result<(), CopycatError> {
         loop {
-            if self.chain_tail.len() > COMMITTED_LENGTH {
+            if self.chain_tail.len() > self.commit_len as usize {
                 return Ok(());
             }
             self.notify.notified().await;

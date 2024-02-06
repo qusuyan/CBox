@@ -1,6 +1,7 @@
 #! /bin/python3
 
-import json, time, sys, signal, datetime, os
+import json, time, sys, signal, os
+from datetime import datetime
 
 from dist_make import Cluster, Configuration, Experiment
 from dist_make.logging import MetaLogger
@@ -12,7 +13,8 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
               result_printer, verbose=False):
     assert params["num-nodes"] >= params["num-machines"]
 
-    exp_name = f"Experiment-{datetime.now()}"
+    datetime_str = datetime.now().strftime("%Y%m%d%H%M%S")
+    exp_name = f"Experiment-{datetime_str}"
     os.makedirs(f"./results/{exp_name}")
 
     tasks = []
@@ -91,11 +93,13 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     cleanup()
 
     # collect stats
-    for machine in machine_config:
+    for machine in machine_config.values():
         for node in machine["node_list"]:
+            addr = machine["addr"].split(":")[0]
             stats_file = f"copycat_node_{node}.csv"
-            cluster.copy_from(machine["addr"], f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
+            cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
 
+    return True
 
 if __name__ == "__main__":
     DEFAULT_PARAMS = {

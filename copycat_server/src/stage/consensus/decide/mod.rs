@@ -26,7 +26,7 @@ fn get_decision(
 ) -> Box<dyn Decision> {
     match config {
         Config::Dummy => Box::new(DummyDecision::new()),
-        Config::Bitcoin { .. } => Box::new(BitcoinDecision::new()),
+        Config::Bitcoin { config } => Box::new(BitcoinDecision::new(config)),
     }
 }
 

@@ -27,6 +27,7 @@ pub struct BitcoinBlockManagement {
     utxo: HashSet<(Hash, PubKey)>,
     chain_tail: Hash,
     difficulty: u8, // hash has at most 256 bits
+    compute_power: f64,
     // fields for constructing new block
     pending_txns: VecDeque<Hash>,
     block_under_construction: Vec<Hash>,
@@ -46,6 +47,7 @@ impl BitcoinBlockManagement {
             utxo: HashSet::new(),
             chain_tail: U256::zero(),
             difficulty: config.difficulty,
+            compute_power: config.compute_power,
             pending_txns: VecDeque::new(),
             block_under_construction: vec![],
             block_size: 0,
@@ -74,7 +76,7 @@ impl BitcoinBlockManagement {
         let p = 1f64 - 2f64.powf(-(self.difficulty as f64));
         let u = rand::thread_rng().gen::<f64>();
         let x = u.log(p);
-        let pow_time = Duration::from_secs_f64(HEADER_HASH_TIME * x);
+        let pow_time = Duration::from_secs_f64(HEADER_HASH_TIME * x / self.compute_power); // assume parallelism
         log::trace!(
             "POW takes {} sec; p: {p}, u: {u}, x: {x}, block size: {}, block len: {}",
             pow_time.as_secs_f64(),

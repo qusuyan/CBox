@@ -2,9 +2,9 @@
 num_iterations = 1
 
 [parameters]
-config = "difficulty=24"
-exp-time = 2700
+config = "difficulty=27"
+exp-time = 3000
 frequency = 3000
 max-inflight-txns = 100000
 num-machines = 1
-num-nodes = 8
+num-nodes = [1, 2, 4, 6, 8]
