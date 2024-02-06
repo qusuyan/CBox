@@ -19,5 +19,4 @@ else
 fi
 
 ID=$(( ($MACHINE_ID << 12) + $LOCAL_ID ))
-./blockchain_copycat/target/${BUILDTYPE}/copycat_server -i ${ID} -c ${CHAIN_TYPE} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} ${CONFIG_ARG}
-
+./blockchain_copycat/target/${BUILDTYPE}/copycat_server -i ${ID} -c ${CHAIN_TYPE} ${CONFIG_ARG} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY}

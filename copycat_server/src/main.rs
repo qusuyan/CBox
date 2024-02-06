@@ -100,6 +100,7 @@ pub fn main() {
     let config = if args.config.is_empty() {
         Config::from_str(args.chain, None).unwrap()
     } else {
+        args.config = args.config.replace('+', "\n");
         match Config::from_str(args.chain, Some(&args.config)) {
             Ok(config) => config,
             Err(e) => {
