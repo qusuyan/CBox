@@ -188,7 +188,7 @@ pub fn main() {
 
                 _ = tokio::time::sleep_until(report_time) => {
                     let stats = flow_gen.get_stats();
-                    let tput = stats.num_committed / (report_time - start_time).as_secs();
+                    let tput = stats.num_committed as f64 / (report_time - start_time).as_secs_f64();
                     log::info!(
                         "Throughput: {} txn/s, Average Latency: {} s",
                         tput,

@@ -44,17 +44,17 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
 
     logger = MetaLogger(exp.log_dir)
     logger.print(f'Running benchmark on with parameters: {params}')
-    if params["num-nodes"] % params["num-machines"] > 0:
-        params["num-nodes"] -= params["num-nodes"] % params["num-machines"]
-        logger.print(f'Running {params["num-nodes"]} blockchain nodes instead')
 
     # generating machine and network config files
     num_nodes_per_machine = int(params["num-nodes"] / params["num-machines"])
+    num_nodes_remainder = params["num-nodes"] % params["num-machines"]
+    
     addrs = exp_machines.get_addrs()
     machine_config = {}
     for (idx, addr) in enumerate(addrs):
         base = idx << 12
-        node_list = [base + id for id in range(num_nodes_per_machine)]
+        curr_machine_num_nodes = num_nodes_per_machine + (1 if num_nodes_remainder > idx else 0)
+        node_list = [base + id for id in range(curr_machine_num_nodes)]
         machine_config[idx] = {
             "addr": f"{addr}:15500",
             "node_list": node_list,
@@ -87,6 +87,15 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
                     int(params["frequency"] / params["num-nodes"]), params["config"]]
         node_task = exp_machines.run_background(config, "node", args=run_args, engine=ENGINE, verbose=verbose)
         tasks.append(node_task)
+
+    # remaining nodes
+    run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["chain-type"], 
+                    int(params["num-accounts"] / params["num-nodes"]), 
+                    int(params["max-inflight-txns"] / params["num-nodes"]), 
+                    int(params["frequency"] / params["num-nodes"]), params["config"]]
+    if num_nodes_remainder > 0:
+        remainder_task = exp_machines.run_background(config, "node", args=run_args, num_machines = num_nodes_remainder, engine=ENGINE, verbose=verbose)
+        tasks.append(remainder_task)
 
     # wait for timeout
     time.sleep(params["exp-time"])
