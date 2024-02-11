@@ -6,11 +6,12 @@ export RUST_BACKTRACE=1
 BUILDTYPE=$1
 MACHINE_ID=$2
 LOCAL_ID=$3
-CHAIN_TYPE=$4
-ACCOUNTS=$5
-MAX_INFLIGHT=$6
-FREQUENCY=$7
-CONFIG=$8
+THREADS=$4
+CHAIN_TYPE=$5
+ACCOUNTS=$6
+MAX_INFLIGHT=$7
+FREQUENCY=$8
+CONFIG=$9
 
 if [[ $CONFIG == "" ]]; then
     CONFIG_ARG=""
@@ -19,4 +20,5 @@ else
 fi
 
 ID=$(( ($MACHINE_ID << 12) + $LOCAL_ID ))
-./blockchain_copycat/target/${BUILDTYPE}/copycat_server -i ${ID} -c ${CHAIN_TYPE} ${CONFIG_ARG} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY}
+./blockchain_copycat/target/${BUILDTYPE}/copycat_server -i ${ID} -t ${THREADS} \
+    -c ${CHAIN_TYPE} ${CONFIG_ARG} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY}

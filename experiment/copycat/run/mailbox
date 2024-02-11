@@ -5,5 +5,7 @@ export RUST_BACKTRACE=1
 
 BUILDTYPE=$1
 ID=$2
+THREADS=$3
 
-./blockchain_copycat/target/${BUILDTYPE}/copycat_mailbox -i ${ID} -m bench_machines.json -n bench_network.json
+./blockchain_copycat/target/${BUILDTYPE}/copycat_mailbox -i ${ID} -t ${THREADS} \
+    -m bench_machines.json -n bench_network.json 

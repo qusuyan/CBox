@@ -11,7 +11,6 @@ ENGINE = "home-runner"
 
 def benchmark(params: dict[str, any], collect_statistics: bool,
               result_printer, verbose=False):
-    assert params["num-nodes"] >= params["num-machines"]
 
     datetime_str = datetime.now().strftime("%Y%m%d%H%M%S")
     exp_name = f"Experiment-{datetime_str}"
@@ -45,6 +44,10 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     logger = MetaLogger(exp.log_dir)
     logger.print(f'Running benchmark on with parameters: {params}')
 
+    if params["num-nodes"] < params["num-machines"]:
+        logger.print("More machines than nodes, skipping...")
+        return True
+
     # generating machine and network config files
     num_nodes_per_machine = int(params["num-nodes"] / params["num-machines"])
     num_nodes_remainder = params["num-nodes"] % params["num-machines"]
@@ -75,13 +78,13 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         cluster.copy_to(addr, "bench_network.json", f'{cluster.workdir}/bench_network.json')
 
     # start mailbox
-    mailbox_task = exp_machines.run_background(config, "mailbox", args=[params["build-type"], "@POS"], engine=ENGINE, verbose=verbose)
+    mailbox_task = exp_machines.run_background(config, "mailbox", args=[params["build-type"], "@POS", params["mailbox-threads"],], engine=ENGINE, verbose=verbose)
     tasks.append(mailbox_task)
 
     time.sleep(5)
 
     for local_id in range(num_nodes_per_machine):
-        run_args = [params["build-type"], "@POS", local_id, params["chain-type"], 
+        run_args = [params["build-type"], "@POS", local_id, params["node-threads"], params["chain-type"], 
                     int(params["num-accounts"] / params["num-nodes"]), 
                     int(params["max-inflight-txns"] / params["num-nodes"]), 
                     int(params["frequency"] / params["num-nodes"]), params["config"]]
@@ -89,7 +92,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         tasks.append(node_task)
 
     # remaining nodes
-    run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["chain-type"], 
+    run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["node-threads"], params["chain-type"], 
                     int(params["num-accounts"] / params["num-nodes"]), 
                     int(params["max-inflight-txns"] / params["num-nodes"]), 
                     int(params["frequency"] / params["num-nodes"]), params["config"]]
@@ -115,6 +118,8 @@ if __name__ == "__main__":
         "build-type": "release",
         "num-nodes": 4,
         "num-machines": 1,
+        "node-threads": 8,
+        "mailbox-threads": 8,
         "network-delay": 150, # in millis
         "network-bw": 25000000, # in B/s
         "chain-type": "bitcoin",

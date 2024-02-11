@@ -1,14 +1,16 @@
 [package]
+edition = "2021"
 name = "copycat_protocol"
 version = "0.1.0"
-edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.4.2", features = ["derive"] }
-serde = { version = "1.0", features = ["derive", "rc"] }
-get-size = { version = "0.1.4", features = ["derive"]}
-copycat_utils = { path = "../copycat_utils" }
+clap = {version = "4.4.2", features = ["derive"]}
+copycat_utils = {path = "../copycat_utils"}
+get-size = {version = "0.1.4", features = ["derive"]}
+primitive-types = {version = "0.12.2", features = ["serde"]}
+rand = "0.8.5"
 ring = "0.17.5"
-primitive-types = { version = "0.12.2", features = ["serde"] }
+serde = {version = "1.0", features = ["derive", "rc"]}
+tokio = "1.32.0"

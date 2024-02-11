@@ -2,7 +2,7 @@ use crate::config::BitcoinConfig;
 
 use super::BlockManagement;
 use copycat_protocol::block::{Block, BlockHeader};
-use copycat_protocol::crypto::{sha256, Hash, PubKey};
+use copycat_protocol::crypto::{sha256, DummyMerkleTree, Hash, PubKey};
 use copycat_protocol::transaction::{BitcoinTxn, Txn};
 use copycat_protocol::CryptoScheme;
 use copycat_utils::CopycatError;
@@ -31,6 +31,7 @@ pub struct BitcoinBlockManagement {
     // fields for constructing new block
     pending_txns: VecDeque<Hash>,
     block_under_construction: Vec<Hash>,
+    merkle_root: Option<DummyMerkleTree>,
     block_size: usize,
     new_utxo: HashSet<(Hash, PubKey)>,
     utxo_spent: HashSet<(Hash, PubKey)>,
@@ -50,6 +51,7 @@ impl BitcoinBlockManagement {
             compute_power: config.compute_power,
             pending_txns: VecDeque::new(),
             block_under_construction: vec![],
+            merkle_root: None,
             block_size: 0,
             new_utxo: HashSet::new(),
             utxo_spent: HashSet::new(),
@@ -249,6 +251,8 @@ impl BlockManagement for BitcoinBlockManagement {
         }
 
         if modified {
+            self.merkle_root =
+                Some(DummyMerkleTree::new(self.block_under_construction.len()).await?);
             let start_pow = Instant::now();
             let pow_time = self.get_pow_time();
             self.pow_time = Some(pow_time);
@@ -270,7 +274,7 @@ impl BlockManagement for BitcoinBlockManagement {
 
     async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError> {
         // TODO: add incentive txn
-        let txns = self
+        let txns: Vec<Arc<Txn>> = self
             .block_under_construction
             .drain(0..)
             .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone())
@@ -278,7 +282,7 @@ impl BlockManagement for BitcoinBlockManagement {
         let block = Arc::new(Block {
             header: BlockHeader::Bitcoin {
                 prev_hash: self.chain_tail.clone(),
-                merkle_root: sha256(&bincode::serialize(&txns)?)?, // TODO
+                merkle_root: self.merkle_root.clone().unwrap().0, // TODO
                 nonce: 1, // use nonce = 1 to indicate valid pow
             },
             txns,
@@ -308,6 +312,7 @@ impl BlockManagement for BitcoinBlockManagement {
             self.block_size,
         );
         self.block_emit_time = None;
+        self.merkle_root = None;
         self.pow_time = None;
         self.block_size = 0;
 
@@ -322,10 +327,19 @@ impl BlockManagement for BitcoinBlockManagement {
             return Ok(vec![]);
         }
 
-        let prev_hash = match &block.header {
-            BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+        let (merkle_root, prev_hash) = match &block.header {
+            BlockHeader::Bitcoin {
+                merkle_root,
+                prev_hash,
+                ..
+            } => (merkle_root, prev_hash),
             _ => unreachable!(),
         };
+
+        let merkle_tree = DummyMerkleTree(merkle_root.clone());
+        if !merkle_tree.verify(block.txns.len()).await? {
+            return Ok(vec![]);
+        }
 
         let height = if prev_hash.is_zero() {
             1u64
@@ -448,8 +462,6 @@ impl BlockManagement for BitcoinBlockManagement {
                 return Ok(vec![]); // invalid POW
             }
 
-            // TODO: add merkle tree proof
-
             for txn in new_block.txns.iter() {
                 let txn_hash = sha256(&bincode::serialize(txn)?)?;
                 let bitcoin_txn = match txn.as_ref() {
@@ -467,11 +479,11 @@ impl BlockManagement for BitcoinBlockManagement {
                     } = bitcoin_txn
                     {
                         let serialized_in_utxo = bincode::serialize(in_utxo)?;
-                        if !self.crypto_scheme.verify(
-                            sender,
-                            &serialized_in_utxo,
-                            sender_signature,
-                        )? {
+                        if !self
+                            .crypto_scheme
+                            .verify(sender, &serialized_in_utxo, sender_signature)
+                            .await?
+                        {
                             return Ok(vec![]);
                         }
                     }
@@ -527,6 +539,7 @@ impl BlockManagement for BitcoinBlockManagement {
 
         // the new block is the tail of the longer chain, move over
         self.block_emit_time = None;
+        self.merkle_root = None;
         self.pow_time = None;
         self.pending_txns
             .append(&mut self.block_under_construction.drain(0..).collect());

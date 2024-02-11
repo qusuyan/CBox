@@ -112,7 +112,7 @@ impl FlowGen for BitcoinFlowGen {
             let (in_utxo_raw, amount) = sender_utxos.pop_front().unwrap();
             let in_utxo = vec![in_utxo_raw];
             let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-            let sender_signature = self.crypto.sign(sender_sk, &serialized_in_utxo)?;
+            let sender_signature = self.crypto.sign(sender_sk, &serialized_in_utxo).await?;
             let out_utxo = std::cmp::min(amount, 10);
             let remainder = amount - out_utxo;
             let txn = Arc::new(Txn::Bitcoin {

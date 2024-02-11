@@ -58,7 +58,8 @@ impl TxnValidation for BitcoinTxnValidation {
         let serialized_in_txo = bincode::serialize(txn_in_utxo)?;
         if !self
             .crypto_scheme
-            .verify(txn_sender, &serialized_in_txo, txn_sender_signature)?
+            .verify(txn_sender, &serialized_in_txo, txn_sender_signature)
+            .await?
         {
             return Ok(false);
         }
