@@ -3,6 +3,8 @@
 export RUST_LOG=debug
 export RUST_BACKTRACE=1
 
+echo $@
+
 BUILDTYPE=$1
 MACHINE_ID=$2
 LOCAL_ID=$3
@@ -12,6 +14,7 @@ ACCOUNTS=$6
 MAX_INFLIGHT=$7
 FREQUENCY=$8
 CONFIG=$9
+DISSEM=${10}
 
 if [[ $CONFIG == "" ]]; then
     CONFIG_ARG=""
@@ -22,4 +25,4 @@ fi
 ID=$(( ($MACHINE_ID << 12) + $LOCAL_ID ))
 ./blockchain_copycat/target/${BUILDTYPE}/copycat_server -i ${ID} -t ${THREADS} \
     -c ${CHAIN_TYPE} ${CONFIG_ARG} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} \
-    --topology bench_topo.json
+    --topology bench_topo.json -n ${DISSEM}

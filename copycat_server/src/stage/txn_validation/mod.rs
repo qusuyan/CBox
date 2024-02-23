@@ -72,7 +72,7 @@ pub async fn txn_validation_thread(
         match txn_validation_stage.validate(txn.clone()).await {
             Ok(valid) => {
                 if !valid {
-                    log::warn!("got invalid txn {txn:?}, ignoring...");
+                    log::trace!("got invalid txn {txn:?}, ignoring...");
                 }
 
                 if let Err(e) = validated_txn_send.send((src, txn)).await {

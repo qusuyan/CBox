@@ -8,6 +8,8 @@ from dist_make import Cluster, Configuration, Experiment
 from dist_make.logging import MetaLogger
 from dist_make.benchmark import benchmark_main
 
+from gen_topo import gen_topo
+
 ENGINE = "home-runner"
 
 def benchmark(params: dict[str, any], collect_statistics: bool,
@@ -16,6 +18,8 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     datetime_str = datetime.now().strftime("%Y%m%d%H%M%S")
     exp_name = f"Experiment-{datetime_str}"
     os.makedirs(f"./results/{exp_name}")
+    with open(f"./results/{exp_name}/config.json", "w") as f:
+        json.dump(params, f, indent=2)
 
     tasks = []
     def cleanup():
@@ -79,51 +83,9 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
 
     # generate random network topology
     full_node_list = [node for tup in zip(*nodes) for node in tup]
-
-    if params["topo-skewness"] <= 1:
-        rng = lambda max: math.floor(np.random.uniform() * max)
-    else:
-        rng = lambda max: (np.random.zipf(params["topo-skewness"]) - 1) % max
-    
-    def sampler(rng, num_samples, max):
-        num_samples_base = math.floor(num_samples)
-        if np.random.uniform() < num_samples - num_samples_base:
-            num_samples = num_samples_base + 1
-        else:
-            num_samples = num_samples_base
-
-        samples = []
-        for i in range(num_samples):
-            sample = rng(max - i)
-            for prev in samples:
-                if sample >= prev:
-                    sample += 1
-                else:
-                    break
-            samples.append(sample)
-            samples.sort()
-        return samples
-
-    edge_count = params["topo-degree"] / 2 # since edges are undirected
-    edges = set()
-    for (idx, node) in enumerate(full_node_list):
-        neighbor_idx = {nidx + (nidx >= idx) for nidx in sampler(rng, edge_count, len(full_node_list) - 1)}
-        neighbors = {full_node_list[nidx] for nidx in neighbor_idx}
-        out_edges = {(node, neighbor) if neighbor > node else (neighbor, node) for neighbor in neighbors}
-        edges = edges.union(out_edges)
-
-    # print(len(edges), edges)
-    # for node in full_node_list:
-    #     neighbors = []
-    #     for (src, dst) in edges:
-    #         if src == node:
-    #             neighbors.append(dst)
-    #         if dst == node:
-    #             neighbors.append(src)
-    #     print(f"node {node} ({len(neighbors)}): {neighbors}")
-        
+    edges = gen_topo(full_node_list, params["topo-degree"], params["topo-skewness"])
     with open("bench_topo.json", "w") as f:
-        json.dump(list(edges), f)
+        json.dump(edges, f)
 
     for addr in addrs: 
         cluster.copy_to(addr, "bench_machines.json", f'{cluster.workdir}/bench_machines.json')
@@ -140,7 +102,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         run_args = [params["build-type"], "@POS", local_id, params["node-threads"], params["chain-type"], 
                     int(params["num-accounts"] / params["num-nodes"]), 
                     int(params["max-inflight-txns"] / params["num-nodes"]), 
-                    int(params["frequency"] / params["num-nodes"]), params["config"]]
+                    int(params["frequency"] / params["num-nodes"]), params["config"], params["dissem"]]
         node_task = exp_machines.run_background(config, "node", args=run_args, engine=ENGINE, verbose=verbose)
         tasks.append(node_task)
 
@@ -148,7 +110,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["node-threads"], params["chain-type"], 
                     int(params["num-accounts"] / params["num-nodes"]), 
                     int(params["max-inflight-txns"] / params["num-nodes"]), 
-                    int(params["frequency"] / params["num-nodes"]), params["config"]]
+                    int(params["frequency"] / params["num-nodes"]), params["config"], params["dissem"]]
     if num_nodes_remainder > 0:
         remainder_task = exp_machines.run_background(config, "node", args=run_args, num_machines = num_nodes_remainder, engine=ENGINE, verbose=verbose)
         tasks.append(remainder_task)
@@ -183,6 +145,7 @@ if __name__ == "__main__":
         "config": "",
         "topo-degree": 3,
         "topo-skewness": 0.0, # uniform
+        "dissem": "broadcast" # broadcast or gossip
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

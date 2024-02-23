@@ -3,10 +3,13 @@ num_iterations = 1
 
 [parameters]
 config = "difficulty=27+commit_depth=0"
+dissem = "gossip"
 exp-time = 1800
 frequency = 1000
 max-inflight-txns = 100000
 node-threads = 4
-num-machines = 8
-num-nodes = [8, 16, 24, 32, 40, 48, 56, 64]
+# num-machines = 8
+num-machines = 1
+# num-nodes = [8, 16, 24, 32, 40, 48, 56, 64]
+num-nodes = 4
 topo-skewness = 2.0

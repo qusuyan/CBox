@@ -24,4 +24,5 @@ node = [
   ["max_inflight", "100000"],
   ["frequency", "0"],
   ["config", ""],
+  ["dissem", "broadcast"],
 ]
