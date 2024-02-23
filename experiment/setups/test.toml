@@ -4,8 +4,9 @@ num_iterations = 1
 [parameters]
 config = "difficulty=27+commit_depth=0"
 exp-time = 1800
-frequency = 3000
+frequency = 1000
 max-inflight-txns = 100000
 node-threads = 4
-num-machines = 4
-num-nodes = [15, 20, 25, 30]
+num-machines = 8
+num-nodes = [8, 16, 24, 32, 40, 48, 56, 64]
+topo-skewness = 2.0

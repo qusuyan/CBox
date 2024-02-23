@@ -1,6 +1,7 @@
 #! /bin/python3
 
-import json, time, sys, signal, os
+import json, time, sys, signal, os, math
+import numpy as np
 from datetime import datetime
 
 from dist_make import Cluster, Configuration, Experiment
@@ -52,6 +53,8 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     num_nodes_per_machine = int(params["num-nodes"] / params["num-machines"])
     num_nodes_remainder = params["num-nodes"] % params["num-machines"]
     
+    nodes = []
+
     addrs = exp_machines.get_addrs()
     machine_config = {}
     for (idx, addr) in enumerate(addrs):
@@ -62,6 +65,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
             "addr": f"{addr}:15500",
             "node_list": node_list,
         }
+        nodes.append(node_list)
     with open("bench_machines.json", "w") as f:
         json.dump(machine_config, f)
 
@@ -73,9 +77,58 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     with open("bench_network.json", "w") as f:
         json.dump(network_config, f)
 
+    # generate random network topology
+    full_node_list = [node for tup in zip(*nodes) for node in tup]
+
+    if params["topo-skewness"] <= 1:
+        rng = lambda max: math.floor(np.random.uniform() * max)
+    else:
+        rng = lambda max: (np.random.zipf(params["topo-skewness"]) - 1) % max
+    
+    def sampler(rng, num_samples, max):
+        num_samples_base = math.floor(num_samples)
+        if np.random.uniform() < num_samples - num_samples_base:
+            num_samples = num_samples_base + 1
+        else:
+            num_samples = num_samples_base
+
+        samples = []
+        for i in range(num_samples):
+            sample = rng(max - i)
+            for prev in samples:
+                if sample >= prev:
+                    sample += 1
+                else:
+                    break
+            samples.append(sample)
+            samples.sort()
+        return samples
+
+    edge_count = params["topo-degree"] / 2 # since edges are undirected
+    edges = set()
+    for (idx, node) in enumerate(full_node_list):
+        neighbor_idx = {nidx + (nidx >= idx) for nidx in sampler(rng, edge_count, len(full_node_list) - 1)}
+        neighbors = {full_node_list[nidx] for nidx in neighbor_idx}
+        out_edges = {(node, neighbor) if neighbor > node else (neighbor, node) for neighbor in neighbors}
+        edges = edges.union(out_edges)
+
+    # print(len(edges), edges)
+    # for node in full_node_list:
+    #     neighbors = []
+    #     for (src, dst) in edges:
+    #         if src == node:
+    #             neighbors.append(dst)
+    #         if dst == node:
+    #             neighbors.append(src)
+    #     print(f"node {node} ({len(neighbors)}): {neighbors}")
+        
+    with open("bench_topo.json", "w") as f:
+        json.dump(list(edges), f)
+
     for addr in addrs: 
         cluster.copy_to(addr, "bench_machines.json", f'{cluster.workdir}/bench_machines.json')
         cluster.copy_to(addr, "bench_network.json", f'{cluster.workdir}/bench_network.json')
+        cluster.copy_to(addr, "bench_topo.json", f'{cluster.workdir}/bench_topo.json')
 
     # start mailbox
     mailbox_task = exp_machines.run_background(config, "mailbox", args=[params["build-type"], "@POS", params["mailbox-threads"],], engine=ENGINE, verbose=verbose)
@@ -128,6 +181,8 @@ if __name__ == "__main__":
         "max-inflight-txns": 100000,
         "frequency": 0,
         "config": "",
+        "topo-degree": 3,
+        "topo-skewness": 0.0, # uniform
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use copycat_protocol::transaction::Txn;
@@ -38,13 +39,14 @@ impl Node {
         dissem_pattern: DissemPattern,
         crypto_scheme: CryptoScheme,
         config: Config,
+        neighbors: HashSet<NodeId>,
     ) -> Result<(Self, mpsc::Receiver<Arc<Txn>>), CopycatError> {
         log::trace!("starting: {chain_type:?}");
 
         // let state = Arc::new(ChainState::new(chain_type));
 
         let (peer_messenger, peer_txn_recv, peer_blk_recv, peer_consensus_recv, peer_pmaker_recv) =
-            PeerMessenger::new(id).await?;
+            PeerMessenger::new(id, neighbors).await?;
 
         let peer_messenger = Arc::new(peer_messenger);
 

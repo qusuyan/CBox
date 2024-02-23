@@ -1,6 +1,9 @@
 mod broadcast;
 use broadcast::BroadcastTxnDissemination;
 
+mod gossip;
+use gossip::GossipTxnDissemination;
+
 use crate::{config::Config, peers::PeerMessenger};
 use copycat_protocol::transaction::Txn;
 use copycat_protocol::DissemPattern;
@@ -24,7 +27,7 @@ fn get_txn_dissemination(
 ) -> Box<dyn TxnDissemination> {
     match dissem_pattern {
         DissemPattern::Broadcast => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)),
-        _ => todo!(),
+        DissemPattern::Gossip => Box::new(GossipTxnDissemination::new(id, peer_messenger)),
     }
 }
 

@@ -1,6 +1,9 @@
 mod broadcast;
 use broadcast::BroadcastBlockDissemination;
 
+mod gossip;
+use gossip::GossipBlockDissemination;
+
 use crate::{config::Config, peers::PeerMessenger};
 use copycat_protocol::block::Block;
 use copycat_protocol::DissemPattern;
@@ -24,7 +27,7 @@ fn get_block_dissemination(
 ) -> Box<dyn BlockDissemination> {
     match dissem_pattern {
         DissemPattern::Broadcast => Box::new(BroadcastBlockDissemination::new(id, peer_messenger)),
-        _ => todo!(),
+        DissemPattern::Gossip => Box::new(GossipBlockDissemination::new(id, peer_messenger)),
     }
 }
 

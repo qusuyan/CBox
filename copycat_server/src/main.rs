@@ -6,12 +6,14 @@ mod peers;
 mod stage;
 
 use copycat_protocol::{ChainType, CryptoScheme, DissemPattern};
+use copycat_utils::get_neighbors;
 use copycat_utils::log::colored_level;
 
 use config::Config;
 use flowgen::get_flow_gen;
 use node::Node;
 
+use std::collections::HashSet;
 use std::io::Write;
 
 use tokio::runtime::Builder;
@@ -57,6 +59,10 @@ struct CliArgs {
     /// Blockchain specific configuration string in TOML format
     #[arg(long, default_value_t = String::from(""))]
     config: String,
+
+    /// Network topology
+    #[arg(long, default_value_t = String::from(""))]
+    topology: String,
 }
 
 impl CliArgs {
@@ -111,6 +117,19 @@ pub fn main() {
     };
     log::info!("Node config: {:?}", config);
 
+    let neighbors = if args.topology.is_empty() {
+        HashSet::new()
+    } else {
+        match get_neighbors(id, args.topology) {
+            Ok(neighbors) => neighbors,
+            Err(e) => {
+                log::error!("parse network topology failed: {e}");
+                HashSet::new()
+            }
+        }
+    };
+    log::info!("neighbors: {neighbors:?}");
+
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_node_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
@@ -119,7 +138,7 @@ pub fn main() {
 
     runtime.block_on(async {
         let (node, mut executed): (Node, _) =
-            match Node::init(id, args.chain, args.dissem_pattern, args.crypto, config).await {
+            match Node::init(id, args.chain, args.dissem_pattern, args.crypto, config, neighbors).await {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("failed to start node: {e:?}");

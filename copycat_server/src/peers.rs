@@ -5,7 +5,7 @@ use mailbox_client::{ClientStubRecvHalf, ClientStubSendHalf};
 use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use std::{fmt::Debug, sync::Arc};
+use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 #[derive(Debug, Serialize, Deserialize)]
 enum SendRequest {
@@ -15,6 +15,7 @@ enum SendRequest {
 
 pub struct PeerMessenger {
     transport_hub: ClientStubSendHalf<MsgType>,
+    neighbors: HashSet<NodeId>,
     _peer_receiver_rt: tokio::runtime::Runtime,
     _peer_receiver_handle: JoinHandle<()>,
 }
@@ -22,6 +23,7 @@ pub struct PeerMessenger {
 impl PeerMessenger {
     pub async fn new(
         id: NodeId,
+        neighbors: HashSet<NodeId>,
     ) -> Result<
         (
             Self,
@@ -57,6 +59,7 @@ impl PeerMessenger {
         Ok((
             Self {
                 transport_hub: send_half,
+                neighbors,
                 _peer_receiver_rt,
                 _peer_receiver_handle,
             },
@@ -78,6 +81,19 @@ impl PeerMessenger {
         log::trace!("broadcasting {msg:?}");
         if let Err(e) = self.transport_hub.broadcast(msg).await {
             return Err(CopycatError(format!("broadcast failed: {e:?}")));
+        }
+        Ok(())
+    }
+
+    pub async fn gossip(
+        &self,
+        msg: MsgType,
+        skipping: HashSet<NodeId>,
+    ) -> Result<(), CopycatError> {
+        log::trace!("gossiping {msg:?}");
+        let dests = self.neighbors.difference(&skipping).cloned().collect();
+        if let Err(e) = self.transport_hub.multicast(dests, msg).await {
+            return Err(CopycatError(format!("gossip failed: {e:?}")));
         }
         Ok(())
     }

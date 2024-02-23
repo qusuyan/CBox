@@ -361,6 +361,7 @@ dependencies = [
  "env_logger",
  "log",
  "mailbox_utils",
+ "serde_json",
  "tokio",
  "toml",
 ]
