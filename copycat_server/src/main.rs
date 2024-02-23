@@ -63,6 +63,10 @@ struct CliArgs {
     /// Network topology
     #[arg(long, default_value_t = String::from(""))]
     topology: String,
+
+    /// If we should disseminate the transactions
+    #[arg(long, default_value_t = false)]
+    dissem_txn: bool,
 }
 
 impl CliArgs {
@@ -138,7 +142,7 @@ pub fn main() {
 
     runtime.block_on(async {
         let (node, mut executed): (Node, _) =
-            match Node::init(id, args.chain, args.dissem_pattern, args.crypto, config, neighbors).await {
+            match Node::init(id, args.chain, args.dissem_pattern, args.crypto, config, args.dissem_txn, neighbors).await {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("failed to start node: {e:?}");

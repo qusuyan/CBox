@@ -35,6 +35,7 @@ pub async fn txn_dissemination_thread(
     id: NodeId,
     dissem_pattern: DissemPattern,
     config: Config,
+    enabled: bool,
     peer_messenger: Arc<PeerMessenger>,
     mut validated_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
     txn_ready_send: mpsc::Sender<Arc<Txn>>,
@@ -54,9 +55,11 @@ pub async fn txn_dissemination_thread(
 
         log::trace!("got from {src} new txn {txn:?}");
 
-        if let Err(e) = txn_dissemination_stage.disseminate(src, &txn).await {
-            log::error!("failed to disseminate txn: {e:?}");
-            continue;
+        if enabled {
+            if let Err(e) = txn_dissemination_stage.disseminate(src, &txn).await {
+                log::error!("failed to disseminate txn: {e:?}");
+                continue;
+            }
         }
 
         if let Err(e) = txn_ready_send.send(txn).await {

@@ -39,6 +39,7 @@ impl Node {
         dissem_pattern: DissemPattern,
         crypto_scheme: CryptoScheme,
         config: Config,
+        dissem_txns: bool,
         neighbors: HashSet<NodeId>,
     ) -> Result<(Self, mpsc::Receiver<Arc<Txn>>), CopycatError> {
         log::trace!("starting: {chain_type:?}");
@@ -72,6 +73,7 @@ impl Node {
             id,
             dissem_pattern,
             config.clone(),
+            dissem_txns,
             peer_messenger.clone(),
             validated_txn_recv,
             txn_ready_send,
