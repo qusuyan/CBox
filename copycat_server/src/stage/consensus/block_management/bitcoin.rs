@@ -1,11 +1,12 @@
-use crate::config::BitcoinConfig;
-
 use super::BlockManagement;
+use crate::config::BitcoinConfig;
+use crate::peers::PeerMessenger;
+
 use copycat_protocol::block::{Block, BlockHeader};
 use copycat_protocol::crypto::{sha256, DummyMerkleTree, Hash, PubKey};
 use copycat_protocol::transaction::{BitcoinTxn, Txn};
-use copycat_protocol::CryptoScheme;
-use copycat_utils::CopycatError;
+use copycat_protocol::{CryptoScheme, MsgType};
+use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 use get_size::GetSize;
@@ -14,6 +15,7 @@ use rand::Rng;
 
 use tokio::time::{Duration, Instant};
 
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
@@ -21,6 +23,7 @@ use std::sync::Arc;
 const HEADER_HASH_TIME: f64 = 0.0000019;
 
 pub struct BitcoinBlockManagement {
+    me: NodeId,
     crypto_scheme: CryptoScheme,
     txn_pool: HashMap<Hash, Arc<Txn>>,
     block_pool: HashMap<Hash, (Arc<Block>, u64)>,
@@ -37,11 +40,20 @@ pub struct BitcoinBlockManagement {
     utxo_spent: HashSet<(Hash, PubKey)>,
     block_emit_time: Option<Instant>,
     pow_time: Option<Duration>, // for debugging
+    // for requesting missing blocks
+    peer_messenger: Arc<PeerMessenger>,
+    orphan_blocks: HashMap<Hash, HashSet<Hash>>,
 }
 
 impl BitcoinBlockManagement {
-    pub fn new(crypto_scheme: CryptoScheme, config: BitcoinConfig) -> Self {
+    pub fn new(
+        me: NodeId,
+        crypto_scheme: CryptoScheme,
+        config: BitcoinConfig,
+        peer_messenger: Arc<PeerMessenger>,
+    ) -> Self {
         Self {
+            me,
             crypto_scheme,
             txn_pool: HashMap::new(),
             block_pool: HashMap::new(),
@@ -57,6 +69,8 @@ impl BitcoinBlockManagement {
             utxo_spent: HashSet::new(),
             block_emit_time: None,
             pow_time: None,
+            peer_messenger,
+            orphan_blocks: HashMap::new(),
         }
     }
 
@@ -66,6 +80,26 @@ impl BitcoinBlockManagement {
         } else {
             let (_, chain_tail_height) = self.block_pool.get(&self.chain_tail).unwrap();
             *chain_tail_height
+        }
+    }
+
+    pub fn update_orphans_and_return_tail(&mut self, block_hash: Hash, height: u64) -> (Hash, u64) {
+        match self.orphan_blocks.remove(&block_hash) {
+            Some(children) => {
+                let mut longest_tail = block_hash;
+                let mut longest_tail_height = height;
+                for child in children {
+                    self.block_pool.get_mut(&child).unwrap().1 = height + 1;
+                    let (new_decendant, new_decendant_height) =
+                        self.update_orphans_and_return_tail(child, height + 1);
+                    if new_decendant_height > longest_tail_height {
+                        longest_tail = new_decendant;
+                        longest_tail_height = new_decendant_height;
+                    }
+                }
+                (longest_tail, longest_tail_height)
+            }
+            None => (block_hash, height),
         }
     }
 }
@@ -341,30 +375,82 @@ impl BlockManagement for BitcoinBlockManagement {
             return Ok(vec![]);
         }
 
-        let height = if prev_hash.is_zero() {
+        // height of block in the chain or 0 if the height is unknown because we have not seen its parent yet
+        let blk_height = if prev_hash.is_zero() {
             1u64
         } else {
             match self.block_pool.get(prev_hash) {
-                Some((_, parent_height)) => parent_height + 1,
-                None => unimplemented!(
-                    "currently does not support validating blocks whose parent was not recorded"
-                ),
+                Some((_, parent_height)) => {
+                    if *parent_height > 0 {
+                        parent_height + 1
+                    } else {
+                        0
+                    }
+                }
+                None => 0,
             }
         };
         self.block_pool
-            .insert(block_hash.clone(), (block.clone(), height));
+            .insert(block_hash.clone(), (block.clone(), blk_height));
 
-        // the new block is the tail of a shorter chain, do nothing
-        let chain_length = self.get_chain_length();
-        if height <= chain_length {
-            log::debug!("new chain is shorter: new chain {height} vs old chain {chain_length}");
+        if blk_height == 0 {
+            // we are missing an ancestor, adding it to orphan blocks
+            match self.orphan_blocks.entry(*prev_hash) {
+                Occupied(mut entry) => {
+                    entry.get_mut().insert(block_hash);
+                }
+                Vacant(entry) => {
+                    entry.insert(HashSet::from([block_hash]));
+                }
+            }
+
+            // find the missing ancestor and send a request for it
+            let mut parent = prev_hash;
+            loop {
+                assert!(!parent.is_zero());
+                if let Some((block, height)) = self.block_pool.get(parent) {
+                    assert!(*height == 0);
+                    parent = match &block.header {
+                        BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+                        _ => unreachable!(),
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // request the missing ancestor from peers
+            self.peer_messenger
+                .gossip(
+                    MsgType::BlockReq { blk_id: *parent },
+                    HashSet::from([self.me]),
+                )
+                .await?;
             return Ok(vec![]);
         }
 
-        // TODO: find blocks belonging to the diverging chain up to the common ancestor
-        let mut new_chain: Vec<Arc<Block>> = vec![block.clone()];
-        let mut new_tail_ancester = prev_hash;
-        let mut new_tail_ancester_height = height - 1;
+        // there might be decendants of this block update child heights and use them as new chain tail
+        let (new_tail, new_tail_height) =
+            self.update_orphans_and_return_tail(block_hash, blk_height);
+        let (new_tail_block, _) = self.block_pool.get(&new_tail).unwrap();
+        let new_tail_parent = match &new_tail_block.header {
+            BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+            _ => unreachable!(),
+        };
+
+        // the new block is the tail of a shorter chain, do nothing
+        let chain_length = self.get_chain_length();
+        if new_tail_height <= chain_length {
+            log::debug!(
+                "new chain is shorter: new chain {new_tail_height} vs old chain {chain_length}"
+            );
+            return Ok(vec![]);
+        }
+
+        // find blocks belonging to the diverging chain up to the common ancestor
+        let mut new_chain: Vec<Arc<Block>> = vec![new_tail_block.clone()];
+        let mut new_tail_ancester = new_tail_parent;
+        let mut new_tail_ancester_height = new_tail_height - 1;
         while new_tail_ancester_height > chain_length {
             let (parent, parent_height) = self.block_pool.get(new_tail_ancester).unwrap();
             assert!(new_tail_ancester_height == *parent_height);
@@ -376,24 +462,40 @@ impl BlockManagement for BitcoinBlockManagement {
             new_tail_ancester_height -= 1;
         }
 
+        // find the old tail
+        let mut old_chain: Vec<Arc<Block>> = vec![];
         let mut old_tail_ancester = &self.chain_tail;
-        let mut undo_utxo_spent: HashSet<(Hash, PubKey)> = HashSet::new();
-        let mut undo_new_utxo: HashSet<(Hash, PubKey)> = HashSet::new();
-        let mut undo_txns: HashSet<Hash> = HashSet::new();
         loop {
             if new_tail_ancester == old_tail_ancester {
                 // found a common ancester, break
                 break;
             }
-
             let (new_tail_parent, new_tail_parent_height) =
                 self.block_pool.get(new_tail_ancester).unwrap();
             let (old_tail_parent, old_tail_parent_height) =
                 self.block_pool.get(old_tail_ancester).unwrap();
             assert!(new_tail_parent_height == old_tail_parent_height);
+
             new_chain.push(new_tail_parent.clone());
+            old_chain.push(old_tail_parent.clone());
+
+            new_tail_ancester = match &new_tail_parent.header {
+                BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+                _ => unreachable!(),
+            };
+            old_tail_ancester = match &old_tail_parent.header {
+                BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+                _ => unreachable!(),
+            };
+        }
+
+        // undo old chain
+        let mut undo_utxo_spent: HashSet<(Hash, PubKey)> = HashSet::new();
+        let mut undo_new_utxo: HashSet<(Hash, PubKey)> = HashSet::new();
+        let mut undo_txns: HashSet<Hash> = HashSet::new();
+        for undo_blk in old_chain {
             // add old tail parent to undo set
-            for txn in old_tail_parent.txns.iter().rev() {
+            for txn in undo_blk.txns.iter().rev() {
                 // undo_txns.push(txn.clone());
                 let txn_hash = sha256(&bincode::serialize(txn)?)?;
                 match txn.as_ref() {
@@ -435,14 +537,6 @@ impl BlockManagement for BitcoinBlockManagement {
                     _ => unreachable!(),
                 }
             }
-            new_tail_ancester = match &new_tail_parent.header {
-                BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
-                _ => unreachable!(),
-            };
-            old_tail_ancester = match &old_tail_parent.header {
-                BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
-                _ => unreachable!(),
-            };
         }
         // reverse the new tail so that it goes in order
         new_chain.reverse();
@@ -546,7 +640,7 @@ impl BlockManagement for BitcoinBlockManagement {
         self.block_size = 0;
         self.utxo_spent.clear();
         self.new_utxo.clear();
-        self.chain_tail = block_hash;
+        self.chain_tail = new_tail;
 
         // add new_utxos and remove utxo_spent from self.utxo
         self.utxo.extend(new_utxos);
@@ -569,6 +663,38 @@ impl BlockManagement for BitcoinBlockManagement {
         self.difficulty = msg[0];
         Ok(())
     }
+
+    async fn handle_peer_blk_req(
+        &mut self,
+        peer: NodeId,
+        blk_id: Hash,
+    ) -> Result<(), CopycatError> {
+        // only return the req if the block is known
+        if let Some((blk, _)) = self.block_pool.get(&blk_id) {
+            self.peer_messenger
+                .send(
+                    peer,
+                    // MsgType::BlockResp {
+                    //     id: blk_id,
+                    //     blk: blk.as_ref().clone(),
+                    // },
+                    MsgType::NewBlock {
+                        blk: blk.as_ref().clone(),
+                    },
+                )
+                .await?
+        }
+        Ok(())
+    }
+
+    //     async fn handle_peer_blk_resp(
+    //         &mut self,
+    //         peer: NodeId,
+    //         blk_id: Hash,
+    //         block: Arc<Block>,
+    //     ) -> Result<(), CopycatError> {
+    //         unimplemented!()
+    //     }
 }
 
 #[cfg(test)]

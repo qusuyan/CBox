@@ -3,8 +3,6 @@
 export RUST_LOG=debug
 export RUST_BACKTRACE=1
 
-echo $@
-
 BUILDTYPE=$1
 MACHINE_ID=$2
 LOCAL_ID=$3

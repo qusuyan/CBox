@@ -1,7 +1,9 @@
 use super::BlockManagement;
+
 use copycat_protocol::block::{Block, BlockHeader};
+use copycat_protocol::crypto::Hash;
 use copycat_protocol::transaction::Txn;
-use copycat_utils::CopycatError;
+use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 use get_size::GetSize;
@@ -61,4 +63,21 @@ impl BlockManagement for DummyBlockManagement {
     async fn handle_pmaker_msg(&mut self, _msg: Arc<Vec<u8>>) -> Result<(), CopycatError> {
         Ok(())
     }
+
+    async fn handle_peer_blk_req(
+        &mut self,
+        _peer: NodeId,
+        _blk_id: Hash,
+    ) -> Result<(), CopycatError> {
+        unimplemented!()
+    }
+
+    // async fn handle_peer_blk_resp(
+    //     &mut self,
+    //     _peer: NodeId,
+    //     _blk_id: Hash,
+    //     _block: Arc<Block>,
+    // ) -> Result<(), CopycatError> {
+    //     unimplemented!()
+    // }
 }

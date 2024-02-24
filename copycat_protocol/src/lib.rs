@@ -4,7 +4,7 @@ pub use crypto::CryptoScheme;
 pub mod transaction;
 
 use block::Block;
-use get_size::GetSize;
+use crypto::Hash;
 use serde::{Deserialize, Serialize};
 use transaction::Txn;
 
@@ -20,10 +20,12 @@ pub enum DissemPattern {
     Gossip,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MsgType {
     NewTxn { txn: Txn },
     NewBlock { blk: Block },
     ConsensusMsg { msg: Vec<u8> },
     PMakerMsg { msg: Vec<u8> },
+    BlockReq { blk_id: Hash },
+    // BlockResp { id: Hash, blk: Block },
 }

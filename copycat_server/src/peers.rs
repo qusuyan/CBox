@@ -1,4 +1,4 @@
-use copycat_protocol::{block::Block, transaction::Txn, MsgType};
+use copycat_protocol::{block::Block, crypto::Hash, transaction::Txn, MsgType};
 use copycat_utils::{CopycatError, NodeId};
 use mailbox_client::{ClientStubRecvHalf, ClientStubSendHalf};
 
@@ -31,6 +31,8 @@ impl PeerMessenger {
             mpsc::Receiver<(NodeId, Arc<Block>)>,
             mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
             mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
+            mpsc::Receiver<(NodeId, Hash)>,
+            // mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,
         ),
         CopycatError,
     > {
@@ -40,6 +42,8 @@ impl PeerMessenger {
         let (rx_blk_send, rx_blk_recv) = mpsc::channel(0x100000);
         let (rx_consensus_send, rx_consensus_recv) = mpsc::channel(0x100000);
         let (rx_pmaker_send, rx_pmaker_recv) = mpsc::channel(0x100000);
+        let (rx_blk_req_send, rx_blk_req_recv) = mpsc::channel(0x100000);
+        // let (rx_blk_resp_send, rx_blk_resp_recv) = mpsc::channel(0x100000);
 
         // put receiver runtime on a separate thread for the bug here: https://github.com/tokio-rs/tokio/issues/4730
         let _peer_receiver_rt = tokio::runtime::Builder::new_multi_thread()
@@ -54,6 +58,8 @@ impl PeerMessenger {
             rx_blk_send,
             rx_consensus_send,
             rx_pmaker_send,
+            rx_blk_req_send,
+            // rx_blk_resp_send,
         ));
 
         Ok((
@@ -67,6 +73,8 @@ impl PeerMessenger {
             rx_blk_recv,
             rx_consensus_recv,
             rx_pmaker_recv,
+            rx_blk_req_recv,
+            // rx_blk_resp_recv,
         ))
     }
 
@@ -91,9 +99,11 @@ impl PeerMessenger {
         skipping: HashSet<NodeId>,
     ) -> Result<(), CopycatError> {
         log::trace!("gossiping {msg:?}");
-        let dests = self.neighbors.difference(&skipping).cloned().collect();
-        if let Err(e) = self.transport_hub.multicast(dests, msg).await {
-            return Err(CopycatError(format!("gossip failed: {e:?}")));
+        let dests: Vec<u64> = self.neighbors.difference(&skipping).cloned().collect();
+        if dests.len() > 0 {
+            if let Err(e) = self.transport_hub.multicast(dests, msg).await {
+                return Err(CopycatError(format!("gossip failed: {e:?}")));
+            }
         }
         Ok(())
     }
@@ -104,6 +114,8 @@ impl PeerMessenger {
         rx_blk_send: mpsc::Sender<(NodeId, Arc<Block>)>,
         rx_consensus_send: mpsc::Sender<(NodeId, Arc<Vec<u8>>)>,
         rx_pmaker_send: mpsc::Sender<(NodeId, Arc<Vec<u8>>)>,
+        rx_blk_req_send: mpsc::Sender<(NodeId, Hash)>,
+        // rx_blk_resp_send: mpsc::Sender<(NodeId, (Hash, Arc<Block>))>,
     ) {
         log::info!("peer receiver thread started");
 
@@ -132,6 +144,16 @@ impl PeerMessenger {
                                 log::error!("rx_pmaker_send failed: {e:?}")
                             }
                         }
+                        MsgType::BlockReq { blk_id } => {
+                            if let Err(e) = rx_blk_req_send.send((src, blk_id)).await {
+                                log::error!("rx_pmaker_send failed: {e:?}")
+                            }
+                        } // MsgType::BlockResp { id, blk } => {
+                          //     if let Err(e) = rx_blk_resp_send.send((src, (id, Arc::new(blk)))).await
+                          //     {
+                          //         log::error!("rx_pmaker_send failed: {e:?}")
+                          //     }
+                          // }
                     }
                 }
                 Err(e) => {

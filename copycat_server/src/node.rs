@@ -46,8 +46,15 @@ impl Node {
 
         // let state = Arc::new(ChainState::new(chain_type));
 
-        let (peer_messenger, peer_txn_recv, peer_blk_recv, peer_consensus_recv, peer_pmaker_recv) =
-            PeerMessenger::new(id, neighbors).await?;
+        let (
+            peer_messenger,
+            peer_txn_recv,
+            peer_blk_recv,
+            peer_consensus_recv,
+            peer_pmaker_recv,
+            peer_blk_req_recv,
+            // peer_blk_resp_recv,
+        ) = PeerMessenger::new(id, neighbors).await?;
 
         let peer_messenger = Arc::new(peer_messenger);
 
@@ -91,6 +98,9 @@ impl Node {
             config.clone(),
             crypto_scheme,
             peer_blk_recv,
+            peer_blk_req_recv,
+            // peer_blk_resp_recv,
+            peer_messenger.clone(),
             txn_ready_recv,
             pacemaker_recv,
             new_block_send,

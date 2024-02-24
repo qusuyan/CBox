@@ -3,8 +3,10 @@ use dummy::DummyBlockManagement;
 mod bitcoin;
 use bitcoin::BitcoinBlockManagement;
 
+use copycat_protocol::block::Block;
+use copycat_protocol::crypto::Hash;
 use copycat_protocol::transaction::Txn;
-use copycat_protocol::{block::Block, CryptoScheme};
+use copycat_protocol::CryptoScheme;
 use copycat_utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -14,6 +16,7 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use crate::config::Config;
+use crate::peers::PeerMessenger;
 
 #[async_trait]
 pub trait BlockManagement: Sync + Send {
@@ -23,12 +26,30 @@ pub trait BlockManagement: Sync + Send {
     async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError>;
     async fn validate_block(&mut self, block: Arc<Block>) -> Result<Vec<Arc<Block>>, CopycatError>;
     async fn handle_pmaker_msg(&mut self, msg: Arc<Vec<u8>>) -> Result<(), CopycatError>;
+    async fn handle_peer_blk_req(&mut self, peer: NodeId, blk_id: Hash)
+        -> Result<(), CopycatError>;
+    // async fn handle_peer_blk_resp(
+    //     &mut self,
+    //     peer: NodeId,
+    //     blk_id: Hash,
+    //     block: Arc<Block>,
+    // ) -> Result<(), CopycatError>;
 }
 
-fn get_blk_creation(config: Config, crypto_scheme: CryptoScheme) -> Box<dyn BlockManagement> {
+fn get_blk_creation(
+    id: NodeId,
+    config: Config,
+    crypto_scheme: CryptoScheme,
+    peer_messenger: Arc<PeerMessenger>,
+) -> Box<dyn BlockManagement> {
     match config {
         Config::Dummy => Box::new(DummyBlockManagement::new()),
-        Config::Bitcoin { config } => Box::new(BitcoinBlockManagement::new(crypto_scheme, config)),
+        Config::Bitcoin { config } => Box::new(BitcoinBlockManagement::new(
+            id,
+            crypto_scheme,
+            config,
+            peer_messenger,
+        )),
     }
 }
 
@@ -37,13 +58,16 @@ pub async fn block_management_thread(
     config: Config,
     crypto_scheme: CryptoScheme,
     mut peer_blk_recv: mpsc::Receiver<(NodeId, Arc<Block>)>,
+    mut peer_blk_req_recv: mpsc::Receiver<(NodeId, Hash)>,
+    // mut peer_blk_resp_recv: mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,
+    peer_messenger: Arc<PeerMessenger>,
     mut txn_ready_recv: mpsc::Receiver<Arc<Txn>>,
     mut pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
     new_block_send: mpsc::Sender<(NodeId, Vec<Arc<Block>>)>,
 ) {
     log::info!("block management stage starting...");
 
-    let mut block_management_stage = get_blk_creation(config, crypto_scheme);
+    let mut block_management_stage = get_blk_creation(id, config, crypto_scheme, peer_messenger);
     let mut batch_prepare_time = Instant::now() + Duration::from_millis(100);
 
     loop {
@@ -139,8 +163,37 @@ pub async fn block_management_thread(
                         return;
                     }
                 }
-
             }
+
+            req = peer_blk_req_recv.recv() => {
+                match req {
+                    Some((peer, blk_id)) => {
+                        if let Err(e) = block_management_stage.handle_peer_blk_req(peer, blk_id).await {
+                            log::error!("error handling peer block request: {e:?}");
+                            continue;
+                        }
+                    }
+                    None => {
+                        log::error!("peer_blk_req pipe closed unexpectedly");
+                        continue;
+                    }
+                }
+            }
+
+            // resp = peer_blk_resp_recv.recv() => {
+            //     match resp {
+            //         Some((src, (id, block))) => {
+            //             if let Err(e) = block_management_stage.handle_peer_blk_resp(src, id, block).await {
+            //                 log::error!("error handling peer block response: {e:?}");
+            //                 continue;
+            //             }
+            //         }
+            //         None => {
+            //             log::error!("peer_blk_resp pipe closed unexpectedly");
+            //             continue;
+            //         }
+            //     }
+            // }
         }
     }
 }
