@@ -441,6 +441,10 @@ impl BlockManagement for BitcoinBlockManagement {
             _ => unreachable!(),
         };
 
+        if new_tail != block_hash {
+            log::debug!("found block {block_hash}'s decendant {new_tail}")
+        }
+
         // the new block is the tail of a shorter chain, do nothing
         let chain_length = self.get_chain_length();
         if new_tail_height <= chain_length {

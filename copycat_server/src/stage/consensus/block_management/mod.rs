@@ -168,6 +168,7 @@ pub async fn block_management_thread(
             req = peer_blk_req_recv.recv() => {
                 match req {
                     Some((peer, blk_id)) => {
+                        log::debug!("got block request for {blk_id}");
                         if let Err(e) = block_management_stage.handle_peer_blk_req(peer, blk_id).await {
                             log::error!("error handling peer block request: {e:?}");
                             continue;
