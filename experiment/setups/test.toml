@@ -2,7 +2,7 @@
 num_iterations = 1
 
 [parameters]
-config = "difficulty=27+commit_depth=0"
+config = "difficulty=27+commit_depth=5"
 dissem = "gossip"
 exp-time = 1800
 frequency = 1000

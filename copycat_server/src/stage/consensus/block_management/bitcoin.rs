@@ -419,6 +419,9 @@ impl BlockManagement for BitcoinBlockManagement {
                 }
             }
 
+            log::debug!(
+                "block {block_hash} arrived early, still waiting for its ancestor {parent}"
+            );
             // request the missing ancestor from peers
             self.peer_messenger
                 .gossip(
