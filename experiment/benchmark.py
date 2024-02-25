@@ -98,19 +98,19 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
 
     time.sleep(5)
 
+    num_accounts = params["num-accounts"] if params["disable-txn-dissem"] else int(params["num-accounts"] / params["num-nodes"])
+    max_inflight = params["max-inflight-txns"] if params["disable-txn-dissem"] else int(params["max-inflight-txns"] / params["num-nodes"])
+    frequency = params["frequency"] if params["disable-txn-dissem"] else int(params["frequency"] / params["num-nodes"])
+
     for local_id in range(num_nodes_per_machine):
         run_args = [params["build-type"], "@POS", local_id, params["node-threads"], params["chain-type"], 
-                    int(params["num-accounts"] / params["num-nodes"]), 
-                    int(params["max-inflight-txns"] / params["num-nodes"]), 
-                    int(params["frequency"] / params["num-nodes"]), params["config"], params["dissem"]]
+                    num_accounts, max_inflight, frequency, params["dissem"], params["disable-txn-dissem"], params["config"]]
         node_task = exp_machines.run_background(config, "node", args=run_args, engine=ENGINE, verbose=verbose)
         tasks.append(node_task)
 
     # remaining nodes
     run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["node-threads"], params["chain-type"], 
-                    int(params["num-accounts"] / params["num-nodes"]), 
-                    int(params["max-inflight-txns"] / params["num-nodes"]), 
-                    int(params["frequency"] / params["num-nodes"]), params["config"], params["dissem"]]
+                    num_accounts, max_inflight, frequency, params["dissem"], params["disable-txn-dissem"], params["config"]]
     if num_nodes_remainder > 0:
         remainder_task = exp_machines.run_background(config, "node", args=run_args, num_machines = num_nodes_remainder, engine=ENGINE, verbose=verbose)
         tasks.append(remainder_task)
@@ -145,7 +145,8 @@ if __name__ == "__main__":
         "config": "",
         "topo-degree": 3,
         "topo-skewness": 0.0, # uniform
-        "dissem": "broadcast" # broadcast or gossip
+        "dissem": "broadcast", # broadcast or gossip
+        "disable-txn-dissem": False,
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

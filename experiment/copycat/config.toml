@@ -23,6 +23,7 @@ node = [
   ["accounts", "10000"],
   ["max_inflight", "100000"],
   ["frequency", "0"],
-  ["config", ""],
   ["dissem", "broadcast"],
+  ["disable_txn_dissem", "false"],
+  ["config", ""],
 ]
