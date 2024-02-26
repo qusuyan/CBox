@@ -1,15 +1,14 @@
 [package]
+edition = "2021"
 name = "copycat_mailbox"
 version = "0.1.0"
-edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = "1.32.0"
-log = "0.4"
+clap = {version = "4", default-features = false, features = ["help", "suggestions", "color", "std", "cargo", "derive"]}
 env_logger = "0.10"
-clap = { version="4", default-features=false, features=["help", "suggestions", "color", "std", "cargo", "derive"]}
-mailbox = { git="ssh://git@github.com/qusuyan/mailbox.git" }
-mailbox_utils = { git="ssh://git@github.com/qusuyan/mailbox.git" }
-copycat_protocol = { path="../copycat_protocol" }
+log = "0.4"
+mailbox = {git = "ssh://git@github.com/qusuyan/mailbox.git"}
+mailbox_utils = {git = "ssh://git@github.com/qusuyan/mailbox.git"}
+tokio = "1.32.0"

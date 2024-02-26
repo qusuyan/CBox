@@ -1,8 +1,9 @@
 #! /bin/python3
 
-import json, time, sys, signal, os, math
-import numpy as np
+import json, time, sys, signal, os
 from datetime import datetime
+
+import pandas as pd
 
 from dist_make import Cluster, Configuration, Experiment
 from dist_make.logging import MetaLogger
@@ -120,11 +121,16 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     cleanup()
 
     # collect stats
+    stats = { "tput": 0 }
     for machine in machine_config.values():
         for node in machine["node_list"]:
             addr = machine["addr"].split(":")[0]
             stats_file = f"copycat_node_{node}.csv"
             cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
+            df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
+            stats["tput"] = max(stats["tput"], df.iloc[-1]['Throughput (txn/s)'])
+    with open(f"./results/{exp_name}/stats.json") as f:
+        json.dump(stats, f, indent=2)
 
     return True
 

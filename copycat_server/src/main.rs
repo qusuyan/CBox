@@ -1,17 +1,10 @@
-mod composition;
-mod config;
-mod flowgen;
-mod node;
-mod peers;
-mod stage;
+use copycat::protocol::{ChainType, CryptoScheme, DissemPattern};
+use copycat::utils::get_neighbors;
+use copycat::utils::log::colored_level;
 
-use copycat_protocol::{ChainType, CryptoScheme, DissemPattern};
-use copycat_utils::get_neighbors;
-use copycat_utils::log::colored_level;
-
-use config::Config;
-use flowgen::get_flow_gen;
-use node::Node;
+use copycat::get_flow_gen;
+use copycat::Config;
+use copycat::Node;
 
 use std::collections::HashSet;
 use std::io::Write;
