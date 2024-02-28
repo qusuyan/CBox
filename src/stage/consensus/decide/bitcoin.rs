@@ -1,9 +1,9 @@
-use crate::config::BitcoinConfig;
-
 use super::Decision;
+use crate::config::BitcoinConfig;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::{sha256, Hash};
 use crate::utils::CopycatError;
+use crate::NodeId;
 use tokio::sync::Notify;
 
 use std::collections::{HashMap, VecDeque};
@@ -12,6 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 pub struct BitcoinDecision {
+    id: NodeId,
     commit_len: u8,
     block_pool: HashMap<Hash, (Arc<Block>, u64)>,
     chain_tail: VecDeque<Hash>,
@@ -19,8 +20,9 @@ pub struct BitcoinDecision {
 }
 
 impl BitcoinDecision {
-    pub fn new(config: BitcoinConfig) -> Self {
+    pub fn new(id: NodeId, config: BitcoinConfig) -> Self {
         Self {
+            id,
             commit_len: config.commit_depth,
             block_pool: HashMap::new(),
             chain_tail: VecDeque::new(),
@@ -54,8 +56,8 @@ impl Decision for BitcoinDecision {
         loop {
             // the entire new tail has been pruned
             if self.chain_tail.is_empty() {
-                log::warn!(
-                    "entire undecided chain pruned, a committed block might need to be undone"
+                pf_warn!(
+                    self.id; "entire undecided chain pruned, a committed block might need to be undone"
                 );
                 break;
             }
@@ -86,7 +88,8 @@ impl Decision for BitcoinDecision {
             self.chain_tail.push_back(blk_hash);
         }
 
-        log::debug!(
+        pf_debug!(
+            self.id;
             "Current chain length: {}, # blocks waiting to be committed: {}",
             first_block_height + new_tail.len() as u64,
             self.chain_tail.len()

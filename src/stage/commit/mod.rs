@@ -3,7 +3,7 @@ use dummy::DummyCommit;
 
 use crate::protocol::block::Block;
 use crate::protocol::transaction::Txn;
-use crate::utils::CopycatError;
+use crate::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
@@ -17,7 +17,11 @@ pub trait Commit: Sync + Send {
     async fn commit(&self, block: Arc<Block>) -> Result<(), CopycatError>;
 }
 
-pub fn get_commit(config: Config, executed_send: mpsc::Sender<Arc<Txn>>) -> Box<dyn Commit> {
+pub fn get_commit(
+    _id: NodeId,
+    config: Config,
+    executed_send: mpsc::Sender<Arc<Txn>>,
+) -> Box<dyn Commit> {
     match config {
         Config::Dummy => Box::new(DummyCommit::new(executed_send)),
         Config::Bitcoin { .. } => Box::new(DummyCommit::new(executed_send)), // TODO:
@@ -25,27 +29,28 @@ pub fn get_commit(config: Config, executed_send: mpsc::Sender<Arc<Txn>>) -> Box<
 }
 
 pub async fn commit_thread(
+    id: NodeId,
     config: Config,
     mut commit_recv: mpsc::Receiver<Arc<Block>>,
     executed_send: mpsc::Sender<Arc<Txn>>,
 ) {
-    log::info!("commit stage starting...");
+    pf_info!(id; "commit stage starting...");
 
-    let commit_stage = get_commit(config, executed_send);
+    let commit_stage = get_commit(id, config, executed_send);
 
     loop {
         let block = match commit_recv.recv().await {
             Some(blk) => blk,
             None => {
-                log::error!("commit pipe closed unexpectedly");
+                pf_error!(id; "commit pipe closed unexpectedly");
                 return;
             }
         };
 
-        log::debug!("got new block {block:?}");
+        pf_debug!(id; "got new block {:?}", block);
 
         if let Err(e) = commit_stage.commit(block).await {
-            log::error!("failed to commit: {e:?}");
+            pf_error!(id; "failed to commit: {:?}", e);
             continue;
         }
     }

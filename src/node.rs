@@ -42,7 +42,7 @@ impl Node {
         dissem_txns: bool,
         neighbors: HashSet<NodeId>,
     ) -> Result<(Self, mpsc::Receiver<Arc<Txn>>), CopycatError> {
-        log::trace!("starting: {chain_type:?}");
+        pf_trace!(id; "starting: {:?}", chain_type);
 
         // let state = Arc::new(ChainState::new(chain_type));
 
@@ -87,6 +87,7 @@ impl Node {
         ));
 
         let _pacemaker_handle = tokio::spawn(pacemaker_thread(
+            id,
             config.clone(),
             peer_messenger.clone(),
             peer_pmaker_recv,
@@ -116,6 +117,7 @@ impl Node {
         ));
 
         let _decision_handle = tokio::spawn(decision_thread(
+            id,
             config.clone(),
             peer_messenger.clone(),
             peer_consensus_recv,
@@ -123,10 +125,14 @@ impl Node {
             commit_send,
         ));
 
-        let _commit_handle =
-            tokio::spawn(commit_thread(config.clone(), commit_recv, executed_send));
+        let _commit_handle = tokio::spawn(commit_thread(
+            id,
+            config.clone(),
+            commit_recv,
+            executed_send,
+        ));
 
-        log::info!("stages started");
+        pf_info!(id; "stages started");
 
         Ok((
             Self {

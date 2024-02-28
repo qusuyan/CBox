@@ -15,6 +15,7 @@ pub trait Pacemaker: Sync + Send {
 }
 
 fn get_pacemaker(
+    _id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
     mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
@@ -26,28 +27,29 @@ fn get_pacemaker(
 }
 
 pub async fn pacemaker_thread(
+    id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
     peer_pmaker_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
     should_propose_send: mpsc::Sender<Arc<Vec<u8>>>,
 ) {
-    log::info!("pacemaker starting...");
+    pf_info!(id; "pacemaker starting...");
 
-    let pmaker = get_pacemaker(config, peer_messenger, peer_pmaker_recv);
+    let pmaker = get_pacemaker(id, config, peer_messenger, peer_pmaker_recv);
 
     loop {
         let propose_msg = match pmaker.wait_to_propose().await {
             Ok(msg) => msg,
             Err(e) => {
-                log::error!("error waiting to propose: {e:?}");
+                pf_error!(id; "error waiting to propose: {:?}", e);
                 continue;
             }
         };
 
-        log::debug!("got pacemaker peer message {propose_msg:?}");
+        pf_debug!(id; "got pacemaker peer message {:?}", propose_msg);
 
         if let Err(e) = should_propose_send.send(propose_msg).await {
-            log::error!("failed to send to should_propose pipe: {e:?}");
+            pf_error!(id; "failed to send to should_propose pipe: {:?}", e);
             continue;
         }
     }

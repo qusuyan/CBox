@@ -1,13 +1,12 @@
+#[macro_use]
+mod utils;
 mod composition;
 mod config;
 mod flowgen;
 mod node;
 mod peers;
-mod stage;
-
-#[macro_use]
-mod utils;
 mod protocol;
+mod stage;
 
 pub use config::Config;
 pub use flowgen::get_flow_gen;

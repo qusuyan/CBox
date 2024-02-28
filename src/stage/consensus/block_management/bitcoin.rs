@@ -23,7 +23,7 @@ use std::sync::Arc;
 const HEADER_HASH_TIME: f64 = 0.0000019;
 
 pub struct BitcoinBlockManagement {
-    me: NodeId,
+    id: NodeId,
     crypto_scheme: CryptoScheme,
     txn_pool: HashMap<Hash, Arc<Txn>>,
     block_pool: HashMap<Hash, (Arc<Block>, u64)>,
@@ -47,13 +47,13 @@ pub struct BitcoinBlockManagement {
 
 impl BitcoinBlockManagement {
     pub fn new(
-        me: NodeId,
+        id: NodeId,
         crypto_scheme: CryptoScheme,
         config: BitcoinConfig,
         peer_messenger: Arc<PeerMessenger>,
     ) -> Self {
         Self {
-            me,
+            id,
             crypto_scheme,
             txn_pool: HashMap::new(),
             block_pool: HashMap::new(),
@@ -113,9 +113,11 @@ impl BitcoinBlockManagement {
         let u = rand::thread_rng().gen::<f64>();
         let x = u.log(p);
         let pow_time = Duration::from_secs_f64(HEADER_HASH_TIME * x / self.compute_power); // assume parallelism
-        log::trace!(
-            "POW takes {} sec; p: {p}, u: {u}, x: {x}, block size: {}, block len: {}",
+        pf_trace!(
+            self.id;
+            "POW takes {} sec; p: {}, u: {}, x: {}, block size: {}, block len: {}",
             pow_time.as_secs_f64(),
+            p, u, x,
             self.block_size,
             self.block_under_construction.len(),
         );
@@ -335,7 +337,8 @@ impl BlockManagement for BitcoinBlockManagement {
         for utxo in self.utxo_spent.drain() {
             self.utxo.remove(&utxo);
         }
-        log::debug!(
+        pf_debug!(
+            self.id;
             "Block emitted at {:?}, pow takes {} sec, actual block size is {}+{}={}, block len is {}, block_size is {}",
             self.block_emit_time.unwrap(),
             self.pow_time.unwrap().as_secs_f64(),
@@ -419,14 +422,12 @@ impl BlockManagement for BitcoinBlockManagement {
                 }
             }
 
-            log::debug!(
-                "block {block_hash} arrived early, still waiting for its ancestor {parent}"
-            );
+            pf_debug!(self.id; "block {} arrived early, still waiting for its ancestor {}", block_hash, parent);
             // request the missing ancestor from peers
             self.peer_messenger
                 .gossip(
                     MsgType::BlockReq { blk_id: *parent },
-                    HashSet::from([self.me]),
+                    HashSet::from([self.id]),
                 )
                 .await?;
             return Ok(vec![]);
@@ -442,15 +443,13 @@ impl BlockManagement for BitcoinBlockManagement {
         };
 
         if new_tail != block_hash {
-            log::debug!("found block {block_hash}'s decendant {new_tail}")
+            pf_debug!(self.id; "found block {}'s decendant {}", block_hash, new_tail)
         }
 
         // the new block is the tail of a shorter chain, do nothing
         let chain_length = self.get_chain_length();
         if new_tail_height <= chain_length {
-            log::debug!(
-                "new chain is shorter: new chain {new_tail_height} vs old chain {chain_length}"
-            );
+            pf_debug!(self.id;                 "new chain is shorter: new chain {} vs old chain {}", new_tail_height, chain_length);
             return Ok(vec![]);
         }
 
@@ -608,7 +607,7 @@ impl BlockManagement for BitcoinBlockManagement {
                             // good case, using new utxos created but not committed yet
                             new_utxos.remove(&utxo);
                         } else {
-                            // log::debug!("double spending - in utxo ({}): {}, in utxo_spent ({}): {}, in new_utxos ({}): {}", self.utxo.len(), self.utxo.contains(&utxo), utxos_spent.len(), utxos_spent.contains(&utxo), new_utxos.len(), new_utxos.contains(&utxo));
+                            // pf_debug!(self.id; "double spending - in utxo ({}): {}, in utxo_spent ({}): {}, in new_utxos ({}): {}", self.utxo.len(), self.utxo.contains(&utxo), utxos_spent.len(), utxos_spent.contains(&utxo), new_utxos.len(), new_utxos.contains(&utxo));
                             return Ok(vec![]);
                         }
                     }

@@ -1,6 +1,7 @@
 mod error;
 pub use error::CopycatError;
 
+#[macro_use]
 pub mod log;
 
 pub mod parse_config;

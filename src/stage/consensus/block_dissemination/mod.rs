@@ -40,7 +40,7 @@ pub async fn block_dissemination_thread(
     mut new_block_recv: mpsc::Receiver<(NodeId, Vec<Arc<Block>>)>,
     block_ready_send: mpsc::Sender<Vec<Arc<Block>>>,
 ) {
-    log::info!("block dissemination stage starting...");
+    pf_info!(id; "block dissemination stage starting...");
 
     let block_dissemination_stage =
         get_block_dissemination(id, dissem_pattern, config, peer_messenger);
@@ -49,7 +49,7 @@ pub async fn block_dissemination_thread(
         let (src, new_tail) = match new_block_recv.recv().await {
             Some(blk) => blk,
             None => {
-                log::error!("new_block pipe closed unexpectedly");
+                pf_error!(id; "new_block pipe closed unexpectedly");
                 return;
             }
         };
@@ -60,15 +60,15 @@ pub async fn block_dissemination_thread(
             None => continue,
         };
 
-        log::debug!("got new block {new_blk:?}");
+        pf_debug!(id; "got new block {:?}", new_blk);
 
         if let Err(e) = block_dissemination_stage.disseminate(src, &new_blk).await {
-            log::error!("failed to disseminate new block: {e:?}");
+            pf_error!(id; "failed to disseminate new block: {:?}", e);
             continue;
         }
 
         if let Err(e) = block_ready_send.send(new_tail).await {
-            log::error!("failed to send to block_ready pipe: {e:?}");
+            pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
             continue;
         }
     }

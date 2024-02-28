@@ -40,7 +40,7 @@ pub async fn txn_dissemination_thread(
     mut validated_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
     txn_ready_send: mpsc::Sender<Arc<Txn>>,
 ) {
-    log::info!("txn dissemination stage starting...");
+    pf_info!(id; "txn dissemination stage starting...");
 
     let txn_dissemination_stage = get_txn_dissemination(id, dissem_pattern, config, peer_messenger);
 
@@ -48,22 +48,22 @@ pub async fn txn_dissemination_thread(
         let (src, txn) = match validated_txn_recv.recv().await {
             Some(txn) => txn,
             None => {
-                log::error!("validated_txn pipe closed unexpectedly");
+                pf_error!(id; "validated_txn pipe closed unexpectedly");
                 return;
             }
         };
 
-        log::trace!("got from {src} new txn {txn:?}");
+        pf_trace!(id; "got from {} new txn {:?}", src, txn);
 
         if enabled {
             if let Err(e) = txn_dissemination_stage.disseminate(src, &txn).await {
-                log::error!("failed to disseminate txn: {e:?}");
+                pf_error!(id; "failed to disseminate txn: {:?}", e);
                 continue;
             }
         }
 
         if let Err(e) = txn_ready_send.send(txn).await {
-            log::error!("failed to send to txn_ready pipe: {e:?}");
+            pf_error!(id; "failed to send to txn_ready pipe: {:?}", e);
             continue;
         }
     }

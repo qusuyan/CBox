@@ -35,7 +35,7 @@ pub async fn txn_validation_thread(
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
     validated_txn_send: mpsc::Sender<(NodeId, Arc<Txn>)>,
 ) {
-    log::info!("txn validation stage starting...");
+    pf_info!(id; "txn validation stage starting...");
 
     let mut txn_validation_stage = get_txn_validation(config, crypto_scheme);
 
@@ -45,7 +45,7 @@ pub async fn txn_validation_thread(
                 match new_txn {
                     Some(txn) => (id, txn),
                     None => {
-                        log::error!("request pipe closed");
+                        pf_error!(id; "request pipe closed");
                         continue;
                     }
                 }
@@ -60,27 +60,27 @@ pub async fn txn_validation_thread(
                         (src, txn)
                     },
                     None => {
-                        log::error!("peer_txn pipe closed");
+                        pf_error!(id; "peer_txn pipe closed");
                         continue;
                     },
                 }
             }
         };
 
-        log::trace!("got from {src} new txn {txn:?}");
+        pf_trace!(id; "got from {} new txn {:?}", src, txn);
 
         match txn_validation_stage.validate(txn.clone()).await {
             Ok(valid) => {
                 if !valid {
-                    log::trace!("got invalid txn {txn:?}, ignoring...");
+                    pf_trace!(id; "got invalid or duplicate txn {:?}, ignoring...", txn);
                 }
 
                 if let Err(e) = validated_txn_send.send((src, txn)).await {
-                    log::error!("failed to send to validated_txn pipe: {e:?}");
+                    pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
                 }
             }
             Err(e) => {
-                log::error!("error validating txn: {e:?}");
+                pf_error!(id; "error validating txn: {:?}", e);
             }
         }
     }

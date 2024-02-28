@@ -20,64 +20,66 @@ pub trait Decision: Sync + Send {
 }
 
 fn get_decision(
+    id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
     peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
 ) -> Box<dyn Decision> {
     match config {
         Config::Dummy => Box::new(DummyDecision::new()),
-        Config::Bitcoin { config } => Box::new(BitcoinDecision::new(config)),
+        Config::Bitcoin { config } => Box::new(BitcoinDecision::new(id, config)),
     }
 }
 
 pub async fn decision_thread(
+    id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
     peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
     mut block_ready_recv: mpsc::Receiver<Vec<Arc<Block>>>,
     commit_send: mpsc::Sender<Arc<Block>>,
 ) {
-    log::info!("decision stage starting...");
+    pf_info!(id; "decision stage starting...");
 
-    let mut decision_stage = get_decision(config, peer_messenger, peer_consensus_recv);
+    let mut decision_stage = get_decision(id, config, peer_messenger, peer_consensus_recv);
 
     loop {
         tokio::select! {
             new_tail = block_ready_recv.recv() => {
-                log::debug!("got new chain tail: {new_tail:?}");
+                pf_debug!(id; "got new chain tail: {:?}", new_tail);
                 let new_tail = match new_tail {
                     Some(tail) => tail,
                     None => {
-                        log::error!("block_ready pipe closed unexpectedly");
+                        pf_error!(id; "block_ready pipe closed unexpectedly");
                         return;
                     }
                 };
 
                 if let Err(e) = decision_stage.new_tail(new_tail).await {
-                    log::error!("failed to record new chain tail: {e:?}");
+                    pf_error!(id; "failed to record new chain tail: {:?}", e);
                     continue;
                 }
             },
             commit_ready = decision_stage.commit_ready() => {
                 if let Err(e) = commit_ready {
-                    log::error!("waiting for commit ready block failed: {e:?}");
+                    pf_error!(id; "waiting for commit ready block failed: {:?}", e);
                     continue;
                 }
 
                 let block_to_commit = match decision_stage.next_to_commit().await {
                     Ok(blk) => blk,
                     Err(e) => {
-                        log::error!("getting commit ready block failed: {e:?}");
+                        pf_error!(id; "getting commit ready block failed: {:?}", e);
                         continue;
                     }
                 };
 
-                log::debug!("committing new block {block_to_commit:?}");
+                pf_debug!(id; "committing new block {:?}", block_to_commit);
 
                 if let Err(e) = commit_send.send(block_to_commit).await {
-                                    log::error!("failed to send to commit pipe: {e:?}");
-                                    continue;
-                                }
+                    pf_error!(id; "failed to send to commit pipe: {:?}", e);
+                    continue;
+                }
 
             },
         }
