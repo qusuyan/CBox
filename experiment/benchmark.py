@@ -93,28 +93,36 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         cluster.copy_to(addr, "bench_network.json", f'{cluster.workdir}/bench_network.json')
         cluster.copy_to(addr, "bench_topo.json", f'{cluster.workdir}/bench_topo.json')
 
-    # start mailbox
-    mailbox_task = exp_machines.run_background(config, "mailbox", args=[params["build-type"], "@POS", params["mailbox-threads"],], engine=ENGINE, verbose=verbose)
-    tasks.append(mailbox_task)
+    # compute 
+    num_flow_gen = 1 if params["disable-txn-dissem"] else params["num-machines"] if params["single-process-cluster"] else params["num-nodes"]
+    num_accounts = int(params["num-accounts"] / num_flow_gen)
+    max_inflight = int(params["max-inflight-txns"] / num_flow_gen)
+    frequency = int(params["frequency"] / num_flow_gen)
 
-    time.sleep(5)
+    if params["single-process-cluster"]:
+        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["chain-type"], params["dissem"], 
+                    num_accounts, max_inflight, frequency, params["disable-txn-dissem"], params["config"]]
+        cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose)
+        tasks.append(cluster_task)
+    else: 
+        # start mailbox
+        mailbox_task = exp_machines.run_background(config, "mailbox", args=[params["build-type"], "@POS", params["mailbox-threads"],], engine=ENGINE, verbose=verbose)
+        tasks.append(mailbox_task)
 
-    num_accounts = params["num-accounts"] if params["disable-txn-dissem"] else int(params["num-accounts"] / params["num-nodes"])
-    max_inflight = params["max-inflight-txns"] if params["disable-txn-dissem"] else int(params["max-inflight-txns"] / params["num-nodes"])
-    frequency = params["frequency"] if params["disable-txn-dissem"] else int(params["frequency"] / params["num-nodes"])
+        time.sleep(5)
 
-    for local_id in range(num_nodes_per_machine):
-        run_args = [params["build-type"], "@POS", local_id, params["node-threads"], params["chain-type"], 
+        for local_id in range(num_nodes_per_machine):
+            run_args = [params["build-type"], "@POS", local_id, params["node-threads"], params["chain-type"], 
+                        num_accounts, max_inflight, frequency, params["dissem"], params["disable-txn-dissem"], params["config"]]
+            node_task = exp_machines.run_background(config, "node", args=run_args, engine=ENGINE, verbose=verbose)
+            tasks.append(node_task)
+
+        # remaining nodes
+        run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["node-threads"], params["chain-type"], 
                     num_accounts, max_inflight, frequency, params["dissem"], params["disable-txn-dissem"], params["config"]]
-        node_task = exp_machines.run_background(config, "node", args=run_args, engine=ENGINE, verbose=verbose)
-        tasks.append(node_task)
-
-    # remaining nodes
-    run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["node-threads"], params["chain-type"], 
-                    num_accounts, max_inflight, frequency, params["dissem"], params["disable-txn-dissem"], params["config"]]
-    if num_nodes_remainder > 0:
-        remainder_task = exp_machines.run_background(config, "node", args=run_args, num_machines = num_nodes_remainder, engine=ENGINE, verbose=verbose)
-        tasks.append(remainder_task)
+        if num_nodes_remainder > 0:
+            remainder_task = exp_machines.run_background(config, "node", args=run_args, num_machines = num_nodes_remainder, engine=ENGINE, verbose=verbose)
+            tasks.append(remainder_task)
 
     # wait for timeout
     time.sleep(params["exp-time"])
@@ -141,6 +149,7 @@ if __name__ == "__main__":
         "num-machines": 1,
         "node-threads": 8,
         "mailbox-threads": 8,
+        "cluster-threads": 40,
         "network-delay": 150, # in millis
         "network-bw": 25000000, # in B/s
         "chain-type": "bitcoin",
@@ -153,6 +162,7 @@ if __name__ == "__main__":
         "topo-skewness": 0.0, # uniform
         "dissem": "broadcast", # broadcast or gossip
         "disable-txn-dissem": False,
+        "single-process-cluster": True,
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

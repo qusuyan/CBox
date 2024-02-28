@@ -12,7 +12,7 @@ ACCOUNTS=$6
 MAX_INFLIGHT=$7
 FREQUENCY=$8
 DISSEM=$9
-ENABLE_TXN_DISSEM=${10}
+DISABLE_TXN_DISSEM=${10}
 CONFIG=${11}
 
 if [[ $CONFIG == "" ]]; then
@@ -21,13 +21,13 @@ else
     CONFIG_ARG="--config ${CONFIG}"
 fi
 
-if [[ $ENABLE_TXN_DISSEM == "false" ]]; then
-    ENABLE_TXN_DISSEM_ARG=""
+if [[ $DISABLE_TXN_DISSEM == "false" ]]; then
+    DISABLE_TXN_DISSEM=""
 else
-    ENABLE_TXN_DISSEM_ARG="--disable-txn-dissem"
+    DISABLE_TXN_DISSEM="--disable-txn-dissem"
 fi
 
 ID=$(( ($MACHINE_ID << 12) + $LOCAL_ID ))
 ./blockchain_copycat/target/${BUILDTYPE}/copycat_server -i ${ID} -t ${THREADS} \
     -c ${CHAIN_TYPE} ${CONFIG_ARG} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} \
-    --topology bench_topo.json -n ${DISSEM} ${ENABLE_TXN_DISSEM_ARG}
+    --topology bench_topo.json -n ${DISSEM} ${DISABLE_TXN_DISSEM}

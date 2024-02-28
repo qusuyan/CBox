@@ -166,8 +166,8 @@ fn main() {
 
     // get flow generation metrics
     let txn_span = args.txn_span;
-    let max_inflight = args.max_inflight / txn_span;
-    let frequency = args.frequency / txn_span;
+    let max_inflight = args.max_inflight;
+    let frequency = args.frequency;
     let num_accounts = args.accounts;
 
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_node_{}.csv", id))

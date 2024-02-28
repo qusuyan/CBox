@@ -4,11 +4,11 @@ num_iterations = 1
 [parameters]
 config = "difficulty=27+commit_depth=5"
 disable-txn-dissem = true
-dissem = "broadcast"
+dissem = "gossip"
 exp-time = 1800
 frequency = 1000
 max-inflight-txns = 100000
 node-threads = 4
 num-machines = 12
-num-nodes = [12, 24, 36, 48, 60, 72, 84, 96]
+num-nodes = [60, 120, 180, 240, 300, 360]
 topo-skewness = 2.0

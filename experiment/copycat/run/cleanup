@@ -2,6 +2,7 @@
 
 killall -9 copycat_mailbox || true
 killall -9 copycat_server || true
+killall -9 copycat_cluster || true
 
 rm -rf /dev/shm/mailbox
 mkdir /dev/shm/mailbox

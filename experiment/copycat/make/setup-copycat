@@ -23,6 +23,8 @@ git pull --ff
 echo "Using branch '${BRANCH}'"
 git checkout ${BRANCH}
 
-cargo build --workspace ${BUILD_FLAGS}
+cargo build -p copycat_server ${BUILD_FLAGS}
+cargo build -p copycat_mailbox ${BUILD_FLAGS}
+cargo build -p copycat_cluster ${BUILD_FLAGS}
 
 exit 0

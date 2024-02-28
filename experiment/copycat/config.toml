@@ -13,6 +13,18 @@ setup-mailbox = [["branch", "main"]]
 
 [run-targets]
 cleanup = []
+cluster = [
+  ["build_type", "release"],
+  ["id", "@POS"],
+  ["threads", "32"],
+  ["chain_type", "bitcoin"],
+  ["dissem", "broadcast"],
+  ["accounts", "10000"],
+  ["max_inflight", "100000"],
+  ["frequency", "0"],
+  ["disable_txn_dissem", "false"],
+  ["config", ""],
+]
 mailbox = [["build_type", "release"], ["id", "@POS"], ["threads", "8"]]
 node = [
   ["build_type", "release"],
