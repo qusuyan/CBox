@@ -1,6 +1,5 @@
 /target
 *.json
-logs/
 
 # perf data
 *.data
