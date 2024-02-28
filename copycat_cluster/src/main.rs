@@ -7,6 +7,7 @@ use copycat::{ChainType, Config, CryptoScheme, DissemPattern};
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use std::time::SystemTime;
 
 use tokio::runtime::Builder;
 use tokio::sync::mpsc;
@@ -107,7 +108,8 @@ fn main() {
             let level = colored_level(&mut style, record.level());
             let mut style = buf.style();
             let target = style.set_bold(true).value(record.target());
-            writeln!(buf, "Cluster{id} {level} {target}: {}", record.args())
+            let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S");
+            writeln!(buf, "Cluster{id} {ts} {level} {target}: {}", record.args())
         })
         .init();
 

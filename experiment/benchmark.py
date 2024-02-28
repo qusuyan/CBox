@@ -137,7 +137,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
             cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
             df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
             stats["tput"] = max(stats["tput"], df.iloc[-1]['Throughput (txn/s)'])
-    with open(f"./results/{exp_name}/stats.json") as f:
+    with open(f"./results/{exp_name}/stats.json", "w") as f:
         json.dump(stats, f, indent=2)
 
     return True
