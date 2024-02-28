@@ -16,7 +16,7 @@ enum SendRequest {
 pub struct PeerMessenger {
     transport_hub: ClientStubSendHalf<MsgType>,
     neighbors: HashSet<NodeId>,
-    _peer_receiver_rt: tokio::runtime::Runtime,
+    _peer_receiver_rt: Option<tokio::runtime::Runtime>,
     _peer_receiver_handle: JoinHandle<()>,
 }
 
@@ -46,21 +46,35 @@ impl PeerMessenger {
         // let (rx_blk_resp_send, rx_blk_resp_recv) = mpsc::channel(0x100000);
 
         // put receiver runtime on a separate thread for the bug here: https://github.com/tokio-rs/tokio/issues/4730
-        let _peer_receiver_rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .thread_name(format!("copycat-server-{}-recver", id))
-            .build()
-            .unwrap();
-        let _peer_receiver_handle = _peer_receiver_rt.spawn(Self::peer_receiver_thread(
-            recv_half,
-            rx_txn_send,
-            rx_blk_send,
-            rx_consensus_send,
-            rx_pmaker_send,
-            rx_blk_req_send,
-            // rx_blk_resp_send,
-        ));
+        let (_peer_receiver_handle, _peer_receiver_rt) = if cfg!(feature = "interprocess") {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .thread_name(format!("copycat-server-{}-recver", id))
+                .build()
+                .unwrap();
+            let _peer_receiver_handle = runtime.spawn(Self::peer_receiver_thread(
+                recv_half,
+                rx_txn_send,
+                rx_blk_send,
+                rx_consensus_send,
+                rx_pmaker_send,
+                rx_blk_req_send,
+                // rx_blk_resp_send,
+            ));
+            (_peer_receiver_handle, Some(runtime))
+        } else {
+            let _peer_receiver_handle = tokio::spawn(Self::peer_receiver_thread(
+                recv_half,
+                rx_txn_send,
+                rx_blk_send,
+                rx_consensus_send,
+                rx_pmaker_send,
+                rx_blk_req_send,
+                // rx_blk_resp_send,
+            ));
+            (_peer_receiver_handle, None)
+        };
 
         Ok((
             Self {

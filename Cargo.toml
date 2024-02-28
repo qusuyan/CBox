@@ -20,7 +20,6 @@ get-size = {version = "0.1.4", features = ["derive"]}
 lazy_static = "1.4.0"
 log = "0.4"
 mailbox_client = {git = "ssh://git@github.com/qusuyan/mailbox.git"}
-mailbox_utils = {git = "ssh://git@github.com/qusuyan/mailbox.git"}
 primitive-types = {version = "0.12.2", features = ["serde"]}
 rand = "0.8.5"
 ring = "0.17.5"
@@ -30,7 +29,9 @@ tokio = {version = "1.32.0", features = ["full"]}#, "tracing"] }
 toml = "0.8.8"
 # console-subscriber = "0.2.0"
 
+[features]
+interprocess = ["mailbox_client/interprocess"]
+
 [patch.'ssh://git@github.com/qusuyan/mailbox.git']
 mailbox = {path = "../mailbox"}
 mailbox_client = {path = "../mailbox/mailbox_client"}
-mailbox_utils = {path = "../mailbox/mailbox_utils"}

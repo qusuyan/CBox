@@ -9,6 +9,5 @@ version = "0.1.0"
 clap = {version = "4", default-features = false, features = ["help", "suggestions", "color", "std", "cargo", "derive"]}
 env_logger = "0.10"
 log = "0.4"
-mailbox = {git = "ssh://git@github.com/qusuyan/mailbox.git"}
-mailbox_utils = {git = "ssh://git@github.com/qusuyan/mailbox.git"}
+mailbox = {git = "ssh://git@github.com/qusuyan/mailbox.git", features = ["interprocess"]}
 tokio = "1.32.0"

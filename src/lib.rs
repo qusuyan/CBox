@@ -6,9 +6,12 @@ mod peers;
 mod stage;
 
 #[macro_use]
-pub mod utils;
-pub mod protocol;
+mod utils;
+mod protocol;
 
 pub use config::Config;
 pub use flowgen::get_flow_gen;
 pub use node::Node;
+pub use protocol::transaction;
+pub use protocol::{ChainType, CryptoScheme, DissemPattern};
+pub use utils::{get_neighbors, get_topology, log, CopycatError, NodeId};

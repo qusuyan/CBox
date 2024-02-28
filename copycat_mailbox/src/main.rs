@@ -1,5 +1,4 @@
-use mailbox_utils;
-use mailbox_utils::{config, MachineId};
+use mailbox::{config, MachineId, Mailbox};
 
 use tokio::runtime::Builder;
 
@@ -33,7 +32,7 @@ fn main() {
     env_logger::builder()
         .format(move |buf, record| {
             let mut style = buf.style();
-            let level = mailbox_utils::log::colored_level(&mut style, record.level());
+            let level = mailbox::log::colored_level(&mut style, record.level());
             let mut style = buf.style();
             let target = style.set_bold(true).value(record.target());
             writeln!(buf, "{level} {target}: {}", record.args())
@@ -79,8 +78,16 @@ fn main() {
         .expect("Creating new runtime failed");
 
     runtime.block_on(async {
-        if let Err(e) = mailbox::init(id, machine_list, pipe_info).await {
-            log::error!("Ipc Server failed with error {:?}", e);
+        let mailbox = match Mailbox::init(id, machine_list, pipe_info).await {
+            Ok(mailbox) => mailbox,
+            Err(e) => {
+                log::error!("Mailbox initialization failed with error {:?}", e);
+                std::process::exit(-1);
+            }
+        };
+
+        if let Err(e) = mailbox.wait().await {
+            log::error!("Mailbox failed with error {:?}", e);
         }
     })
 }

@@ -1,1 +1,335 @@
-fn main() {}
+use mailbox::Mailbox;
+
+use copycat::log::colored_level;
+use copycat::Node;
+use copycat::{get_flow_gen, get_topology};
+use copycat::{ChainType, Config, CryptoScheme, DissemPattern};
+
+use std::collections::{HashMap, HashSet};
+use std::io::Write;
+
+use tokio::runtime::Builder;
+use tokio::sync::mpsc;
+use tokio::time::{Duration, Instant};
+
+use rand::{seq::IteratorRandom, thread_rng};
+
+use clap::Parser;
+
+// TODO: add parameters to config individual node configs
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+struct CliArgs {
+    /// ID of the physical machine this instance runs on
+    #[clap(long, short = 'i')]
+    id: u64,
+
+    /// Path to config file containing the list of physical machines and nodes they host
+    #[clap(long, short = 'm')]
+    machine_config: String,
+
+    /// Path to network config file containing the list of network channel specs
+    #[clap(long, short = 'n')]
+    network_config: String,
+
+    /// Number of threads
+    #[clap(long, short = 't', default_value_t = 8)]
+    num_threads: u64,
+
+    /// The type of blockchain
+    #[arg(long, short = 'c', value_enum, default_value = "dummy")]
+    chain: ChainType,
+
+    /// Dissemination pattern
+    #[arg(long, short = 'd', default_value = "broadcast")]
+    dissem_pattern: DissemPattern,
+
+    /// Cryptography scheme
+    #[arg(long, short = 'p', value_enum, default_value = "dummy")]
+    crypto: CryptoScheme,
+
+    /// Number of user accounts for flow generation
+    #[arg(long, short = 'a', default_value = "10000")]
+    accounts: usize,
+
+    /// Maximum number of inflight transaction requests
+    #[arg(long, short = 'f', default_value = "100000")]
+    max_inflight: usize,
+
+    /// Frequency at which transactions are generated
+    #[arg(long, short = 'q', value_enum, default_value = "0")]
+    frequency: usize,
+
+    /// Number of nodes receiving a transaction
+    #[arg(long, short = 's', default_value_t = 1)]
+    txn_span: usize,
+
+    /// Blockchain specific configuration string in TOML format
+    #[arg(long, default_value_t = String::from(""))]
+    config: String,
+
+    /// Network topology
+    #[arg(long, default_value_t = String::from(""))]
+    topology: String,
+
+    /// If we should disseminate the transactions
+    #[arg(long, default_value_t = false)]
+    disable_txn_dissem: bool,
+}
+
+impl CliArgs {
+    pub fn validate(&mut self) {
+        if self.num_threads < 8 {
+            log::warn!("not enough threads running, setting it to 8");
+            self.num_threads = 8;
+        }
+
+        if self.frequency == 0 && self.max_inflight == 0 {
+            log::warn!("neither frequency nor max_inflight is set, restore to default");
+            self.max_inflight = 100000;
+        }
+
+        if self.txn_span == 0 {
+            log::warn!("transaction span cannot be 0, setting it to 1");
+            self.txn_span = 1;
+        }
+    }
+}
+
+fn main() {
+    let mut args = CliArgs::parse();
+    args.validate();
+
+    let id = args.id;
+    env_logger::builder()
+        .format(move |buf, record| {
+            let mut style = buf.style();
+            let level = colored_level(&mut style, record.level());
+            let mut style = buf.style();
+            let target = style.set_bold(true).value(record.target());
+            writeln!(buf, "Cluster{id} {level} {target}: {}", record.args())
+        })
+        .init();
+
+    // get mailbox parameters
+    let machine_config_path = args.machine_config;
+    let machine_list = match mailbox::config::read_machine_config(&machine_config_path) {
+        Ok(machines) => machines,
+        Err(e) => {
+            log::error!("failed to read json config {machine_config_path}: {e}");
+            return;
+        }
+    };
+    let local_nodes = machine_list[&id].node_list.clone();
+
+    let nodes = machine_list
+        .iter()
+        .flat_map(|(_, mailbox::config::Machine { addr: _, node_list })| node_list.clone())
+        .collect();
+    let network_config_path = args.network_config;
+    let network_config = match mailbox::config::read_network_config(&network_config_path) {
+        Ok(config) => config,
+        Err(e) => {
+            log::error!("failed to read network config {network_config_path}: {e}");
+            return;
+        }
+    };
+    let pipe_info = mailbox::config::parse_network_config(&nodes, network_config);
+
+    // get node parameters
+    let node_config = if args.config.is_empty() {
+        Config::from_str(args.chain, None).unwrap()
+    } else {
+        args.config = args.config.replace('+', "\n");
+        match Config::from_str(args.chain, Some(&args.config)) {
+            Ok(config) => config,
+            Err(e) => {
+                log::warn!("Invalid config string ({e:?}), fall back to default");
+                Config::from_str(args.chain, None).unwrap()
+            }
+        }
+    };
+    log::info!("Node config: {:?}", node_config);
+
+    let mut topology = if args.topology.is_empty() {
+        HashMap::new()
+    } else {
+        match get_topology(&local_nodes, args.topology) {
+            Ok(neighbors) => neighbors,
+            Err(e) => {
+                log::error!("parse network topology failed: {e}");
+                HashMap::new()
+            }
+        }
+    };
+    log::info!("topology: {topology:?}");
+
+    // get flow generation metrics
+    let txn_span = args.txn_span;
+    let max_inflight = args.max_inflight / txn_span;
+    let frequency = args.frequency / txn_span;
+    let num_accounts = args.accounts;
+
+    let mut stats_file = std::fs::File::create(format!("/tmp/copycat_node_{}.csv", id))
+        .expect("stats file creation failed");
+    stats_file
+        .write(b"Throughput (txn/s), Avg Latency (s)\n")
+        .expect("write stats failed");
+
+    let runtime = Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(args.num_threads as usize)
+        .thread_name("copycat-mailbox-thread")
+        .build()
+        .expect("Creating new runtime failed");
+
+    runtime.block_on(async {
+        let mut rng = thread_rng();
+
+        // start mailbox
+        let _mailbox = match Mailbox::init(id, machine_list, pipe_info).await {
+            Ok(mailbox) => mailbox,
+            Err(e) => {
+                log::error!("Mailbox initialization failed with error {:?}", e);
+                std::process::exit(-1);
+            }
+        };
+
+        // start nodes
+        let (combine_tx, mut combine_rx) = mpsc::channel(0x1000000);
+        let mut node_map = HashMap::new();
+        let mut redirect_handles = HashMap::new();
+        for node_id in local_nodes.clone() {
+            let (node, mut executed): (Node, _) = match Node::init(
+                node_id,
+                args.chain,
+                args.dissem_pattern,
+                args.crypto,
+                node_config.clone(),
+                !args.disable_txn_dissem,
+                topology.remove(&node_id).unwrap_or(HashSet::new()),
+            )
+            .await
+            {
+                Ok(node) => node,
+                Err(e) => {
+                    log::error!("failed to start node: {e:?}");
+                    return;
+                }
+            };
+            node_map.insert(node_id, node);
+
+            let tx = combine_tx.clone();
+            let redirect_handle = tokio::spawn(async move {
+                loop {
+                    match executed.recv().await {
+                        Some(msg) => {
+                            if let Err(e) = tx.send(msg).await {
+                                log::error!("Node {id} redirecting executed pipe failed: {e:?}")
+                            }
+                        }
+                        None => {
+                            log::error!("Node {id} executed pipe closed unexpectedly");
+                            return;
+                        }
+                    };
+                }
+            });
+            redirect_handles.insert(node_id, redirect_handle);
+        }
+
+        // run flowgen
+        let mut flow_gen = get_flow_gen(
+            id,
+            num_accounts,
+            max_inflight,
+            frequency,
+            args.chain,
+            args.crypto,
+        );
+        let init_txns = flow_gen.setup_txns().await.unwrap();
+
+        for txn in init_txns {
+            let receiving_nodes = node_map.iter().choose_multiple(&mut rng, txn_span);
+            for (id, node) in receiving_nodes {
+                if let Err(e) = node.send_req(txn.clone()).await {
+                    log::error!("failed to send setup txns to node {id}: {e}");
+                    return;
+                }
+            }
+        }
+
+        log::info!("setup txns sent");
+        let start_time = Instant::now();
+        let mut report_time = start_time + Duration::from_secs(60);
+        // wait when setup txns are propogated over the network
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        log::info!("flow generation starts");
+
+        loop {
+            tokio::select! {
+                wait_next_req = flow_gen.wait_next() => {
+                    if let Err(e) = wait_next_req {
+                        log::error!("wait for next available request failed: {e:?}");
+                        continue;
+                    }
+
+                    let next_req = match flow_gen.next_txn().await {
+                        Ok(txn) => txn,
+                        Err(e) => {
+                            log::error!("get available request failed: {e:?}");
+                            continue;
+                        }
+                    };
+
+                    let receiving_nodes = node_map.iter().choose_multiple(&mut rng, txn_span);
+                    for (id, node) in receiving_nodes {
+                        if let Err(e) = node.send_req(next_req.clone()).await {
+                            log::error!("sending next request to node {id} failed: {e:?}");
+                            return;
+                        }
+                    }
+                }
+
+                committed_txn = combine_rx.recv() => {
+                    let txn = match committed_txn {
+                        Some(txn) => txn,
+                        None => {
+                            log::error!("committed_txn closed unexpectedly");
+                            return;
+                        }
+                    };
+
+                    if let Err(e) = flow_gen.txn_committed(txn).await {
+                        log::error!("flow gen failed to record committed transaction: {e:?}");
+                        continue;
+                    }
+                }
+
+                _ = tokio::time::sleep_until(report_time) => {
+                    let stats = flow_gen.get_stats();
+                    let tput = stats.num_committed as f64 / (report_time - start_time).as_secs_f64();
+                    log::info!(
+                        "Throughput: {} txn/s, Average Latency: {} s",
+                        tput,
+                        stats.latency
+                    );
+                    stats_file
+                        .write_fmt(format_args!("{},{}\n", tput, stats.latency))
+                        .expect("write stats failed");
+                    report_time += Duration::from_secs(60);
+                }
+            }
+        }
+
+        // for (id, handle) in redirect_handles {
+        //     if let Err(e) = handle.await {
+        //         log::error!("join redirect thread for node {id} failed: {e:?}")
+        //     }
+        // }
+
+        // if let Err(e) = mailbox.wait().await {
+        //     log::error!("Mailbox failed with error {:?}", e);
+        // }
+    })
+}

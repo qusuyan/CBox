@@ -1,10 +1,6 @@
-use copycat::protocol::{ChainType, CryptoScheme, DissemPattern};
-use copycat::utils::get_neighbors;
-use copycat::utils::log::colored_level;
-
-use copycat::get_flow_gen;
-use copycat::Config;
-use copycat::Node;
+use copycat::log::colored_level;
+use copycat::{get_flow_gen, get_neighbors};
+use copycat::{ChainType, Config, CryptoScheme, DissemPattern, Node};
 
 use std::collections::HashSet;
 use std::io::Write;

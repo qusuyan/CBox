@@ -9,7 +9,7 @@ version = "0.1.0"
 async-trait = "0.1.74"
 bincode = "1.3.3"
 clap = {version = "4.4.2", features = ["derive"]}
-copycat = {path = "../"}
+copycat = {path = "../", features = ["interprocess"]}
 env_logger = "0.10"
 get-size = "0.1.4"
 lazy_static = "1.4.0"
