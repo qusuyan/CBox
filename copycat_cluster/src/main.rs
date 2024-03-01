@@ -7,7 +7,6 @@ use copycat::{ChainType, Config, CryptoScheme, DissemPattern};
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::time::SystemTime;
 
 use tokio::runtime::Builder;
 use tokio::sync::mpsc;
