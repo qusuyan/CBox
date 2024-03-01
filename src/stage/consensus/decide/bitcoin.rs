@@ -75,7 +75,7 @@ impl Decision for BitcoinDecision {
                     unreachable!("got new tail but its parent does not match existing chain");
                 }
             } else {
-                unreachable!("got new tail bu its parent was skipped over");
+                unreachable!("got new tail but its parent was skipped over");
             }
         }
 

@@ -286,7 +286,7 @@ impl BlockManagement for BitcoinBlockManagement {
             };
         }
 
-        if modified {
+        if modified || self.block_emit_time.is_none() {
             self.merkle_root =
                 Some(DummyMerkleTree::new(self.block_under_construction.len()).await?);
             let start_pow = Instant::now();
@@ -339,7 +339,7 @@ impl BlockManagement for BitcoinBlockManagement {
         }
         pf_debug!(
             self.id;
-            "Block emitted at {:?}, pow takes {} sec, actual block size is {}+{}={}, block len is {}, block_size is {}",
+            "Block emitted at {:?}, pow takes {} sec, actual block size is {}+{}={}, block len is {}, block_size is {}, {} pending txns left",
             self.block_emit_time.unwrap(),
             self.pow_time.unwrap().as_secs_f64(),
             block.header.get_size(),
@@ -347,6 +347,7 @@ impl BlockManagement for BitcoinBlockManagement {
             block.get_size(),
             block.txns.len(),
             self.block_size,
+            self.pending_txns.len(),
         );
         self.block_emit_time = None;
         self.merkle_root = None;
@@ -364,15 +365,23 @@ impl BlockManagement for BitcoinBlockManagement {
             return Ok(vec![]);
         }
 
-        let (merkle_root, prev_hash) = match &block.header {
+        let (merkle_root, prev_hash, nonce) = match &block.header {
             BlockHeader::Bitcoin {
                 merkle_root,
                 prev_hash,
+                nonce,
                 ..
-            } => (merkle_root, prev_hash),
+            } => (merkle_root, prev_hash, nonce),
             _ => unreachable!(),
         };
 
+        // hash verification
+        tokio::time::sleep(Duration::from_secs_f64(HEADER_HASH_TIME)).await;
+        if *nonce != 1 {
+            return Ok(vec![]); // invalid POW
+        }
+
+        // merkle root verification
         let merkle_tree = DummyMerkleTree(merkle_root.clone());
         if !merkle_tree.verify(block.txns.len()).await? {
             return Ok(vec![]);
@@ -449,7 +458,7 @@ impl BlockManagement for BitcoinBlockManagement {
         // the new block is the tail of a shorter chain, do nothing
         let chain_length = self.get_chain_length();
         if new_tail_height <= chain_length {
-            pf_debug!(self.id;                 "new chain is shorter: new chain {} vs old chain {}", new_tail_height, chain_length);
+            pf_debug!(self.id; "new chain is shorter: new chain {} vs old chain {}", new_tail_height, chain_length);
             return Ok(vec![]);
         }
 
@@ -552,16 +561,6 @@ impl BlockManagement for BitcoinBlockManagement {
         let mut utxos_spent = undo_new_utxo;
         let mut txns_applied: HashSet<Hash> = HashSet::new();
         for new_block in new_chain.iter() {
-            let nonce = match new_block.header {
-                BlockHeader::Bitcoin { nonce, .. } => nonce,
-                _ => unreachable!(),
-            };
-            // hash verification
-            tokio::time::sleep(Duration::from_secs_f64(HEADER_HASH_TIME)).await;
-            if nonce != 1 {
-                return Ok(vec![]); // invalid POW
-            }
-
             for txn in new_block.txns.iter() {
                 let txn_hash = sha256(&bincode::serialize(txn)?)?;
                 let bitcoin_txn = match txn.as_ref() {
