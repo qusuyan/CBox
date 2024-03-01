@@ -17,6 +17,7 @@ pub struct BitcoinDecision {
     block_pool: HashMap<Hash, (Arc<Block>, u64)>,
     chain_tail: VecDeque<Hash>,
     notify: Notify,
+    first_block_seen: bool,
 }
 
 impl BitcoinDecision {
@@ -27,6 +28,7 @@ impl BitcoinDecision {
             block_pool: HashMap::new(),
             chain_tail: VecDeque::new(),
             notify: Notify::new(),
+            first_block_seen: false,
         }
     }
 }
@@ -56,10 +58,14 @@ impl Decision for BitcoinDecision {
         loop {
             // the entire new tail has been pruned
             if self.chain_tail.is_empty() {
-                pf_warn!(
-                    self.id; "entire undecided chain pruned, a committed block might need to be undone"
-                );
-                break;
+                if self.first_block_seen {
+                    pf_warn!(
+                        self.id; "entire undecided chain pruned, a committed block might need to be undone"
+                    );
+                    break;
+                } else {
+                    self.first_block_seen = true;
+                }
             }
 
             let old_tail = self.chain_tail.back().unwrap();
