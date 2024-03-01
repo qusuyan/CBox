@@ -101,7 +101,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
 
     if params["single-process-cluster"]:
         run_args = [params["build-type"], "@POS", params["cluster-threads"], params["chain-type"], params["dissem"], 
-                    num_accounts, max_inflight, frequency, params["disable-txn-dissem"], params["config"]]
+                    num_accounts, max_inflight, frequency, params["txn-span"], params["disable-txn-dissem"], params["config"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose)
         tasks.append(cluster_task)
     else: 
@@ -157,6 +157,7 @@ if __name__ == "__main__":
         "num-accounts": 10000,
         "max-inflight-txns": 100000,
         "frequency": 0,
+        "txn-span": 0,
         "config": "",
         "topo-degree": 3,
         "topo-skewness": 0.0, # uniform

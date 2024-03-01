@@ -271,6 +271,8 @@ impl BlockManagement for BitcoinBlockManagement {
                             }
                             self.block_size += txn.get_size();
                             modified = true;
+                        } else {
+                            self.pending_txns.push_back(txn_hash); // some dependencies might be missing, retry later
                         }
                     }
                     BitcoinTxn::Grant { receiver, .. } => {
