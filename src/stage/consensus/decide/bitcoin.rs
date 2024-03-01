@@ -62,10 +62,10 @@ impl Decision for BitcoinDecision {
                     pf_warn!(
                         self.id; "entire undecided chain pruned, a committed block might need to be undone"
                     );
-                    break;
                 } else {
                     self.first_block_seen = true;
                 }
+                break;
             }
 
             let old_tail = self.chain_tail.back().unwrap();

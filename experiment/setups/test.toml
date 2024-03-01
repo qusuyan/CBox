@@ -5,7 +5,7 @@ num_iterations = 1
 config = "difficulty=27+commit_depth=5"
 disable-txn-dissem = true
 dissem = "gossip"
-exp-time = 1800
+exp-time = 60
 frequency = 0
 max-inflight-txns = 100000
 node-threads = 4

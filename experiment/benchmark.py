@@ -129,14 +129,24 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     cleanup()
 
     # collect stats
+    files = []
+    for (machine_id, machine) in machine_config.items():
+        addr = machine["addr"].split(":")[0]
+        if params["single-process-cluster"]:
+            stats_file = f"copycat_cluster_{machine_id}.csv"
+            files.append((addr, stats_file))
+        else:
+            for node in machine_id["node_list"]:
+                stats_file = f"copycat_node_{node}.csv"
+                files.append((addr, stats_file))
+    print(files)
+
     stats = { "tput": 0 }
-    for machine in machine_config.values():
-        for node in machine["node_list"]:
-            addr = machine["addr"].split(":")[0]
-            stats_file = f"copycat_node_{node}.csv"
-            cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
-            df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
-            stats["tput"] = max(stats["tput"], df.iloc[-1]['Throughput (txn/s)'])
+    for (addr, stats_file) in files:
+        cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
+        df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
+        stats["tput"] = max(stats["tput"], df.iloc[-1]['Throughput (txn/s)'])
+
     with open(f"./results/{exp_name}/stats.json", "w") as f:
         json.dump(stats, f, indent=2)
 
