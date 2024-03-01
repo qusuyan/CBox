@@ -339,7 +339,8 @@ impl BlockManagement for BitcoinBlockManagement {
         }
         pf_debug!(
             self.id;
-            "Block emitted at {:?}, pow takes {} sec, actual block size is {}+{}={}, block len is {}, block_size is {}, {} pending txns left",
+            "Block {} emitted at {:?}, pow takes {} sec, actual block size is {}+{}={}, block len is {}, block_size is {}, {} pending txns left ({:?})",
+            hash,
             self.block_emit_time.unwrap(),
             self.pow_time.unwrap().as_secs_f64(),
             block.header.get_size(),
@@ -348,6 +349,7 @@ impl BlockManagement for BitcoinBlockManagement {
             block.txns.len(),
             self.block_size,
             self.pending_txns.len(),
+            block.header,
         );
         self.block_emit_time = None;
         self.merkle_root = None;
@@ -641,7 +643,7 @@ impl BlockManagement for BitcoinBlockManagement {
         self.merkle_root = None;
         self.pow_time = None;
         self.pending_txns
-            .append(&mut self.block_under_construction.drain(0..).collect());
+            .extend(&mut self.block_under_construction.drain(0..));
         self.block_size = 0;
         self.utxo_spent.clear();
         self.new_utxo.clear();

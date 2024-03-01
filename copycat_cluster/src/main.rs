@@ -17,7 +17,7 @@ use rand::{seq::IteratorRandom, thread_rng};
 use clap::Parser;
 
 // TODO: add parameters to config individual node configs
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct CliArgs {
     /// ID of the physical machine this instance runs on
@@ -52,15 +52,15 @@ struct CliArgs {
     #[arg(long, short = 'a', default_value = "10000")]
     accounts: usize,
 
-    /// Maximum number of inflight transaction requests
+    /// Maximum number of inflight transaction requests, 0 means unlimited
     #[arg(long, short = 'f', default_value = "100000")]
     max_inflight: usize,
 
-    /// Frequency at which transactions are generated
+    /// Frequency at which transactions are generated, 0 means unlimited
     #[arg(long, short = 'q', value_enum, default_value = "0")]
     frequency: usize,
 
-    /// Number of nodes receiving a transaction
+    /// Number of nodes receiving a transaction, 0 means sending to all nodes
     #[arg(long, short = 's', default_value_t = 1)]
     txn_span: usize,
 
@@ -84,14 +84,19 @@ impl CliArgs {
             self.num_threads = 8;
         }
 
-        if self.frequency == 0 && self.max_inflight == 0 {
-            log::warn!("neither frequency nor max_inflight is set, restore to default");
-            self.max_inflight = 100000;
+        // if self.frequency == 0 && self.max_inflight == 0 {
+        //     log::warn!("neither frequency nor max_inflight is set, restore to default");
+        //     self.max_inflight = 100000;
+        // }
+
+        if self.accounts < 100 {
+            log::warn!("too few accounts, reset to default");
+            self.accounts = 10000
         }
 
-        if self.txn_span == 0 {
-            log::warn!("transaction span cannot be 0, setting it to 1");
-            self.txn_span = 1;
+        if self.disable_txn_dissem && self.txn_span > 0 {
+            log::warn!("currently does not support sending flow generation to different nodes when transaction dissemination is disabled");
+            self.txn_span = 0;
         }
     }
 }
@@ -111,6 +116,8 @@ fn main() {
             writeln!(buf, "Cluster{id} {ts} {level} {target}: {}", record.args())
         })
         .init();
+
+    log::info!("{:?}", args);
 
     // get mailbox parameters
     let machine_config_path = args.machine_config;
@@ -251,7 +258,11 @@ fn main() {
         let init_txns = flow_gen.setup_txns().await.unwrap();
 
         for txn in init_txns {
-            let receiving_nodes = node_map.iter().choose_multiple(&mut rng, txn_span);
+            let receiving_nodes = if txn_span == 0 {
+                node_map.iter().collect()
+            } else { 
+                node_map.iter().choose_multiple(&mut rng, txn_span)
+            };
             for (id, node) in receiving_nodes {
                 if let Err(e) = node.send_req(txn.clone()).await {
                     log::error!("failed to send setup txns to node {id}: {e}");
@@ -283,7 +294,11 @@ fn main() {
                         }
                     };
 
-                    let receiving_nodes = node_map.iter().choose_multiple(&mut rng, txn_span);
+                    let receiving_nodes = if txn_span == 0 {
+                        node_map.iter().collect()
+                    } else { 
+                        node_map.iter().choose_multiple(&mut rng, txn_span)
+                    };
                     for (id, node) in receiving_nodes {
                         if let Err(e) = node.send_req(next_req.clone()).await {
                             log::error!("sending next request to node {id} failed: {e:?}");

@@ -97,9 +97,9 @@ impl FlowGen for BitcoinFlowGen {
     async fn next_txn(&mut self) -> Result<Arc<Txn>, CopycatError> {
         let (sender, remainder, recver, out_utxo, txn) = loop {
             let sender = rand::random::<usize>() % self.accounts.len();
-            let receiver = rand::random::<usize>() % self.accounts.len();
-            if sender == receiver {
-                continue; // retry
+            let mut receiver = rand::random::<usize>() % (self.accounts.len() - 1);
+            if receiver >= sender {
+                receiver += 1; // avoid sending to self
             }
 
             let (sender_pk, sender_sk) = self.accounts.get(sender).unwrap();

@@ -6,7 +6,7 @@ config = "difficulty=27+commit_depth=5"
 disable-txn-dissem = true
 dissem = "gossip"
 exp-time = 1800
-frequency = 1000
+frequency = 0
 max-inflight-txns = 100000
 node-threads = 4
 num-machines = 12
