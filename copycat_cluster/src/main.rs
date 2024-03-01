@@ -181,7 +181,7 @@ fn main() {
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
-        .write(b"Runtime (s), Throughput (txn/s), Avg Latency (s)\n")
+        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s)\n")
         .expect("write stats failed");
 
     let runtime = Builder::new_multi_thread()
