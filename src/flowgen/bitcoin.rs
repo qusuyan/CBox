@@ -7,6 +7,7 @@ use crate::utils::{CopycatError, NodeId};
 use async_trait::async_trait;
 use rand::Rng;
 
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
@@ -21,7 +22,7 @@ pub struct BitcoinFlowGen {
     accounts: Vec<(PubKey, PrivKey)>,
     in_flight: HashMap<Hash, Instant>,
     num_completed_txns: u64,
-    total_committed_txns: u64,
+    total_committed_txns: HashMap<NodeId, u64>,
     total_time_sec: f64,
 }
 
@@ -51,7 +52,7 @@ impl BitcoinFlowGen {
             in_flight: HashMap::new(),
             num_completed_txns: 0,
             total_time_sec: 0.0,
-            total_committed_txns: 0,
+            total_committed_txns: HashMap::new(),
         }
     }
 }
@@ -143,8 +144,13 @@ impl FlowGen for BitcoinFlowGen {
         Ok(txn)
     }
 
-    async fn txn_committed(&mut self, txn: Arc<Txn>) -> Result<(), CopycatError> {
-        self.total_committed_txns += 1;
+    async fn txn_committed(&mut self, node: NodeId, txn: Arc<Txn>) -> Result<(), CopycatError> {
+        match self.total_committed_txns.entry(node) {
+            Entry::Occupied(mut e) => (*e.get_mut()) += 1,
+            Entry::Vacant(e) => {
+                e.insert(1);
+            }
+        }
 
         let serialized = bincode::serialize(txn.as_ref())?;
         let hash = sha256(&serialized)?;
@@ -166,9 +172,15 @@ impl FlowGen for BitcoinFlowGen {
         } else {
             self.total_time_sec / self.num_completed_txns as f64
         };
+        let committed = self
+            .total_committed_txns
+            .values()
+            .max()
+            .cloned()
+            .unwrap_or(0);
         Stats {
             latency,
-            num_committed: self.total_committed_txns,
+            num_committed: committed,
         }
     }
 }

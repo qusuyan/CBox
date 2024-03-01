@@ -178,10 +178,10 @@ fn main() {
     let frequency = args.frequency;
     let num_accounts = args.accounts;
 
-    let mut stats_file = std::fs::File::create(format!("/tmp/copycat_node_{}.csv", id))
+    let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
-        .write(b"Throughput (txn/s), Avg Latency (s)\n")
+        .write(b"Runtime (s), Throughput (txn/s), Avg Latency (s)\n")
         .expect("write stats failed");
 
     let runtime = Builder::new_multi_thread()
@@ -232,7 +232,7 @@ fn main() {
                 loop {
                     match executed.recv().await {
                         Some(msg) => {
-                            if let Err(e) = tx.send(msg).await {
+                            if let Err(e) = tx.send((node_id, msg)).await {
                                 log::error!("Node {id} redirecting executed pipe failed: {e:?}")
                             }
                         }
@@ -260,7 +260,7 @@ fn main() {
         for txn in init_txns {
             let receiving_nodes = if txn_span == 0 {
                 node_map.iter().collect()
-            } else { 
+            } else {
                 node_map.iter().choose_multiple(&mut rng, txn_span)
             };
             for (id, node) in receiving_nodes {
@@ -296,7 +296,7 @@ fn main() {
 
                     let receiving_nodes = if txn_span == 0 {
                         node_map.iter().collect()
-                    } else { 
+                    } else {
                         node_map.iter().choose_multiple(&mut rng, txn_span)
                     };
                     for (id, node) in receiving_nodes {
@@ -308,7 +308,7 @@ fn main() {
                 }
 
                 committed_txn = combine_rx.recv() => {
-                    let txn = match committed_txn {
+                    let (node, txn) = match committed_txn {
                         Some(txn) => txn,
                         None => {
                             log::error!("committed_txn closed unexpectedly");
@@ -316,7 +316,7 @@ fn main() {
                         }
                     };
 
-                    if let Err(e) = flow_gen.txn_committed(txn).await {
+                    if let Err(e) = flow_gen.txn_committed(node, txn).await {
                         log::error!("flow gen failed to record committed transaction: {e:?}");
                         continue;
                     }
@@ -324,14 +324,16 @@ fn main() {
 
                 _ = tokio::time::sleep_until(report_time) => {
                     let stats = flow_gen.get_stats();
-                    let tput = stats.num_committed as f64 / (report_time - start_time).as_secs_f64();
+                    let run_time =  (report_time - start_time).as_secs_f64();
+                    let tput = stats.num_committed as f64 / run_time;
                     log::info!(
-                        "Throughput: {} txn/s, Average Latency: {} s",
+                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s",
+                        run_time,
                         tput,
                         stats.latency
                     );
                     stats_file
-                        .write_fmt(format_args!("{},{}\n", tput, stats.latency))
+                        .write_fmt(format_args!("{},{},{}\n", run_time, tput, stats.latency))
                         .expect("write stats failed");
                     report_time += Duration::from_secs(60);
                 }

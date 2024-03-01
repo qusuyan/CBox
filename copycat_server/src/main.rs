@@ -192,7 +192,7 @@ pub fn main() {
                         }
                     };
 
-                    if let Err(e) = flow_gen.txn_committed(txn).await {
+                    if let Err(e) = flow_gen.txn_committed(id, txn).await {
                         log::error!("flow gen failed to record committed transaction: {e:?}");
                         continue;
                     }
