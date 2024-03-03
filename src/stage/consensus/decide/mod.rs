@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 pub trait Decision: Sync + Send {
     async fn new_tail(&mut self, new_tail: Vec<Arc<Block>>) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
-    async fn next_to_commit(&mut self) -> Result<Arc<Block>, CopycatError>;
+    async fn next_to_commit(&mut self) -> Result<(u64, Arc<Block>), CopycatError>;
 }
 
 fn get_decision(
@@ -37,7 +37,7 @@ pub async fn decision_thread(
     peer_messenger: Arc<PeerMessenger>,
     peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
     mut block_ready_recv: mpsc::Receiver<Vec<Arc<Block>>>,
-    commit_send: mpsc::Sender<Arc<Block>>,
+    commit_send: mpsc::Sender<(u64, Arc<Block>)>,
 ) {
     pf_info!(id; "decision stage starting...");
 
@@ -66,7 +66,7 @@ pub async fn decision_thread(
                     continue;
                 }
 
-                let block_to_commit = match decision_stage.next_to_commit().await {
+                let (height, block_to_commit) = match decision_stage.next_to_commit().await {
                     Ok(blk) => blk,
                     Err(e) => {
                         pf_error!(id; "getting commit ready block failed: {:?}", e);
@@ -74,9 +74,9 @@ pub async fn decision_thread(
                     }
                 };
 
-                pf_debug!(id; "committing new block {:?}", block_to_commit);
+                pf_debug!(id; "committing new block {:?}, height {}", block_to_commit, height);
 
-                if let Err(e) = commit_send.send(block_to_commit).await {
+                if let Err(e) = commit_send.send((height, block_to_commit)).await {
                     pf_error!(id; "failed to send to commit pipe: {:?}", e);
                     continue;
                 }

@@ -183,16 +183,16 @@ pub fn main() {
                     }
                 }
 
-                committed_txn = executed.recv() => {
-                    let txn = match committed_txn {
-                        Some(txn) => txn,
+                committed_txns = executed.recv() => {
+                    let (height, txns) = match committed_txns {
+                        Some(txns) => txns,
                         None => {
-                            log::error!("committed_txn closed unexpectedly");
+                            log::error!("executed pipe closed unexpectedly");
                             return;
                         }
                     };
 
-                    if let Err(e) = flow_gen.txn_committed(id, txn).await {
+                    if let Err(e) = flow_gen.txn_committed(id, txns, height).await {
                         log::error!("flow gen failed to record committed transaction: {e:?}");
                         continue;
                     }

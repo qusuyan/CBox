@@ -14,7 +14,3 @@ pub enum Txn {
     Dummy { txn: DummyTxn },
     Bitcoin { txn: BitcoinTxn },
 }
-
-// since transactions are created and never modified
-unsafe impl Sync for BitcoinTxn {}
-unsafe impl Send for BitcoinTxn {}

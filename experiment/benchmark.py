@@ -17,10 +17,6 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
               result_printer, verbose=False):
 
     datetime_str = datetime.now().strftime("%Y%m%d%H%M%S")
-    exp_name = f"Experiment-{datetime_str}"
-    os.makedirs(f"./results/{exp_name}")
-    with open(f"./results/{exp_name}/config.json", "w") as f:
-        json.dump(params, f, indent=2)
 
     tasks = []
     def cleanup():
@@ -49,6 +45,11 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
 
     logger = MetaLogger(exp.log_dir)
     logger.print(f'Running benchmark on with parameters: {params}')
+
+    exp_name = f"experiment-{exp.uid}"
+    os.makedirs(f"./results/{exp_name}")
+    with open(f"./results/{exp_name}/config.json", "w") as f:
+        json.dump(params, f, indent=2)
 
     if params["num-nodes"] < params["num-machines"]:
         logger.print("More machines than nodes, skipping...")
@@ -102,7 +103,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     if params["single-process-cluster"]:
         run_args = [params["build-type"], "@POS", params["cluster-threads"], params["chain-type"], params["dissem"], 
                     num_accounts, max_inflight, frequency, params["txn-span"], params["disable-txn-dissem"], params["config"]]
-        cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose)
+        cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
         # start mailbox

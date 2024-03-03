@@ -17,29 +17,25 @@ pub trait Commit: Sync + Send {
     async fn commit(&self, block: Arc<Block>) -> Result<(), CopycatError>;
 }
 
-pub fn get_commit(
-    _id: NodeId,
-    config: Config,
-    executed_send: mpsc::Sender<Arc<Txn>>,
-) -> Box<dyn Commit> {
+pub fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
     match config {
-        Config::Dummy => Box::new(DummyCommit::new(executed_send)),
-        Config::Bitcoin { .. } => Box::new(DummyCommit::new(executed_send)), // TODO:
+        Config::Dummy => Box::new(DummyCommit::new()),
+        Config::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:
     }
 }
 
 pub async fn commit_thread(
     id: NodeId,
     config: Config,
-    mut commit_recv: mpsc::Receiver<Arc<Block>>,
-    executed_send: mpsc::Sender<Arc<Txn>>,
+    mut commit_recv: mpsc::Receiver<(u64, Arc<Block>)>,
+    executed_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
 ) {
     pf_info!(id; "commit stage starting...");
 
-    let commit_stage = get_commit(id, config, executed_send);
+    let commit_stage = get_commit(id, config);
 
     loop {
-        let block = match commit_recv.recv().await {
+        let (height, block) = match commit_recv.recv().await {
             Some(blk) => blk,
             None => {
                 pf_error!(id; "commit pipe closed unexpectedly");
@@ -49,8 +45,13 @@ pub async fn commit_thread(
 
         pf_debug!(id; "got new block {:?}", block);
 
-        if let Err(e) = commit_stage.commit(block).await {
+        if let Err(e) = commit_stage.commit(block.clone()).await {
             pf_error!(id; "failed to commit: {:?}", e);
+            continue;
+        }
+
+        if let Err(e) = executed_send.send((height, block.txns.clone())).await {
+            pf_error!(id; "failed to send committed txns: {:?}", e);
             continue;
         }
     }

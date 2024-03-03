@@ -41,7 +41,7 @@ impl Node {
         config: Config,
         dissem_txns: bool,
         neighbors: HashSet<NodeId>,
-    ) -> Result<(Self, mpsc::Receiver<Arc<Txn>>), CopycatError> {
+    ) -> Result<(Self, mpsc::Receiver<(u64, Vec<Arc<Txn>>)>), CopycatError> {
         pf_trace!(id; "starting: {:?}", chain_type);
 
         // let state = Arc::new(ChainState::new(chain_type));

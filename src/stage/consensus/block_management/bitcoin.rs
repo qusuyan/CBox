@@ -162,11 +162,10 @@ impl BitcoinBlockManagement {
                         }
                         BitcoinTxn::Send {
                             sender,
-                            in_utxo: _,
                             receiver,
                             out_utxo,
                             remainder,
-                            sender_signature: _,
+                            ..
                         } => {
                             if receiver == txn_sender {
                                 out_utxo
@@ -243,6 +242,9 @@ impl BlockManagement for BitcoinBlockManagement {
                         receiver,
                         out_utxo,
                         remainder,
+                        script_bytes,
+                        script_runtime,
+                        script_succeed,
                         ..
                     } => {
                         let mut valid: bool = true;
@@ -258,6 +260,13 @@ impl BlockManagement for BitcoinBlockManagement {
                                 break;
                             }
                         }
+
+                        // execute the script
+                        tokio::time::sleep(*script_runtime).await;
+                        if !script_succeed {
+                            valid = false;
+                        }
+
                         if valid {
                             self.block_under_construction.push(txn_hash.clone());
                             for in_utxo in in_utxos {
@@ -269,7 +278,7 @@ impl BlockManagement for BitcoinBlockManagement {
                             if *remainder > 0 {
                                 self.new_utxo.insert((txn_hash.clone(), sender.clone()));
                             }
-                            self.block_size += txn.get_size();
+                            self.block_size += txn.get_size() + *script_bytes as usize;
                             modified = true;
                         } else {
                             self.pending_txns.push_back(txn_hash); // some dependencies might be missing, retry later
@@ -560,6 +569,7 @@ impl BlockManagement for BitcoinBlockManagement {
         // reverse the new tail so that it goes in order
         new_chain.reverse();
 
+        let mut total_exec_time = Duration::from_secs(0);
         // apply transactions of the new chain and check if this chain is valid
         let mut new_utxos = undo_utxo_spent;
         let mut utxos_spent = undo_new_utxo;
@@ -587,10 +597,12 @@ impl BlockManagement for BitcoinBlockManagement {
                             .verify(sender, &serialized_in_utxo, sender_signature)
                             .await?
                         {
+                            tokio::time::sleep(total_exec_time).await;
                             return Ok(vec![]);
                         }
                     }
                     if !self.validate_txn(bitcoin_txn)? {
+                        tokio::time::sleep(total_exec_time).await;
                         return Ok(vec![]);
                     }
                     self.txn_pool.insert(txn_hash.clone(), txn.clone());
@@ -611,8 +623,23 @@ impl BlockManagement for BitcoinBlockManagement {
                             new_utxos.remove(&utxo);
                         } else {
                             // pf_debug!(self.id; "double spending - in utxo ({}): {}, in utxo_spent ({}): {}, in new_utxos ({}): {}", self.utxo.len(), self.utxo.contains(&utxo), utxos_spent.len(), utxos_spent.contains(&utxo), new_utxos.len(), new_utxos.contains(&utxo));
+                            tokio::time::sleep(total_exec_time).await;
                             return Ok(vec![]);
                         }
+                    }
+                }
+
+                // execute the txn script
+                if let BitcoinTxn::Send {
+                    script_runtime,
+                    script_succeed,
+                    ..
+                } = bitcoin_txn
+                {
+                    total_exec_time += *script_runtime;
+                    if !script_succeed {
+                        tokio::time::sleep(total_exec_time).await;
+                        return Ok(vec![]);
                     }
                 }
 
@@ -660,6 +687,7 @@ impl BlockManagement for BitcoinBlockManagement {
         self.pending_txns
             .retain(|txn_hash| !txns_applied.contains(txn_hash));
 
+        tokio::time::sleep(total_exec_time).await;
         Ok(new_chain)
     }
 

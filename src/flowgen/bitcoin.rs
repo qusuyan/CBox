@@ -14,6 +14,12 @@ use tokio::time::{Duration, Instant};
 
 const UNSET: usize = 0;
 
+struct ChainInfo {
+    chain_length: u64,
+    txn_count: HashMap<u64, u64>,
+    total_committed: u64, // includes false commits
+}
+
 pub struct BitcoinFlowGen {
     max_inflight: usize,
     frequency: usize,
@@ -22,7 +28,7 @@ pub struct BitcoinFlowGen {
     accounts: Vec<(PubKey, PrivKey)>,
     in_flight: HashMap<Hash, Instant>,
     num_completed_txns: u64,
-    total_committed_txns: HashMap<NodeId, u64>,
+    chain_info: HashMap<NodeId, ChainInfo>,
     total_time_sec: f64,
 }
 
@@ -52,7 +58,7 @@ impl BitcoinFlowGen {
             in_flight: HashMap::new(),
             num_completed_txns: 0,
             total_time_sec: 0.0,
-            total_committed_txns: HashMap::new(),
+            chain_info: HashMap::new(),
         }
     }
 }
@@ -124,6 +130,9 @@ impl FlowGen for BitcoinFlowGen {
                     out_utxo,
                     remainder,
                     sender_signature,
+                    script_bytes: 400,
+                    script_runtime: Duration::from_millis(1),
+                    script_succeed: true,
                 },
             });
             break (sender_pk, remainder, recver_pk, out_utxo, txn);
@@ -144,24 +153,42 @@ impl FlowGen for BitcoinFlowGen {
         Ok(txn)
     }
 
-    async fn txn_committed(&mut self, node: NodeId, txn: Arc<Txn>) -> Result<(), CopycatError> {
-        match self.total_committed_txns.entry(node) {
-            Entry::Occupied(mut e) => (*e.get_mut()) += 1,
-            Entry::Vacant(e) => {
-                e.insert(1);
-            }
-        }
-
-        let serialized = bincode::serialize(txn.as_ref())?;
-        let hash = sha256(&serialized)?;
-        let start_time = match self.in_flight.remove(&hash) {
-            Some(time) => time,
-            None => return Ok(()), // unrecognized txn, possibly generated from another node
+    async fn txn_committed(
+        &mut self,
+        node: NodeId,
+        txns: Vec<Arc<Txn>>,
+        blk_height: u64,
+    ) -> Result<(), CopycatError> {
+        // avoid counting blocks that are
+        let chain_info = match self.chain_info.entry(node) {
+            Entry::Occupied(e) => e.into_mut(),
+            Entry::Vacant(e) => e.insert(ChainInfo {
+                chain_length: 0,
+                txn_count: HashMap::new(),
+                total_committed: 0,
+            }),
         };
 
-        let commit_latency = Instant::now() - start_time;
-        self.total_time_sec += commit_latency.as_secs_f64();
-        self.num_completed_txns += 1;
+        assert!(blk_height <= chain_info.chain_length + 1); // make sure we are not skipping over some parents
+        for height in blk_height..chain_info.chain_length + 1 {
+            chain_info.txn_count.remove(&height);
+        }
+        chain_info.txn_count.insert(blk_height, txns.len() as u64);
+        chain_info.chain_length = blk_height + 1;
+        chain_info.total_committed += txns.len() as u64;
+
+        for txn in txns {
+            let serialized = bincode::serialize(txn.as_ref())?;
+            let hash = sha256(&serialized)?;
+            let start_time = match self.in_flight.remove(&hash) {
+                Some(time) => time,
+                None => continue, // unrecognized txn, possibly generated from another node
+            };
+
+            let commit_latency = Instant::now() - start_time;
+            self.total_time_sec += commit_latency.as_secs_f64();
+            self.num_completed_txns += 1;
+        }
 
         Ok(())
     }
@@ -172,15 +199,37 @@ impl FlowGen for BitcoinFlowGen {
         } else {
             self.total_time_sec / self.num_completed_txns as f64
         };
-        let committed = self
-            .total_committed_txns
+        let (num_committed, chain_length, acc_commit_confidence) = self
+            .chain_info
             .values()
-            .max()
-            .cloned()
-            .unwrap_or(0);
+            .map(|info| {
+                let num_committed = (1..info.chain_length)
+                    .map(|height| info.txn_count.get(&height).unwrap())
+                    .sum();
+                (
+                    num_committed,
+                    info.chain_length,
+                    num_committed as f64 / info.total_committed as f64,
+                )
+            })
+            .reduce(|acc, e| {
+                (
+                    std::cmp::max(acc.0, e.0),
+                    std::cmp::max(acc.1, e.1),
+                    (acc.2 + e.2),
+                )
+            })
+            .unwrap_or((0, 0, 0f64));
+        let commit_confidence = if self.chain_info.len() == 0 {
+            1f64
+        } else {
+            acc_commit_confidence / self.chain_info.len() as f64
+        };
         Stats {
             latency,
-            num_committed: committed,
+            num_committed,
+            chain_length,
+            commit_confidence,
         }
     }
 }

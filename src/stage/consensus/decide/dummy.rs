@@ -10,14 +10,16 @@ use tokio::sync::Notify;
 
 pub struct DummyDecision {
     blocks_to_commit: VecDeque<Arc<Block>>,
-    notify: Notify,
+    blocks_committed: u64,
+    _notify: Notify,
 }
 
 impl DummyDecision {
     pub fn new() -> Self {
         Self {
             blocks_to_commit: VecDeque::new(),
-            notify: Notify::new(),
+            blocks_committed: 0,
+            _notify: Notify::new(),
         }
     }
 }
@@ -34,13 +36,16 @@ impl Decision for DummyDecision {
             if !self.blocks_to_commit.is_empty() {
                 return Ok(());
             }
-            self.notify.notified().await;
+            self._notify.notified().await;
         }
     }
 
-    async fn next_to_commit(&mut self) -> Result<Arc<Block>, CopycatError> {
+    async fn next_to_commit(&mut self) -> Result<(u64, Arc<Block>), CopycatError> {
         match self.blocks_to_commit.pop_front() {
-            Some(block) => Ok(block),
+            Some(block) => {
+                self.blocks_committed += 1;
+                Ok((self.blocks_committed, block))
+            }
             None => Err(CopycatError(String::from("no blocks to commit"))),
         }
     }

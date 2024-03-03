@@ -113,11 +113,11 @@ impl Decision for BitcoinDecision {
         }
     }
 
-    async fn next_to_commit(&mut self) -> Result<Arc<Block>, CopycatError> {
+    async fn next_to_commit(&mut self) -> Result<(u64, Arc<Block>), CopycatError> {
         match self.chain_tail.pop_front() {
             Some(blk_hash) => {
-                let (blk, _) = self.block_pool.get(&blk_hash).unwrap();
-                Ok(blk.clone())
+                let (blk, height) = self.block_pool.get(&blk_hash).unwrap();
+                Ok((*height, blk.clone()))
             }
             None => unreachable!(),
         }

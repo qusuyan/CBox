@@ -181,7 +181,7 @@ fn main() {
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
-        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s)\n")
+        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence\n")
         .expect("write stats failed");
 
     let runtime = Builder::new_multi_thread()
@@ -308,7 +308,7 @@ fn main() {
                 }
 
                 committed_txn = combine_rx.recv() => {
-                    let (node, txn) = match committed_txn {
+                    let (node, (height, txn_batch)) = match committed_txn {
                         Some(txn) => txn,
                         None => {
                             log::error!("committed_txn closed unexpectedly");
@@ -316,7 +316,7 @@ fn main() {
                         }
                     };
 
-                    if let Err(e) = flow_gen.txn_committed(node, txn).await {
+                    if let Err(e) = flow_gen.txn_committed(node, txn_batch, height).await {
                         log::error!("flow gen failed to record committed transaction: {e:?}");
                         continue;
                     }
@@ -327,13 +327,15 @@ fn main() {
                     let run_time =  (report_time - start_time).as_secs_f64();
                     let tput = stats.num_committed as f64 / run_time;
                     log::info!(
-                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s",
+                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit confidence: {}",
                         run_time,
                         tput,
-                        stats.latency
+                        stats.latency,
+                        stats.chain_length,
+                        stats.commit_confidence,
                     );
                     stats_file
-                        .write_fmt(format_args!("{},{},{}\n", run_time, tput, stats.latency))
+                        .write_fmt(format_args!("{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence))
                         .expect("write stats failed");
                     report_time += Duration::from_secs(60);
                 }
