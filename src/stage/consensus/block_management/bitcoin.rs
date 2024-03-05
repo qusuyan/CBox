@@ -264,10 +264,12 @@ impl BlockManagement for BitcoinBlockManagement {
                             }
                         }
 
-                        // execute the script
-                        execution_delay += *script_runtime;
-                        if !script_succeed {
-                            valid = false;
+                        // execute the script if the txn is valid
+                        if valid {
+                            execution_delay += *script_runtime;
+                            if !script_succeed {
+                                valid = false;
+                            }
                         }
 
                         if valid {

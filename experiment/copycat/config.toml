@@ -26,6 +26,7 @@ cluster = [
   ["disable_txn_dissem", "false"],
   ["config", ""],
 ]
+date = []
 mailbox = [["build_type", "release"], ["id", "@POS"], ["threads", "8"]]
 node = [
   ["build_type", "release"],
