@@ -218,7 +218,7 @@ impl BlockManagement for BitcoinBlockManagement {
     }
 
     async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
-        pf_debug!(self.id; "preparing new block...");
+        let start_time = Instant::now();
 
         let mut modified = false;
         let mut execution_delay = Duration::from_secs(0);
@@ -309,9 +309,10 @@ impl BlockManagement for BitcoinBlockManagement {
             let pow_time = self.get_pow_time();
             self.pow_time = Some(pow_time);
             self.block_emit_time = Some(start_pow + pow_time);
+            let runtime = Instant::now() - start_time;
+            pf_debug!(self.id; "preparing new block takes {:?}, execution delay is {:?}", runtime, execution_delay);
         }
 
-        pf_debug!(self.id; "preparing new block returned, execution delay is {:?}", execution_delay);
         Ok(())
     }
 
