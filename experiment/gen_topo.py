@@ -38,15 +38,36 @@ def gen_topo(nodes, degree, skewness):
         out_edges = {(node, neighbor) if neighbor > node else (neighbor, node) for neighbor in neighbors}
         edges = edges.union(out_edges)
 
-    # print(len(edges), edges)
-    # for node in full_node_list:
-    #     neighbors = []
-    #     for (src, dst) in edges:
-    #         if src == node:
-    #             neighbors.append(dst)
-    #         if dst == node:
-    #             neighbors.append(src)
-    #     print(f"node {node} ({len(neighbors)}): {neighbors}")
+    # find connected graphs and connect them together
+    compartments = []
+    unvisited_nodes = nodes.copy()
+    while len(unvisited_nodes) > 0:
+        frontier = [unvisited_nodes.pop(0)]
+        connected = []
+        while len(frontier) > 0:
+            cur_node = frontier.pop(0)
+            connected.append(cur_node)
+            for (src, dst) in edges:
+                if src == cur_node and dst in unvisited_nodes:
+                    frontier.append(dst)
+                    unvisited_nodes.remove(dst)
+                if dst == cur_node and src in unvisited_nodes:
+                    frontier.append(src)
+                    unvisited_nodes.remove(src)
+        compartments.append(connected)
+
+    while len(compartments) > 1:
+        graph1 = compartments.pop(0)
+        rand1 = math.floor(np.random.uniform() * len(graph1))
+        node1 = graph1[rand1]
+
+        graph2 = compartments.pop(0)
+        rand2 = math.floor(np.random.uniform() * len(graph2))
+        node2 = graph2[rand2]
+
+        edges.add((node1, node2) if node2 > node1 else (node2, node1))
+        graph1.extend(graph2)
+        compartments.append(graph1)
 
     return list(edges)
 

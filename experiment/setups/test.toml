@@ -4,7 +4,7 @@ num_iterations = 1
 [parameters]
 config = "difficulty=27+commit_depth=6"
 disable-txn-dissem = true
-dissem = ["gossip", "broadcast"]
+dissem = ["broadcast", "gossip"]
 exp-time = 1800
 frequency = 0
 max-inflight-txns = 100000

@@ -218,7 +218,10 @@ impl BlockManagement for BitcoinBlockManagement {
     }
 
     async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
+        pf_debug!(self.id; "preparing new block...");
+
         let mut modified = false;
+        let mut execution_delay = Duration::from_secs(0);
 
         // if block is not full yet, try adding new txns
         loop {
@@ -262,7 +265,7 @@ impl BlockManagement for BitcoinBlockManagement {
                         }
 
                         // execute the script
-                        tokio::time::sleep(*script_runtime).await;
+                        execution_delay += *script_runtime;
                         if !script_succeed {
                             valid = false;
                         }
@@ -297,6 +300,8 @@ impl BlockManagement for BitcoinBlockManagement {
             };
         }
 
+        tokio::time::sleep(execution_delay).await;
+
         if modified || self.block_emit_time.is_none() {
             self.merkle_root =
                 Some(DummyMerkleTree::new(self.block_under_construction.len()).await?);
@@ -306,6 +311,7 @@ impl BlockManagement for BitcoinBlockManagement {
             self.block_emit_time = Some(start_pow + pow_time);
         }
 
+        pf_debug!(self.id; "preparing new block returned, execution delay is {:?}", execution_delay);
         Ok(())
     }
 
@@ -688,6 +694,7 @@ impl BlockManagement for BitcoinBlockManagement {
             .retain(|txn_hash| !txns_applied.contains(txn_hash));
 
         tokio::time::sleep(total_exec_time).await;
+        pf_debug!(self.id; "validation complete, execution takes {:?}", total_exec_time);
         Ok(new_chain)
     }
 
