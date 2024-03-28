@@ -24,6 +24,7 @@ fn get_txn_validation(config: Config, crypto_scheme: CryptoScheme) -> Box<dyn Tx
     match config {
         Config::Dummy => Box::new(DummyTxnValidation::new()),
         Config::Bitcoin { .. } => Box::new(BitcoinTxnValidation::new(crypto_scheme)),
+        Config::Avalanche { .. } => todo!(),
     }
 }
 

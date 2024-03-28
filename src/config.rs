@@ -6,6 +6,7 @@ use crate::utils::CopycatError;
 pub enum Config {
     Dummy,
     Bitcoin { config: BitcoinConfig },
+    Avalanche { config: AvalancheConfig },
 }
 
 #[derive(Clone, Debug)]
@@ -25,12 +26,35 @@ impl Default for BitcoinConfig {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct AvalancheConfig {
+    k: usize,
+    alpha: f64,
+    beta1: usize,
+    beta2: usize,
+}
+
+// https://arxiv.org/pdf/1906.08936.pdf
+impl Default for AvalancheConfig {
+    fn default() -> Self {
+        Self {
+            k: 10,
+            alpha: 0.8,
+            beta1: 11,
+            beta2: 150,
+        }
+    }
+}
+
 impl Config {
     pub fn from_str(chain_type: ChainType, input: Option<&str>) -> Result<Self, CopycatError> {
         match chain_type {
             ChainType::Dummy => Ok(Config::Dummy),
             ChainType::Bitcoin => Ok(Config::Bitcoin {
                 config: parsed_config!(input => BitcoinConfig; difficulty, commit_depth, compute_power)?,
+            }),
+            ChainType::Avalanche => Ok(Config::Avalanche {
+                config: parsed_config!(input => AvalancheConfig; k, alpha, beta1, beta2)?,
             }),
         }
     }

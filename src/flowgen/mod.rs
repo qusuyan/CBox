@@ -46,6 +46,7 @@ pub fn get_flow_gen(
             frequency,
             crypto,
         )),
+        ChainType::Avalanche => todo!(),
         _ => todo!(),
     }
 }

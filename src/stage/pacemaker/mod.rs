@@ -23,6 +23,7 @@ fn get_pacemaker(
     match config {
         Config::Dummy => Box::new(DummyPacemaker {}),
         Config::Bitcoin { .. } => Box::new(DummyPacemaker {}), // TODO
+        Config::Avalanche { .. } => todo!(),
     }
 }
 

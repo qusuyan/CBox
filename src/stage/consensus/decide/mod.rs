@@ -28,6 +28,7 @@ fn get_decision(
     match config {
         Config::Dummy => Box::new(DummyDecision::new()),
         Config::Bitcoin { config } => Box::new(BitcoinDecision::new(id, config)),
+        Config::Avalanche { config } => todo!(),
     }
 }
 

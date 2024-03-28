@@ -50,6 +50,7 @@ fn get_blk_creation(
             config,
             peer_messenger,
         )),
+        Config::Avalanche { config } => todo!(),
     }
 }
 

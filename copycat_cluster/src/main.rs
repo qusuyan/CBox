@@ -178,7 +178,7 @@ fn main() {
     let frequency = args.frequency;
     let num_accounts = args.accounts;
 
-    let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
+    let mut stats_file = std::fs::File::create(format!("tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
         .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence\n")

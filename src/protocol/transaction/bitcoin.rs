@@ -30,7 +30,3 @@ pub enum BitcoinTxn {
 }
 
 impl GetSize for BitcoinTxn {}
-
-// since transactions are created and never modified
-unsafe impl Sync for BitcoinTxn {}
-unsafe impl Send for BitcoinTxn {}

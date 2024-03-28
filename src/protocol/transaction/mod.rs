@@ -4,6 +4,9 @@ pub use bitcoin::BitcoinTxn;
 mod dummy;
 pub use dummy::DummyTxn;
 
+mod avalanche;
+pub use avalanche::AvalancheTxn;
+
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
@@ -13,4 +16,9 @@ use serde::{Deserialize, Serialize};
 pub enum Txn {
     Dummy { txn: DummyTxn },
     Bitcoin { txn: BitcoinTxn },
+    Avalanche { txn: AvalancheTxn },
 }
+
+// since transactions are created and never modified
+unsafe impl Sync for Txn {}
+unsafe impl Send for Txn {}

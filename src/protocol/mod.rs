@@ -12,6 +12,7 @@ use transaction::Txn;
 pub enum ChainType {
     Dummy,
     Bitcoin,
+    Avalanche,
 }
 
 #[derive(Copy, Clone, Debug, clap::ValueEnum)]
