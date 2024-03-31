@@ -28,16 +28,18 @@ impl Default for BitcoinConfig {
 
 #[derive(Clone, Debug)]
 pub struct AvalancheConfig {
-    k: usize,
-    alpha: f64,
-    beta1: usize,
-    beta2: usize,
+    pub blk_len: usize,
+    pub k: usize,
+    pub alpha: f64,
+    pub beta1: usize,
+    pub beta2: usize,
 }
 
 // https://arxiv.org/pdf/1906.08936.pdf
 impl Default for AvalancheConfig {
     fn default() -> Self {
         Self {
+            blk_len: 40,
             k: 10,
             alpha: 0.8,
             beta1: 11,
@@ -54,7 +56,7 @@ impl Config {
                 config: parsed_config!(input => BitcoinConfig; difficulty, commit_depth, compute_power)?,
             }),
             ChainType::Avalanche => Ok(Config::Avalanche {
-                config: parsed_config!(input => AvalancheConfig; k, alpha, beta1, beta2)?,
+                config: parsed_config!(input => AvalancheConfig; blk_len, k, alpha, beta1, beta2)?,
             }),
         }
     }

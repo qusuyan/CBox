@@ -22,7 +22,7 @@ pub fn get_neighbors(me: NodeId, path: String) -> Result<HashSet<NodeId>, Copyca
 }
 
 pub fn get_topology(
-    nodes: &Vec<NodeId>,
+    local_nodes: &Vec<NodeId>,
     path: String,
 ) -> Result<HashMap<NodeId, HashSet<NodeId>>, CopycatError> {
     let file = File::open(path)?;
@@ -30,7 +30,7 @@ pub fn get_topology(
     let pipes: Pipes = serde_json::from_reader(reader)?;
 
     let mut neighbor_map = HashMap::new();
-    for node in nodes {
+    for node in local_nodes {
         neighbor_map.insert(*node, HashSet::new());
     }
 
@@ -44,4 +44,20 @@ pub fn get_topology(
     }
 
     Ok(neighbor_map)
+}
+
+pub fn fully_connected_topology(
+    local_nodes: &Vec<NodeId>,
+    all_nodes: &Vec<NodeId>,
+) -> HashMap<NodeId, HashSet<NodeId>> {
+    let mut neighbor_map = HashMap::new();
+    for node in local_nodes {
+        let neighbors = all_nodes
+            .iter()
+            .filter(|neighbor| **neighbor != *node)
+            .cloned()
+            .collect();
+        neighbor_map.insert(*node, neighbors);
+    }
+    neighbor_map
 }

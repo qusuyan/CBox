@@ -2,6 +2,7 @@ mod dummy;
 use dummy::DummyBlockManagement;
 mod bitcoin;
 use bitcoin::BitcoinBlockManagement;
+mod avalanche;
 
 use crate::protocol::block::Block;
 use crate::protocol::crypto::Hash;
@@ -17,6 +18,8 @@ use tokio::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::peers::PeerMessenger;
+
+use self::avalanche::AvalancheBlockManagement;
 
 #[async_trait]
 pub trait BlockManagement: Sync + Send {
@@ -50,7 +53,12 @@ fn get_blk_creation(
             config,
             peer_messenger,
         )),
-        Config::Avalanche { config } => todo!(),
+        Config::Avalanche { config } => Box::new(AvalancheBlockManagement::new(
+            id,
+            crypto_scheme,
+            config,
+            peer_messenger,
+        )),
     }
 }
 

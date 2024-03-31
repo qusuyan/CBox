@@ -19,6 +19,9 @@ pub enum BlockHeader {
         merkle_root: Hash,
         nonce: u32, // https://en.bitcoin.it/wiki/Nonce
     },
+    Avalanche {
+        parents: Vec<Hash>,
+    },
 }
 
 impl GetSize for BlockHeader {}

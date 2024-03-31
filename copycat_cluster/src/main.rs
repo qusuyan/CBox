@@ -2,7 +2,7 @@ use mailbox::Mailbox;
 
 use copycat::log::colored_level;
 use copycat::Node;
-use copycat::{get_flow_gen, get_topology};
+use copycat::{fully_connected_topology, get_flow_gen, get_topology};
 use copycat::{ChainType, Config, CryptoScheme, DissemPattern};
 
 use std::collections::{HashMap, HashSet};
@@ -160,13 +160,13 @@ fn main() {
     log::info!("Node config: {:?}", node_config);
 
     let mut topology = if args.topology.is_empty() {
-        HashMap::new()
+        fully_connected_topology(&local_nodes, &nodes)
     } else {
         match get_topology(&local_nodes, args.topology) {
             Ok(neighbors) => neighbors,
             Err(e) => {
-                log::error!("parse network topology failed: {e}");
-                HashMap::new()
+                log::error!("parse network topology failed, fall back to fully connected: {e}");
+                fully_connected_topology(&local_nodes, &nodes)
             }
         }
     };

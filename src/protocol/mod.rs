@@ -19,6 +19,7 @@ pub enum ChainType {
 pub enum DissemPattern {
     Broadcast,
     Gossip,
+    Sample,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

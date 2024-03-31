@@ -2,6 +2,7 @@ use crate::protocol::{block::Block, crypto::Hash, transaction::Txn, MsgType};
 use crate::utils::{CopycatError, NodeId};
 use mailbox_client::{ClientStubRecvHalf, ClientStubSendHalf};
 
+use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, task::JoinHandle};
 
@@ -122,6 +123,21 @@ impl PeerMessenger {
         if dests.len() > 0 {
             if let Err(e) = self.transport_hub.multicast(dests, msg).await {
                 return Err(CopycatError(format!("gossip failed: {e:?}")));
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn sample(&self, msg: MsgType, neighbors: usize) -> Result<(), CopycatError> {
+        let sample = {
+            let mut rng = rand::thread_rng();
+            self.neighbors.iter().choose_multiple(&mut rng, neighbors)
+        };
+        let dests: Vec<u64> = sample.into_iter().cloned().collect();
+        pf_trace!(self.id; "sending {:?} to {} neighbors ({:?})", msg, neighbors, dests);
+        if dests.len() > 0 {
+            if let Err(e) = self.transport_hub.multicast(dests, msg).await {
+                return Err(CopycatError(format!("sample multicast failed: {e:?}")));
             }
         }
         Ok(())

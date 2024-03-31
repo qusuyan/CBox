@@ -13,4 +13,4 @@ pub use flowgen::get_flow_gen;
 pub use node::Node;
 pub use protocol::transaction;
 pub use protocol::{ChainType, CryptoScheme, DissemPattern};
-pub use utils::{get_neighbors, get_topology, log, CopycatError, NodeId};
+pub use utils::{fully_connected_topology, get_neighbors, get_topology, log, CopycatError, NodeId};

@@ -4,6 +4,9 @@ use broadcast::BroadcastBlockDissemination;
 mod gossip;
 use gossip::GossipBlockDissemination;
 
+mod sampling;
+use sampling::SamplingBlockDissemination;
+
 use crate::config::Config;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
@@ -23,12 +26,15 @@ pub trait BlockDissemination: Sync + Send {
 fn get_block_dissemination(
     id: NodeId,
     dissem_pattern: DissemPattern,
-    _config: Config,
+    config: Config,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockDissemination> {
     match dissem_pattern {
         DissemPattern::Broadcast => Box::new(BroadcastBlockDissemination::new(id, peer_messenger)),
         DissemPattern::Gossip => Box::new(GossipBlockDissemination::new(id, peer_messenger)),
+        DissemPattern::Sample => {
+            Box::new(SamplingBlockDissemination::new(id, peer_messenger, config))
+        }
     }
 }
 

@@ -4,6 +4,9 @@ use dummy::DummyTxnValidation;
 mod bitcoin;
 use bitcoin::BitcoinTxnValidation;
 
+mod avalanche;
+use avalanche::AvalancheTxnValidation;
+
 use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
@@ -24,7 +27,7 @@ fn get_txn_validation(config: Config, crypto_scheme: CryptoScheme) -> Box<dyn Tx
     match config {
         Config::Dummy => Box::new(DummyTxnValidation::new()),
         Config::Bitcoin { .. } => Box::new(BitcoinTxnValidation::new(crypto_scheme)),
-        Config::Avalanche { .. } => todo!(),
+        Config::Avalanche { .. } => Box::new(AvalancheTxnValidation::new(crypto_scheme)),
     }
 }
 
