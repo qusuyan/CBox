@@ -122,4 +122,12 @@ impl Decision for BitcoinDecision {
             None => unreachable!(),
         }
     }
+
+    async fn handle_peer_msg(
+        &mut self,
+        _src: NodeId,
+        _content: Arc<Vec<u8>>,
+    ) -> Result<(), CopycatError> {
+        unreachable!("Bitcoin consensus can be done locally")
+    }
 }

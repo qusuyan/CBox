@@ -160,9 +160,11 @@ impl PeerMessenger {
                 Ok(msg) => {
                     let (src, content) = msg;
                     match content {
-                        MsgType::NewTxn { txn } => {
-                            if let Err(e) = rx_txn_send.send((src, Arc::new(txn))).await {
-                                pf_error!(id; "rx_txn_send failed: {:?}", e)
+                        MsgType::NewTxn { txn_batch } => {
+                            for txn in txn_batch {
+                                if let Err(e) = rx_txn_send.send((src, Arc::new(txn))).await {
+                                    pf_error!(id; "rx_txn_send failed: {:?}", e)
+                                }
                             }
                         }
                         MsgType::NewBlock { blk } => {

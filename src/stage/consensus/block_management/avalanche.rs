@@ -237,6 +237,7 @@ impl BlockManagement for AvalancheBlockManagement {
 
         let parent_blks = self.batch_parents.drain().collect();
         let header = BlockHeader::Avalanche {
+            proposer: self.id,
             parents: parent_blks,
         };
         let serialized = &bincode::serialize(&header)?;

@@ -1,6 +1,7 @@
 use super::Decision;
 use crate::protocol::block::Block;
 use crate::utils::CopycatError;
+use crate::NodeId;
 
 use async_trait::async_trait;
 
@@ -48,5 +49,13 @@ impl Decision for DummyDecision {
             }
             None => Err(CopycatError(String::from("no blocks to commit"))),
         }
+    }
+
+    async fn handle_peer_msg(
+        &mut self,
+        _src: NodeId,
+        _content: Arc<Vec<u8>>,
+    ) -> Result<(), CopycatError> {
+        unreachable!();
     }
 }

@@ -24,7 +24,7 @@ pub enum DissemPattern {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MsgType {
-    NewTxn { txn: Txn },
+    NewTxn { txn_batch: Vec<Txn> },
     NewBlock { blk: Block },
     ConsensusMsg { msg: Vec<u8> },
     PMakerMsg { msg: Vec<u8> },

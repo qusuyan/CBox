@@ -21,13 +21,19 @@ impl BroadcastTxnDissemination {
 
 #[async_trait]
 impl TxnDissemination for BroadcastTxnDissemination {
-    async fn disseminate(&self, src: NodeId, txn: &Txn) -> Result<(), CopycatError> {
+    async fn disseminate(&self, txn_batch: &Vec<(u64, Arc<Txn>)>) -> Result<(), CopycatError> {
         // only the node that receives the txn first needs to broadcast
-        if src == self.me {
-            return self
-                .transport
-                .broadcast(MsgType::NewTxn { txn: txn.clone() })
-                .await;
+        let txn_to_dissem: Vec<Txn> = txn_batch
+            .iter()
+            .filter(|(src, _)| *src == self.me)
+            .map(|(_, txn)| txn.as_ref().clone())
+            .collect();
+        if txn_to_dissem.len() > 0 {
+            self.transport
+                .broadcast(MsgType::NewTxn {
+                    txn_batch: txn_to_dissem,
+                })
+                .await?;
         }
         Ok(())
     }

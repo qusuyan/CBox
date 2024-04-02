@@ -2,6 +2,8 @@ mod dummy;
 use dummy::DummyDecision;
 mod bitcoin;
 use bitcoin::BitcoinDecision;
+mod avalanche;
+use avalanche::AvalancheDecision;
 
 use crate::protocol::block::Block;
 use crate::utils::{CopycatError, NodeId};
@@ -17,18 +19,24 @@ pub trait Decision: Sync + Send {
     async fn new_tail(&mut self, new_tail: Vec<Arc<Block>>) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
     async fn next_to_commit(&mut self) -> Result<(u64, Arc<Block>), CopycatError>;
+    async fn handle_peer_msg(
+        &mut self,
+        src: NodeId,
+        content: Arc<Vec<u8>>,
+    ) -> Result<(), CopycatError>;
 }
 
 fn get_decision(
     id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
 ) -> Box<dyn Decision> {
     match config {
         Config::Dummy => Box::new(DummyDecision::new()),
         Config::Bitcoin { config } => Box::new(BitcoinDecision::new(id, config)),
-        Config::Avalanche { config } => todo!(),
+        Config::Avalanche { config } => {
+            Box::new(AvalancheDecision::new(id, config, peer_messenger))
+        }
     }
 }
 
@@ -36,13 +44,13 @@ pub async fn decision_thread(
     id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
+    mut peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
     mut block_ready_recv: mpsc::Receiver<Vec<Arc<Block>>>,
     commit_send: mpsc::Sender<(u64, Arc<Block>)>,
 ) {
     pf_info!(id; "decision stage starting...");
 
-    let mut decision_stage = get_decision(id, config, peer_messenger, peer_consensus_recv);
+    let mut decision_stage = get_decision(id, config, peer_messenger);
 
     loop {
         tokio::select! {
@@ -83,6 +91,20 @@ pub async fn decision_thread(
                 }
 
             },
+            peer_msg = peer_consensus_recv.recv() => {
+                let (src, msg) =  match peer_msg {
+                    Some(msg) => msg,
+                    None => {
+                        pf_error!(id; "peer consensus recv pipe closed unexpectedly");
+                        continue;
+                    }
+                };
+
+                if let Err(e) = decision_stage.handle_peer_msg(src, msg).await {
+                    pf_error!(id; "failed to handle message from peer {}: {:?}", src, e);
+                    continue;
+                }
+            }
         }
     }
 }
