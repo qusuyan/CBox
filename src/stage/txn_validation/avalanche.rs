@@ -43,6 +43,9 @@ impl TxnValidation for AvalancheTxnValidation {
                 self.txns_pool.insert(hash, txn);
                 return Ok(true);
             }
+            AvalancheTxn::Noop { .. } | AvalancheTxn::PlaceHolder => {
+                unreachable!();
+            }
         };
 
         let serialized_txn = bincode::serialize(&txn)?;

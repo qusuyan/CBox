@@ -98,6 +98,18 @@ impl CliArgs {
             log::warn!("currently does not support sending flow generation to different nodes when transaction dissemination is disabled");
             self.txn_span = 0;
         }
+
+        if matches!(self.chain, ChainType::Avalanche)
+            && !matches!(self.dissem_pattern, DissemPattern::Sample)
+        {
+            log::warn!("Avalanche is based on sampling, using dissem pattern sample instead");
+            self.dissem_pattern = DissemPattern::Sample;
+        }
+
+        if !matches!(self.dissem_pattern, DissemPattern::Gossip) && !self.topology.is_empty() {
+            log::warn!("Topology files are only used for gossipping, but the dissem pattern is {:?}, ignoring topology file...", self.dissem_pattern);
+            self.topology = String::from("");
+        }
     }
 }
 
@@ -145,19 +157,6 @@ fn main() {
     let pipe_info = mailbox::config::parse_network_config(&nodes, network_config);
 
     // get node parameters
-    let node_config = if args.config.is_empty() {
-        Config::from_str(args.chain, None).unwrap()
-    } else {
-        args.config = args.config.replace('+', "\n");
-        match Config::from_str(args.chain, Some(&args.config)) {
-            Ok(config) => config,
-            Err(e) => {
-                log::warn!("Invalid config string ({e:?}), fall back to default");
-                Config::from_str(args.chain, None).unwrap()
-            }
-        }
-    };
-    log::info!("Node config: {:?}", node_config);
 
     let mut topology = if args.topology.is_empty() {
         fully_connected_topology(&local_nodes, &nodes)
@@ -172,13 +171,33 @@ fn main() {
     };
     log::info!("topology: {topology:?}");
 
+    let mut node_config = if args.config.is_empty() {
+        Config::from_str(args.chain, None).unwrap()
+    } else {
+        args.config = args.config.replace('+', "\n");
+        match Config::from_str(args.chain, Some(&args.config)) {
+            Ok(config) => config,
+            Err(e) => {
+                log::warn!("Invalid config string ({e:?}), fall back to default");
+                Config::from_str(args.chain, None).unwrap()
+            }
+        }
+    };
+    let min_neighbors = topology
+        .iter()
+        .map(|(_, neighbors)| neighbors.len())
+        .min()
+        .unwrap();
+    node_config.validate(min_neighbors);
+    log::info!("Node config: {:?}", node_config);
+
     // get flow generation metrics
     let txn_span = args.txn_span;
     let max_inflight = args.max_inflight;
     let frequency = args.frequency;
     let num_accounts = args.accounts;
 
-    let mut stats_file = std::fs::File::create(format!("tmp/copycat_cluster_{}.csv", id))
+    let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
         .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence\n")

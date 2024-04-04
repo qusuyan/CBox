@@ -6,7 +6,9 @@ mod avalanche;
 use avalanche::AvalancheDecision;
 
 use crate::protocol::block::Block;
+use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
+use crate::CryptoScheme;
 use crate::{config::Config, peers::PeerMessenger};
 
 use async_trait::async_trait;
@@ -16,9 +18,13 @@ use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait Decision: Sync + Send {
-    async fn new_tail(&mut self, new_tail: Vec<Arc<Block>>) -> Result<(), CopycatError>;
+    async fn new_tail(
+        &mut self,
+        src: NodeId,
+        new_tail: Vec<Arc<Block>>,
+    ) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
-    async fn next_to_commit(&mut self) -> Result<(u64, Arc<Block>), CopycatError>;
+    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
     async fn handle_peer_msg(
         &mut self,
         src: NodeId,
@@ -28,35 +34,39 @@ pub trait Decision: Sync + Send {
 
 fn get_decision(
     id: NodeId,
+    crypto_scheme: CryptoScheme,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn Decision> {
     match config {
         Config::Dummy => Box::new(DummyDecision::new()),
         Config::Bitcoin { config } => Box::new(BitcoinDecision::new(id, config)),
-        Config::Avalanche { config } => {
-            Box::new(AvalancheDecision::new(id, config, peer_messenger))
-        }
+        Config::Avalanche { config } => Box::new(AvalancheDecision::new(
+            id,
+            crypto_scheme,
+            config,
+            peer_messenger,
+        )),
     }
 }
 
 pub async fn decision_thread(
     id: NodeId,
+    crypto_scheme: CryptoScheme,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
     mut peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
-    mut block_ready_recv: mpsc::Receiver<Vec<Arc<Block>>>,
-    commit_send: mpsc::Sender<(u64, Arc<Block>)>,
+    mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<Arc<Block>>)>,
+    commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
 ) {
     pf_info!(id; "decision stage starting...");
 
-    let mut decision_stage = get_decision(id, config, peer_messenger);
+    let mut decision_stage = get_decision(id, crypto_scheme, config, peer_messenger);
 
     loop {
         tokio::select! {
             new_tail = block_ready_recv.recv() => {
-                pf_debug!(id; "got new chain tail: {:?}", new_tail);
-                let new_tail = match new_tail {
+                let (src, new_tail) = match new_tail {
                     Some(tail) => tail,
                     None => {
                         pf_error!(id; "block_ready pipe closed unexpectedly");
@@ -64,7 +74,9 @@ pub async fn decision_thread(
                     }
                 };
 
-                if let Err(e) = decision_stage.new_tail(new_tail).await {
+                pf_debug!(id; "got new chain tail from {}: {:?}", src, new_tail);
+
+                if let Err(e) = decision_stage.new_tail(src, new_tail).await {
                     pf_error!(id; "failed to record new chain tail: {:?}", e);
                     continue;
                 }
@@ -83,7 +95,7 @@ pub async fn decision_thread(
                     }
                 };
 
-                pf_debug!(id; "committing new block {:?}, height {}", block_to_commit, height);
+                pf_debug!(id; "committing new block of length {:?}, height {}", block_to_commit.len(), height);
 
                 if let Err(e) = commit_send.send((height, block_to_commit)).await {
                     pf_error!(id; "failed to send to commit pipe: {:?}", e);

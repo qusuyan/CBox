@@ -2,6 +2,7 @@ use super::Decision;
 use crate::config::BitcoinConfig;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::{sha256, Hash};
+use crate::transaction::Txn;
 use crate::utils::CopycatError;
 use crate::NodeId;
 use tokio::sync::Notify;
@@ -35,7 +36,11 @@ impl BitcoinDecision {
 
 #[async_trait]
 impl Decision for BitcoinDecision {
-    async fn new_tail(&mut self, new_tail: Vec<Arc<Block>>) -> Result<(), CopycatError> {
+    async fn new_tail(
+        &mut self,
+        _src: NodeId,
+        new_tail: Vec<Arc<Block>>,
+    ) -> Result<(), CopycatError> {
         // find height of first block
         let (ancester_hash, first_block_height) = match new_tail.first() {
             Some(blk) => {
@@ -113,11 +118,11 @@ impl Decision for BitcoinDecision {
         }
     }
 
-    async fn next_to_commit(&mut self) -> Result<(u64, Arc<Block>), CopycatError> {
+    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
         match self.chain_tail.pop_front() {
             Some(blk_hash) => {
                 let (blk, height) = self.block_pool.get(&blk_hash).unwrap();
-                Ok((*height, blk.clone()))
+                Ok((*height, blk.txns.clone()))
             }
             None => unreachable!(),
         }

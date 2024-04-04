@@ -1,5 +1,5 @@
 use super::Commit;
-use crate::protocol::block::Block;
+use crate::transaction::Txn;
 use crate::utils::CopycatError;
 
 use async_trait::async_trait;
@@ -16,7 +16,7 @@ impl DummyCommit {
 
 #[async_trait]
 impl Commit for DummyCommit {
-    async fn commit(&self, _block: Arc<Block>) -> Result<(), CopycatError> {
+    async fn commit(&self, _txn_batch: &Vec<Arc<Txn>>) -> Result<(), CopycatError> {
         Ok(())
     }
 }

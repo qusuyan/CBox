@@ -12,7 +12,7 @@ impl Pacemaker for DummyPacemaker {
     async fn wait_to_propose(&self) -> Result<Arc<Vec<u8>>, CopycatError> {
         let notify = tokio::sync::Notify::new();
         loop {
-            notify.notified();
+            notify.notified().await;
         }
     }
 }

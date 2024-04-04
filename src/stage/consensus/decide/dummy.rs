@@ -1,5 +1,6 @@
 use super::Decision;
 use crate::protocol::block::Block;
+use crate::transaction::Txn;
 use crate::utils::CopycatError;
 use crate::NodeId;
 
@@ -27,7 +28,11 @@ impl DummyDecision {
 
 #[async_trait]
 impl Decision for DummyDecision {
-    async fn new_tail(&mut self, new_tail: Vec<Arc<Block>>) -> Result<(), CopycatError> {
+    async fn new_tail(
+        &mut self,
+        _src: NodeId,
+        new_tail: Vec<Arc<Block>>,
+    ) -> Result<(), CopycatError> {
         self.blocks_to_commit.append(&mut VecDeque::from(new_tail));
         Ok(())
     }
@@ -41,11 +46,11 @@ impl Decision for DummyDecision {
         }
     }
 
-    async fn next_to_commit(&mut self) -> Result<(u64, Arc<Block>), CopycatError> {
+    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
         match self.blocks_to_commit.pop_front() {
             Some(block) => {
                 self.blocks_committed += 1;
-                Ok((self.blocks_committed, block))
+                Ok((self.blocks_committed, block.txns.clone()))
             }
             None => Err(CopycatError(String::from("no blocks to commit"))),
         }

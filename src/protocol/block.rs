@@ -21,8 +21,9 @@ pub enum BlockHeader {
         nonce: u32, // https://en.bitcoin.it/wiki/Nonce
     },
     Avalanche {
+        // only include data to uniquely identify each rounds of vote
         proposer: NodeId,
-        parents: Vec<Hash>,
+        id: u64,
     },
 }
 

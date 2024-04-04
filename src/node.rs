@@ -118,6 +118,7 @@ impl Node {
 
         let _decision_handle = tokio::spawn(decision_thread(
             id,
+            crypto_scheme,
             config.clone(),
             peer_messenger.clone(),
             peer_consensus_recv,

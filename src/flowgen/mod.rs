@@ -1,7 +1,10 @@
 mod dummy;
 
 mod bitcoin;
-pub use bitcoin::BitcoinFlowGen;
+use bitcoin::BitcoinFlowGen;
+
+mod avalanche;
+use avalanche::AvalancheFlowGen;
 
 use crate::protocol::{transaction::Txn, ChainType, CryptoScheme};
 use crate::utils::{CopycatError, NodeId};
@@ -46,7 +49,13 @@ pub fn get_flow_gen(
             frequency,
             crypto,
         )),
-        ChainType::Avalanche => todo!(),
+        ChainType::Avalanche => Box::new(AvalancheFlowGen::new(
+            id,
+            num_accounts,
+            max_inflight,
+            frequency,
+            crypto,
+        )),
         _ => todo!(),
     }
 }

@@ -44,7 +44,7 @@ pub async fn block_dissemination_thread(
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
     mut new_block_recv: mpsc::Receiver<(NodeId, Vec<Arc<Block>>)>,
-    block_ready_send: mpsc::Sender<Vec<Arc<Block>>>,
+    block_ready_send: mpsc::Sender<(NodeId, Vec<Arc<Block>>)>,
 ) {
     pf_info!(id; "block dissemination stage starting...");
 
@@ -73,7 +73,7 @@ pub async fn block_dissemination_thread(
             continue;
         }
 
-        if let Err(e) = block_ready_send.send(new_tail).await {
+        if let Err(e) = block_ready_send.send((src, new_tail)).await {
             pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
             continue;
         }

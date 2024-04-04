@@ -53,12 +53,9 @@ fn get_blk_creation(
             config,
             peer_messenger,
         )),
-        Config::Avalanche { config } => Box::new(AvalancheBlockManagement::new(
-            id,
-            crypto_scheme,
-            config,
-            peer_messenger,
-        )),
+        Config::Avalanche { config } => {
+            Box::new(AvalancheBlockManagement::new(id, crypto_scheme, config))
+        }
     }
 }
 

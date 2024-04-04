@@ -31,8 +31,10 @@ pub struct AvalancheConfig {
     pub blk_len: usize,
     pub k: usize,
     pub alpha: f64,
-    pub beta1: usize,
-    pub beta2: usize,
+    pub beta1: u64,
+    pub beta2: u64,
+    pub proposal_timeout_secs: f64,
+    pub commit_timeout_secs: f64,
 }
 
 // https://arxiv.org/pdf/1906.08936.pdf
@@ -44,6 +46,8 @@ impl Default for AvalancheConfig {
             alpha: 0.8,
             beta1: 11,
             beta2: 150,
+            proposal_timeout_secs: 5.0,
+            commit_timeout_secs: 5.0,
         }
     }
 }
@@ -56,8 +60,28 @@ impl Config {
                 config: parsed_config!(input => BitcoinConfig; difficulty, commit_depth, compute_power)?,
             }),
             ChainType::Avalanche => Ok(Config::Avalanche {
-                config: parsed_config!(input => AvalancheConfig; blk_len, k, alpha, beta1, beta2)?,
+                config: parsed_config!(input => AvalancheConfig; blk_len, k, alpha, beta1, beta2, proposal_timeout_secs)?,
             }),
+        }
+    }
+
+    pub fn validate(&mut self, num_neighbors: usize) {
+        match self {
+            Config::Dummy => {}
+            Config::Bitcoin { .. } => {}
+            Config::Avalanche { config } => {
+                let max_voters = num_neighbors + 1;
+                if config.k > max_voters {
+                    log::warn!("not enough neighbors, setting k to {max_voters} instead");
+                    config.k = max_voters;
+                }
+                if config.alpha <= 0.5 {
+                    log::warn!(
+                        "alpha has to be greater than 0.5 to ensure majority vote, setting to 0.51"
+                    );
+                    config.alpha = 0.51
+                }
+            }
         }
     }
 }

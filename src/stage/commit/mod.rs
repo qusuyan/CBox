@@ -1,7 +1,6 @@
 mod dummy;
 use dummy::DummyCommit;
 
-use crate::protocol::block::Block;
 use crate::protocol::transaction::Txn;
 use crate::{CopycatError, NodeId};
 
@@ -14,7 +13,7 @@ use crate::config::Config;
 
 #[async_trait]
 pub trait Commit: Sync + Send {
-    async fn commit(&self, block: Arc<Block>) -> Result<(), CopycatError>;
+    async fn commit(&self, block: &Vec<Arc<Txn>>) -> Result<(), CopycatError>;
 }
 
 pub fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
@@ -28,7 +27,7 @@ pub fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
 pub async fn commit_thread(
     id: NodeId,
     config: Config,
-    mut commit_recv: mpsc::Receiver<(u64, Arc<Block>)>,
+    mut commit_recv: mpsc::Receiver<(u64, Vec<Arc<Txn>>)>,
     executed_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
 ) {
     pf_info!(id; "commit stage starting...");
@@ -36,7 +35,7 @@ pub async fn commit_thread(
     let commit_stage = get_commit(id, config);
 
     loop {
-        let (height, block) = match commit_recv.recv().await {
+        let (height, txn_batch) = match commit_recv.recv().await {
             Some(blk) => blk,
             None => {
                 pf_error!(id; "commit pipe closed unexpectedly");
@@ -44,14 +43,14 @@ pub async fn commit_thread(
             }
         };
 
-        pf_debug!(id; "got new block {:?}", block);
+        pf_debug!(id; "got new txn batch ({})", txn_batch.len());
 
-        if let Err(e) = commit_stage.commit(block.clone()).await {
+        if let Err(e) = commit_stage.commit(&txn_batch).await {
             pf_error!(id; "failed to commit: {:?}", e);
             continue;
         }
 
-        if let Err(e) = executed_send.send((height, block.txns.clone())).await {
+        if let Err(e) = executed_send.send((height, txn_batch)).await {
             pf_error!(id; "failed to send committed txns: {:?}", e);
             continue;
         }

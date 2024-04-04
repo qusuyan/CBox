@@ -18,6 +18,10 @@ pub enum AvalancheTxn {
         out_utxo: u64,
         receiver: PubKey,
     },
+    Noop {
+        parents: Vec<Hash>,
+    },
+    PlaceHolder, // place holders to replace invalid txns in a batch / block
 }
 
 impl GetSize for AvalancheTxn {}
