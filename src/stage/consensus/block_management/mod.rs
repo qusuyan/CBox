@@ -76,12 +76,20 @@ pub async fn block_management_thread(
     let mut block_management_stage = get_blk_creation(id, config, crypto_scheme, peer_messenger);
     let mut batch_prepare_time = Instant::now() + Duration::from_millis(100);
 
+    let mut report_timeout = Instant::now() + Duration::from_secs(60);
+    let mut self_txns_sent = 0;
+    let mut self_blks_sent = 0;
+    let mut peer_txns_sent = 0;
+    let mut peer_blks_sent = 0;
+    let mut txns_recv = 0;
+
     loop {
         tokio::select! {
             new_txn = txn_ready_recv.recv() => {
                 match new_txn {
                     Some(txn) => {
                         pf_trace!(id; "got new txn {:?}", txn);
+                        txns_recv += 1;
                         if let Err(e) = block_management_stage.record_new_txn(txn).await {
                             pf_error!(id; "failed to record new txn: {:?}", e);
                             continue;
@@ -111,6 +119,8 @@ pub async fn block_management_thread(
                 match block_management_stage.get_new_block().await {
                     Ok(block) => {
                         pf_debug!(id; "proposing new block {:?}", block);
+                        self_blks_sent += 1;
+                        self_txns_sent += block.txns.len();
                         if let Err(e) = new_block_send.send((id, vec![block])).await {
                             pf_error!(id; "failed to send to new_block pipe: {:?}", e);
                             continue;
@@ -143,6 +153,10 @@ pub async fn block_management_thread(
                 match block_management_stage.validate_block(new_block.clone()).await {
                     Ok(new_tail) => {
                         if !new_tail.is_empty() {
+                            for blk in new_tail.iter() {
+                                peer_blks_sent += 1;
+                                peer_txns_sent += blk.txns.len();
+                            }
                             if let Err(e) = new_block_send.send((src, new_tail)).await {
                                 pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
                                 continue;
@@ -185,6 +199,16 @@ pub async fn block_management_thread(
                         continue;
                     }
                 }
+            }
+
+            _ = tokio::time::sleep_until(report_timeout) => {
+                pf_info!(id; "In the last minute: txns_recv: {}, self_blks_sent: {}, self_txns_sent: {}, peer_blks_sent: {}, peer_txns_sent: {}", txns_recv, self_blks_sent, self_txns_sent, peer_blks_sent, peer_txns_sent);
+                txns_recv = 0;
+                self_blks_sent = 0;
+                self_txns_sent = 0;
+                peer_blks_sent = 0;
+                peer_txns_sent = 0;
+                report_timeout = Instant::now() + Duration::from_secs(60);
             }
 
             // resp = peer_blk_resp_recv.recv() => {

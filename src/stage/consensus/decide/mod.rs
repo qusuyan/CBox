@@ -15,6 +15,7 @@ use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::time::{Duration, Instant};
 
 #[async_trait]
 pub trait Decision: Sync + Send {
@@ -63,6 +64,12 @@ pub async fn decision_thread(
 
     let mut decision_stage = get_decision(id, crypto_scheme, config, peer_messenger);
 
+    let mut report_timeout = Instant::now() + Duration::from_secs(60);
+    let mut blks_sent = 0;
+    let mut txns_sent = 0;
+    let mut blks_recv = 0;
+    let mut txns_recv = 0;
+
     loop {
         tokio::select! {
             new_tail = block_ready_recv.recv() => {
@@ -75,6 +82,10 @@ pub async fn decision_thread(
                 };
 
                 pf_debug!(id; "got new chain tail from {}: {:?}", src, new_tail);
+                for blk in new_tail.iter() {
+                    blks_recv += 1;
+                    txns_recv += blk.txns.len();
+                }
 
                 if let Err(e) = decision_stage.new_tail(src, new_tail).await {
                     pf_error!(id; "failed to record new chain tail: {:?}", e);
@@ -97,6 +108,9 @@ pub async fn decision_thread(
 
                 pf_debug!(id; "committing new block of length {:?}, height {}", block_to_commit.len(), height);
 
+                blks_sent += 1;
+                txns_sent += block_to_commit.len();
+
                 if let Err(e) = commit_send.send((height, block_to_commit)).await {
                     pf_error!(id; "failed to send to commit pipe: {:?}", e);
                     continue;
@@ -116,6 +130,14 @@ pub async fn decision_thread(
                     pf_error!(id; "failed to handle message from peer {}: {:?}", src, e);
                     continue;
                 }
+            },
+            _ = tokio::time::sleep_until(report_timeout) => {
+                pf_info!(id; "In the last minute: blks_recv: {}, txns_recv: {}, blks_sent: {}, txns_sent: {}", blks_recv, txns_recv, blks_sent, txns_sent);
+                blks_recv = 0;
+                txns_recv = 0;
+                blks_sent = 0;
+                txns_sent = 0;
+                report_timeout = Instant::now() + Duration::from_secs(60);
             }
         }
     }
