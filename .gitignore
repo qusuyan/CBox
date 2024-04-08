@@ -5,3 +5,7 @@
 # perf data
 *.data
 *.svg
+*.perf
+*.folded
+*.html
+*.pl

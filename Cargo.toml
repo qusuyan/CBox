@@ -25,7 +25,8 @@ rand = "0.8.5"
 ring = "0.17.5"
 serde = {version = "1.0", features = ["derive", "rc"]}
 serde_json = "1.0"
-tokio = {version = "1.32.0", features = ["full"]}#, "tracing"] }
+tokio = {version = "1.32.0", features = ["full"]} #, "tracing"] }
+async-scoped = {version = "0.9.0", features = ["use-tokio"]}
 toml = "0.8.8"
 # console-subscriber = "0.2.0"
 

@@ -30,6 +30,11 @@ struct VoteMsg {
     pub signature: Signature,
 }
 
+// struct DagNode {
+//     pub parents: Vec<Hash>,
+//     pub children: Vec<Hash>,
+// }
+
 pub struct AvalancheDecision {
     id: NodeId,
     crypto_scheme: CryptoScheme,
@@ -37,12 +42,14 @@ pub struct AvalancheDecision {
     beta1: u64,
     beta2: u64,
     txn_pool: HashMap<Hash, Arc<Txn>>,
+    // txn_dag: HashMap<Hash, DagNode>,
     txn_dag: HashMap<Hash, Vec<Hash>>,
     conflict_sets: HashMap<(Hash, PubKey), ConflictSet>, // the cnt of grant txns is always its confidence
     confidence: HashMap<Hash, (bool, u64)>,              // (has_chit, confidence)
     // for voting
     query_pool: HashMap<(NodeId, u64), Vec<Option<Hash>>>,
     votes: HashMap<(NodeId, u64), (usize, Vec<usize>)>,
+    preference_cache: HashMap<Hash, bool>,
     // blocks ready to be committed
     commit_queue: Vec<Hash>,
     commit_count: u64,
@@ -80,6 +87,7 @@ impl AvalancheDecision {
             confidence: HashMap::new(),
             query_pool: HashMap::new(),
             votes: HashMap::new(),
+            preference_cache: HashMap::new(),
             commit_queue: vec![],
             commit_count: 0,
             batch_emission_time: Instant::now() + batch_emission_timeout,
@@ -121,30 +129,69 @@ impl AvalancheDecision {
         }
     }
 
-    fn is_strongly_preferred(&self, txn_hash: &Hash) -> bool {
-        // first check if the txn is already accpeted
-        let parents = match self.txn_dag.get(txn_hash) {
-            Some(parents) => parents,
-            None => return true, // since the txn is already accepted
-        };
+    // fn is_strongly_preferred(&mut self, txn_hash: &Hash) -> bool {
+    //     // first check if the txn is already accpeted
+    //     let parents = match self.txn_dag.get(txn_hash) {
+    //         Some(node) => node.parents.clone(),
+    //         None => return true, // since the txn is already accepted
+    //     };
 
-        // check if the txn is preferred
-        if !self.is_preferred(txn_hash) {
-            return false;
-        }
+    //     match self.preference_cache.get(&txn_hash) {
+    //         Some(res) => *res,
+    //         None => {
+    //             // check if the txn is preferred
+    //             if !self.is_preferred(txn_hash) {
+    //                 self.preference_cache.insert(txn_hash.clone(), false);
+    //                 return false;
+    //             }
 
-        // recursively check if all its parents are strongly preferred
-        for parent in parents {
-            if !self.is_strongly_preferred(parent) {
+    //             // recursively check if all its parents are strongly preferred
+    //             for parent in parents {
+    //                 if !self.is_strongly_preferred(&parent) {
+    //                     self.preference_cache.insert(txn_hash.clone(), false);
+    //                     return false;
+    //                 }
+    //             }
+
+    //             self.preference_cache.insert(txn_hash.clone(), true);
+    //             true
+    //         }
+    //     }
+    // }
+
+    fn is_strongly_preferred(&mut self, txn_hash: &Hash) -> bool {
+        let mut frontier = VecDeque::new();
+        frontier.push_back(txn_hash);
+
+        while let Some(hash) = frontier.pop_front() {
+            // first check if the txn is already accpeted
+            let parents = match self.txn_dag.get(hash) {
+                Some(parents) => parents,
+                None => return true, // since the txn is already accepted
+            };
+
+            let (is_preferred, cache_hit) = match self.preference_cache.get(hash) {
+                Some(val) => (*val, true),
+                None => (self.is_preferred(hash), false),
+            };
+
+            if !cache_hit {
+                self.preference_cache.insert(hash.clone(), is_preferred);
+            }
+
+            // check if the txn is preferred
+            if !is_preferred {
                 return false;
             }
+
+            frontier.extend(parents);
         }
 
         true
     }
 
     fn handle_votes(&mut self, blk_id: (NodeId, u64), src: NodeId, votes: Vec<bool>) {
-        pf_debug!(self.id; "getting vote for block query {:?} from {}", blk_id, src);
+        pf_trace!(self.id; "getting vote for block query {:?} from {}", blk_id, src);
         let (votes_received, accept_votes) = self
             .votes
             .entry(blk_id)
@@ -171,6 +218,7 @@ impl AvalancheDecision {
                     Some(hash) => hash,
                     None => continue, // the txn is not valid
                 };
+                pf_trace!(self.id; "looking at txn {} at block idx {}", txn_hash, idx);
                 let (has_chit, _) = self.confidence.get_mut(&txn_hash).unwrap();
                 *has_chit = true;
                 // update the confidence and conflict set for all parents
@@ -218,6 +266,20 @@ impl AvalancheDecision {
                                         }
                                     };
                                     if pref_confidence_score < confidence_score {
+                                        // invalidate preference cache for ct.pref, next_txn and their offsprings
+                                        // let mut frontier = VecDeque::new();
+                                        // frontier.extend(vec![&ct.pref, &next_txn]);
+                                        // while let Some(txn) = frontier.pop_front() {
+                                        //     self.preference_cache.remove(txn);
+                                        //     let children = match self.txn_dag.get(txn) {
+                                        //         Some(node) => &node.children,
+                                        //         None => continue,
+                                        //     };
+                                        //     frontier.extend(children);
+                                        // }
+                                        self.preference_cache.remove(&next_txn);
+                                        self.preference_cache.remove(&ct.pref);
+                                        // update conflict set
                                         ct.pref = next_txn;
                                         ct.count = 1;
                                     } else {
@@ -251,9 +313,10 @@ impl AvalancheDecision {
                         count > self.beta2 // consecutive counter
                     };
 
-                    pf_trace!(self.id; "txn {} - parents accepted: {}, can_be_accepted: {}, count: {}, have conflicts: {}", next_txn, parents_accepted, can_be_accepted, count, has_conflicts);
+                    pf_trace!(self.id; "txn {} - parents accepted: {}, can_be_accepted: {}, count: {}, have conflicts: {}, pending txns: {}", next_txn, parents_accepted, can_be_accepted, count, has_conflicts, self.txn_dag.len());
 
                     if parents_accepted && can_be_accepted {
+                        pf_trace!(self.id; "txn {} accepted", next_txn);
                         self.txn_dag.remove(&next_txn);
                         if matches!(
                             avax_txn,
@@ -284,6 +347,8 @@ impl Decision for AvalancheDecision {
             unreachable!("Avalanche blocks are in DAG not chain")
         };
 
+        pf_trace!(self.id; "getting new batch of txns {:?}", new_blk.header);
+
         let (proposer, blk_id) = match new_blk.header {
             BlockHeader::Avalanche { proposer, id } => (proposer, id),
             _ => unreachable!(),
@@ -291,8 +356,13 @@ impl Decision for AvalancheDecision {
 
         assert!(src == proposer);
 
-        // gather votes
+        // record txns if not yet done
+        // enum VoteParams {
+        //     Vote { vote: bool },
+        //     Check { hash: Hash },
+        // }
         let mut votes = vec![];
+        // let mut vote_params = vec![];
         let mut query_txns = vec![];
         for txn in &new_blk.txns {
             let avax_txn = match txn.as_ref() {
@@ -307,10 +377,18 @@ impl Decision for AvalancheDecision {
                     if !self.txn_pool.contains_key(&txn_hash) {
                         self.txn_pool.insert(txn_hash.clone(), txn.clone());
                         self.txn_dag.insert(txn_hash, vec![]);
+                        // self.txn_dag.insert(
+                        //     txn_hash,
+                        //     DagNode {
+                        //         parents: vec![],
+                        //         children: vec![],
+                        //     },
+                        // );
                         self.confidence.insert(txn_hash, (false, 0));
                     }
                     // vote true on grant msgs since they cannot conflict with others
                     votes.push(true);
+                    // vote_params.push(VoteParams::Vote { vote: true });
                     query_txns.push(Some(txn_hash));
                 }
                 AvalancheTxn::Send {
@@ -321,6 +399,18 @@ impl Decision for AvalancheDecision {
                     if !self.txn_pool.contains_key(&txn_hash) {
                         self.txn_pool.insert(txn_hash.clone(), txn.clone());
                         self.txn_dag.insert(txn_hash, in_utxo.clone());
+                        // self.txn_dag.insert(
+                        //     txn_hash.clone(),
+                        //     DagNode {
+                        //         parents: in_utxo.clone(),
+                        //         children: vec![],
+                        //     },
+                        // );
+                        // for input_txn in in_utxo {
+                        //     if let Some(node) = self.txn_dag.get_mut(input_txn) {
+                        //         node.children.push(txn_hash.clone());
+                        //     }
+                        // }
                         self.confidence.insert(txn_hash, (false, 0));
                         // update conflict set as appropriate
                         for unspent_txn in in_utxo {
@@ -338,6 +428,9 @@ impl Decision for AvalancheDecision {
                         }
                     }
                     votes.push(self.is_strongly_preferred(&txn_hash));
+                    // vote_params.push(VoteParams::Check {
+                    //     hash: txn_hash.clone(),
+                    // });
                     query_txns.push(Some(txn_hash));
                 }
                 AvalancheTxn::Noop { parents } => {
@@ -345,19 +438,47 @@ impl Decision for AvalancheDecision {
                     if !self.txn_pool.contains_key(&txn_hash) {
                         self.txn_pool.insert(txn_hash.clone(), txn.clone());
                         self.txn_dag.insert(txn_hash, parents.clone());
+                        // self.txn_dag.insert(
+                        //     txn_hash,
+                        //     DagNode {
+                        //         parents: parents.clone(),
+                        //         children: vec![],
+                        //     },
+                        // );
+                        // for input_txn in parents {
+                        //     if let Some(node) = self.txn_dag.get_mut(input_txn) {
+                        //         node.children.push(txn_hash.clone());
+                        //     }
+                        // }
                         self.confidence.insert(txn_hash, (false, 0));
                     }
-                    votes.push(self.is_preferred(&txn_hash));
+                    votes.push(self.is_strongly_preferred(&txn_hash));
+                    // vote_params.push(VoteParams::Check {
+                    //     hash: txn_hash.clone(),
+                    // });
                     query_txns.push(Some(txn_hash));
                 }
                 AvalancheTxn::PlaceHolder => {
                     // no need to record the txn
                     // vote no since the txn is not valid
                     votes.push(false);
+                    // vote_params.push(VoteParams::Vote { vote: false });
                     query_txns.push(None);
                 }
             }
         }
+
+        // let (_, votes_result) = async_scoped::TokioScope::scope_and_block(|s| {
+        //     for param in vote_params.iter() {
+        //         match param {
+        //             VoteParams::Vote { vote } => s.spawn(async {
+        //                 return *vote;
+        //             }),
+        //             VoteParams::Check { hash } => s.spawn(self.is_strongly_preferred(hash)),
+        //         }
+        //     }
+        // });
+        // let votes = votes_result.into_iter().map(|res| res.unwrap()).collect();
 
         if proposer == self.id {
             // if queried by myself, record block and and handle votes locally
@@ -397,11 +518,12 @@ impl Decision for AvalancheDecision {
     }
 
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
-        let txns = self
+        let txns: Vec<Arc<Txn>> = self
             .commit_queue
             .drain(0..)
             .map(|hash| self.txn_pool.get(&hash).unwrap().clone())
             .collect();
+        pf_debug!(self.id; "committing {} txns", txns.len());
         self.commit_count += 1;
         self.batch_emission_time = Instant::now() + self.batch_emission_timeout;
         Ok((self.commit_count, txns))

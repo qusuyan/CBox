@@ -89,10 +89,10 @@ impl CliArgs {
         //     self.max_inflight = 100000;
         // }
 
-        if self.accounts < 100 {
-            log::warn!("too few accounts, reset to default");
-            self.accounts = 10000
-        }
+        // if self.accounts < 100 {
+        //     log::warn!("too few accounts, reset to default");
+        //     self.accounts = 10000
+        // }
 
         if self.disable_txn_dissem && self.txn_span > 0 {
             log::warn!("currently does not support sending flow generation to different nodes when transaction dissemination is disabled");
@@ -202,6 +202,8 @@ fn main() {
     stats_file
         .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence\n")
         .expect("write stats failed");
+
+    // console_subscriber::init();
 
     let runtime = Builder::new_multi_thread()
         .enable_all()
