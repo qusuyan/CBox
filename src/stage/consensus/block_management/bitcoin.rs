@@ -4,7 +4,7 @@ use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::{sha256, DummyMerkleTree, Hash, PubKey};
+use crate::protocol::crypto::{DummyMerkleTree, Hash, PubKey};
 use crate::protocol::transaction::{BitcoinTxn, Txn};
 use crate::protocol::{CryptoScheme, MsgType};
 use crate::utils::{CopycatError, NodeId};
@@ -341,29 +341,20 @@ impl BlockManagement for BitcoinBlockManagement {
             .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone())
             .collect();
         let txns = txns_with_ctx.iter().map(|(txn, _)| txn.clone()).collect();
-        let ctxs = txns_with_ctx.into_iter().map(|(_, ctx)| ctx).collect();
+        let txn_ctxs = txns_with_ctx.into_iter().map(|(_, ctx)| ctx).collect();
 
-        let block = Arc::new(Block {
-            header: BlockHeader::Bitcoin {
-                prev_hash: self.chain_tail.clone(),
-                merkle_root: self.merkle_root.clone().unwrap().0, // TODO
-                nonce: 1, // use nonce = 1 to indicate valid pow
-            },
-            txns,
-        });
-
-        let serialized = &bincode::serialize(&block.header)?;
-        let hash = sha256(&serialized)?;
-        let block_ctx = Arc::new(BlkCtx {
-            id: hash,
-            txn_ctx: ctxs,
-        });
+        let header = BlockHeader::Bitcoin {
+            prev_hash: self.chain_tail.clone(),
+            merkle_root: self.merkle_root.clone().unwrap().0, // TODO
+            nonce: 1,                                         // use nonce = 1 to indicate valid pow
+        };
+        let block_ctx = Arc::new(BlkCtx::from_header_and_txns(&header, txn_ctxs)?);
+        let hash = block_ctx.id;
+        let block = Arc::new(Block { header, txns });
 
         let chain_length = self.get_chain_length();
-        self.block_pool.insert(
-            hash.clone(),
-            (block.clone(), block_ctx.clone(), chain_length + 1),
-        );
+        self.block_pool
+            .insert(hash, (block.clone(), block_ctx.clone(), chain_length + 1));
         self.chain_tail = hash;
 
         for utxo in self.new_utxo.drain() {
@@ -397,9 +388,9 @@ impl BlockManagement for BitcoinBlockManagement {
     async fn validate_block(
         &mut self,
         block: Arc<Block>,
+        blk_ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
-        let serialized = bincode::serialize(&block.header)?;
-        let block_hash = sha256(&serialized)?;
+        let block_hash = blk_ctx.id;
         if self.block_pool.contains_key(&block_hash) {
             // duplicate, do nothing
             return Ok(vec![]);
@@ -421,25 +412,19 @@ impl BlockManagement for BitcoinBlockManagement {
             return Ok(vec![]); // invalid POW
         }
 
-        // merkle root verification
-        let merkle_tree = DummyMerkleTree(merkle_root.clone());
-        if !merkle_tree.verify(block.txns.len()).await? {
-            return Ok(vec![]);
-        }
-
         // validate txns
-        let mut txn_ctx = vec![];
-        for txn in block.txns.iter() {
-            let txn_hash = sha256(&bincode::serialize(txn)?)?;
+        assert!(block.txns.len() == blk_ctx.txn_ctx.len());
+        for idx in 0..block.txns.len() {
+            let txn = &block.txns[idx];
+            let txn_ctx = &blk_ctx.txn_ctx[idx];
+            let txn_hash = txn_ctx.id;
             let bitcoin_txn = match txn.as_ref() {
                 Txn::Bitcoin { txn } => txn,
                 _ => unreachable!(),
             };
 
             // validate transaction
-            let ctx = if let Some((_, ctx)) = self.txn_pool.get(&txn_hash) {
-                ctx.clone()
-            } else {
+            if !self.txn_pool.contains_key(&txn_hash) {
                 if let BitcoinTxn::Send {
                     sender,
                     in_utxo,
@@ -459,21 +444,14 @@ impl BlockManagement for BitcoinBlockManagement {
                 if !self.validate_txn(bitcoin_txn)? {
                     return Ok(vec![]);
                 }
-
-                // txn is valid, insert to txn_pool
-                let ctx = Arc::new(TxnCtx { id: txn_hash });
-                self.txn_pool
-                    .insert(txn_hash.clone(), (txn.clone(), ctx.clone()));
-                ctx
             };
-
-            txn_ctx.push(ctx);
         }
 
-        let blk_ctx = Arc::new(BlkCtx {
-            id: block_hash,
-            txn_ctx,
-        });
+        // merkle root verification
+        let merkle_tree = DummyMerkleTree(merkle_root.clone());
+        if !merkle_tree.verify(block.txns.len()).await? {
+            return Ok(vec![]);
+        }
 
         // height of block in the chain or 0 if the height is unknown because we have not seen its parent yet
         let blk_height = if prev_hash.is_zero() {

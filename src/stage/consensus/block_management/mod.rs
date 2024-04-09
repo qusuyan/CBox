@@ -35,6 +35,7 @@ pub trait BlockManagement: Sync + Send {
     async fn validate_block(
         &mut self,
         block: Arc<Block>,
+        ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError>;
     async fn handle_pmaker_msg(&mut self, msg: Arc<Vec<u8>>) -> Result<(), CopycatError>;
     async fn handle_peer_blk_req(&mut self, peer: NodeId, blk_id: Hash)
@@ -90,6 +91,8 @@ pub async fn block_management_thread(
     let mut peer_txns_sent = 0;
     let mut peer_blks_sent = 0;
     let mut txns_recv = 0;
+
+    let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
 
     loop {
         tokio::select! {
@@ -156,26 +159,50 @@ pub async fn block_management_thread(
                     }
                 };
 
-                pf_debug!(id; "got from {} new block {:?}", src, new_block);
+                pf_debug!(id; "got from {} new block {:?}, computing its context...", src, new_block);
 
-                match block_management_stage.validate_block(new_block.clone()).await {
-                    Ok(new_tail) => {
-                        if !new_tail.is_empty() {
-                            for (blk, _) in new_tail.iter() {
-                                peer_blks_sent += 1;
-                                peer_txns_sent += blk.txns.len();
-                            }
-                            if let Err(e) = new_block_send.send((src, new_tail)).await {
-                                pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
-                                continue;
+                let blk_sender = pending_blk_sender.clone();
+                tokio::task::spawn(async move {
+                    let blk_ctx = match BlkCtx::from_blk(&new_block) {
+                        Ok(ctx) => ctx,
+                        Err(e) => {
+                            pf_error!(id; "failed to compute blk_context: {:?}", e);
+                            return;
+                        }
+                    };
+                    if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
+                        pf_error!(id; "failed to send blk_context: {:?}", e);
+                    }
+                });
+            }
+
+            peer_blk_with_ctx = pending_blk_recver.recv() => {
+                let (src, peer_blk, peer_blk_ctx) = match peer_blk_with_ctx {
+                    Some(data) => data,
+                    None => {
+                        pf_error!(id; "pending_blk pipe closed unexpectedly");
+                        return;
+                    }
+                };
+
+                match block_management_stage.validate_block(peer_blk, peer_blk_ctx).await {
+                        Ok(new_tail) => {
+                            if !new_tail.is_empty() {
+                                for (blk, _) in new_tail.iter() {
+                                    peer_blks_sent += 1;
+                                    peer_txns_sent += blk.txns.len();
+                                }
+                                if let Err(e) = new_block_send.send((src, new_tail)).await {
+                                    pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
+                                    continue;
+                                }
                             }
                         }
+                        Err(e) => {
+                            pf_error!(id; "failed to validate block: {:?}", e);
+                            continue;
+                        }
                     }
-                    Err(e) => {
-                        pf_error!(id; "failed to validate block: {:?}", e);
-                        continue;
-                    }
-                }
             }
 
             pmaker_msg = pacemaker_recv.recv() => {

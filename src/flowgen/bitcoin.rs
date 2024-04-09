@@ -1,5 +1,6 @@
 use super::{FlowGen, Stats};
-use crate::protocol::crypto::{sha256, Hash, PrivKey, PubKey};
+use crate::context::TxnCtx;
+use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::transaction::{BitcoinTxn, Txn};
 use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
@@ -77,8 +78,8 @@ impl FlowGen for BitcoinFlowGen {
                     receiver: *account,
                 },
             };
-            let serialized = bincode::serialize(&txn)?;
-            let hash = sha256(&serialized)?;
+            let txn_ctx = TxnCtx::from_txn(&txn)?;
+            let hash = txn_ctx.id;
             utxos.push_back((hash, 100));
             txns.push(Arc::new(txn));
         }
@@ -143,8 +144,8 @@ impl FlowGen for BitcoinFlowGen {
                 break (sender_pk, remainder, recver_pk, out_utxo, txn);
             };
 
-            let serialized_txn = bincode::serialize(txn.as_ref())?;
-            let txn_hash = sha256(&serialized_txn)?;
+            let txn_ctx = TxnCtx::from_txn(&txn)?;
+            let txn_hash = txn_ctx.id;
             if remainder > 0 {
                 let sender_utxos = self.utxos.get_mut(sender).unwrap();
                 sender_utxos.push_back((txn_hash.clone(), remainder));
@@ -185,8 +186,8 @@ impl FlowGen for BitcoinFlowGen {
         chain_info.total_committed += txns.len() as u64;
 
         for txn in txns {
-            let serialized = bincode::serialize(txn.as_ref())?;
-            let hash = sha256(&serialized)?;
+            let txn_ctx = TxnCtx::from_txn(&txn)?;
+            let hash = txn_ctx.id;
             let start_time = match self.in_flight.remove(&hash) {
                 Some(time) => time,
                 None => continue, // unrecognized txn, possibly generated from another node

@@ -39,6 +39,7 @@ struct VoteMsg {
 pub struct AvalancheDecision {
     id: NodeId,
     crypto_scheme: CryptoScheme,
+    k: usize,
     vote_thresh: usize,
     beta1: u64,
     beta2: u64,
@@ -48,7 +49,7 @@ pub struct AvalancheDecision {
     conflict_sets: HashMap<(Hash, PubKey), ConflictSet>, // the cnt of grant txns is always its confidence
     confidence: HashMap<Hash, (bool, u64)>,              // (has_chit, confidence)
     // for voting
-    query_pool: HashMap<(NodeId, u64), Vec<Option<Hash>>>,
+    query_pool: HashMap<(NodeId, u64), Vec<Option<Hash>>>, // TODO: add timeouts
     votes: HashMap<(NodeId, u64), (usize, Vec<usize>)>,
     preference_cache: HashMap<Hash, bool>,
     // blocks ready to be committed
@@ -79,6 +80,7 @@ impl AvalancheDecision {
         Self {
             id,
             crypto_scheme,
+            k: config.k,
             vote_thresh,
             beta1: config.beta1,
             beta2: config.beta2,
@@ -212,123 +214,154 @@ impl AvalancheDecision {
         };
 
         assert!(txns.len() == accept_votes.len());
-        for idx in 0..txns.len() {
-            if accept_votes[idx] == self.vote_thresh {
-                // we gathered enough votes
+        if *votes_received == self.k {
+            for idx in 0..txns.len() {
                 let txn_hash = match txns[idx] {
                     Some(hash) => hash,
                     None => continue, // the txn is not valid
                 };
-                pf_trace!(self.id; "looking at txn {} at block idx {}", txn_hash, idx);
-                let (has_chit, _) = self.confidence.get_mut(&txn_hash).unwrap();
-                *has_chit = true;
-                // update the confidence and conflict set for all parents
-                let mut dag_frontier = VecDeque::new();
-                let mut dedup = HashSet::new();
-                dag_frontier.push_back(txn_hash);
-                while let Some(next_txn) = dag_frontier.pop_front() {
-                    dedup.insert(next_txn);
-                    let parents = match self.txn_dag.get(&next_txn) {
-                        Some(parents) => parents,
-                        None => continue, // the txn is already committed
-                    };
-                    dag_frontier.extend(parents.iter().filter(|hash| !dedup.contains(hash)));
-                    // update confidence
-                    let (chit, confidence) = self.confidence.get_mut(&next_txn).unwrap();
-                    *confidence += 1;
-                    let confidence_score = if *chit { *confidence } else { 0 };
-                    // update conflict set
-                    let avax_txn = match self.txn_pool.get(&next_txn).unwrap().0.as_ref() {
-                        Txn::Avalanche { txn } => txn,
-                        _ => unreachable!(),
-                    };
+                if accept_votes[idx] >= self.vote_thresh {
+                    // we gathered enough votes
+                    pf_trace!(self.id; "looking at txn {} at block idx {}", txn_hash, idx);
+                    let (has_chit, _) = self.confidence.get_mut(&txn_hash).unwrap();
+                    *has_chit = true;
+                    // update the confidence and conflict set for all parents
+                    let mut dag_frontier = VecDeque::new();
+                    let mut dedup = HashSet::new();
+                    dag_frontier.push_back(txn_hash);
+                    while let Some(next_txn) = dag_frontier.pop_front() {
+                        dedup.insert(next_txn);
+                        let parents = match self.txn_dag.get(&next_txn) {
+                            Some(parents) => parents,
+                            None => continue, // the txn is already committed
+                        };
+                        dag_frontier.extend(parents.iter().filter(|hash| !dedup.contains(hash)));
+                        // update confidence
+                        let (chit, confidence) = self.confidence.get_mut(&next_txn).unwrap();
+                        *confidence += 1;
+                        let confidence_score = if *chit { *confidence } else { 0 };
+                        // update conflict set
+                        let avax_txn = match self.txn_pool.get(&next_txn).unwrap().0.as_ref() {
+                            Txn::Avalanche { txn } => txn,
+                            _ => unreachable!(),
+                        };
 
-                    let (has_conflicts, count) = match avax_txn {
-                        AvalancheTxn::Grant { .. } | AvalancheTxn::Noop { .. } => {
-                            (false, confidence_score)
+                        let (has_conflicts, count) = match avax_txn {
+                            AvalancheTxn::Grant { .. } | AvalancheTxn::Noop { .. } => {
+                                (false, confidence_score)
+                            }
+                            AvalancheTxn::Send {
+                                sender, in_utxo, ..
+                            } => {
+                                let mut count = confidence_score;
+                                let mut has_conflicts = false;
+                                for input_txn in in_utxo {
+                                    let utxo = (input_txn.clone(), sender.clone());
+                                    let ct = self.conflict_sets.get_mut(&utxo).unwrap();
+                                    if ct.pref == next_txn {
+                                        ct.count += 1;
+                                    } else {
+                                        let pref_confidence_score = {
+                                            let (chit, conf) =
+                                                self.confidence.get(&ct.pref).unwrap();
+                                            if *chit {
+                                                *conf
+                                            } else {
+                                                0
+                                            }
+                                        };
+                                        if pref_confidence_score < confidence_score {
+                                            // invalidate preference cache for ct.pref, next_txn and their offsprings
+                                            // let mut frontier = VecDeque::new();
+                                            // frontier.extend(vec![&ct.pref, &next_txn]);
+                                            // while let Some(txn) = frontier.pop_front() {
+                                            //     self.preference_cache.remove(txn);
+                                            //     let children = match self.txn_dag.get(txn) {
+                                            //         Some(node) => &node.children,
+                                            //         None => continue,
+                                            //     };
+                                            //     frontier.extend(children);
+                                            // }
+                                            self.preference_cache.remove(&next_txn);
+                                            self.preference_cache.remove(&ct.pref);
+                                            // update conflict set
+                                            ct.pref = next_txn;
+                                            ct.count = 1;
+                                        } else {
+                                            ct.count += 1;
+                                        }
+                                    }
+                                    if ct.count < count {
+                                        count = ct.count;
+                                    }
+                                    if ct.has_conflicts {
+                                        has_conflicts = true;
+                                    }
+                                }
+                                (has_conflicts, count)
+                            }
+                            AvalancheTxn::PlaceHolder => unreachable!(),
+                        };
+
+                        // add accepted txns to commit queue
+                        let mut parents_accepted = true;
+                        for parent in parents {
+                            if self.txn_dag.contains_key(parent) {
+                                parents_accepted = false;
+                                break;
+                            }
                         }
-                        AvalancheTxn::Send {
+
+                        let can_be_accepted = if !has_conflicts {
+                            count > self.beta1 // safe early commitment
+                        } else {
+                            count > self.beta2 // consecutive counter
+                        };
+
+                        pf_trace!(self.id; "txn {} - parents accepted: {}, can_be_accepted: {}, count: {}, have conflicts: {}, pending txns: {}", next_txn, parents_accepted, can_be_accepted, count, has_conflicts, self.txn_dag.len());
+
+                        if parents_accepted && can_be_accepted {
+                            pf_trace!(self.id; "txn {} accepted", next_txn);
+                            self.txn_dag.remove(&next_txn);
+                            if matches!(
+                                avax_txn,
+                                AvalancheTxn::Grant { .. } | AvalancheTxn::Send { .. }
+                            ) {
+                                self.commit_queue.push(next_txn);
+                            }
+                        }
+                    }
+                } else {
+                    // if not enough votes, reset counts to 0
+                    let mut dag_frontier = VecDeque::new();
+                    dag_frontier.push_back(txn_hash);
+                    while let Some(next_txn_hash) = dag_frontier.pop_front() {
+                        let parents = match self.txn_dag.get(&next_txn_hash) {
+                            Some(parents) => parents,
+                            None => continue, // the txn is already committed
+                        };
+                        dag_frontier.extend(parents);
+
+                        let (txn, _) = self.txn_pool.get(&next_txn_hash).unwrap();
+                        let avax_txn = match txn.as_ref() {
+                            Txn::Avalanche { txn } => txn,
+                            _ => unimplemented!(),
+                        };
+
+                        // only send txns can conflict with others
+                        if let AvalancheTxn::Send {
                             sender, in_utxo, ..
-                        } => {
-                            let mut count = confidence_score;
-                            let mut has_conflicts = false;
+                        } = avax_txn
+                        {
                             for input_txn in in_utxo {
                                 let utxo = (input_txn.clone(), sender.clone());
                                 let ct = self.conflict_sets.get_mut(&utxo).unwrap();
-                                if ct.pref == next_txn {
-                                    ct.count += 1;
-                                } else {
-                                    let pref_confidence_score = {
-                                        let (chit, conf) = self.confidence.get(&ct.pref).unwrap();
-                                        if *chit {
-                                            *conf
-                                        } else {
-                                            0
-                                        }
-                                    };
-                                    if pref_confidence_score < confidence_score {
-                                        // invalidate preference cache for ct.pref, next_txn and their offsprings
-                                        // let mut frontier = VecDeque::new();
-                                        // frontier.extend(vec![&ct.pref, &next_txn]);
-                                        // while let Some(txn) = frontier.pop_front() {
-                                        //     self.preference_cache.remove(txn);
-                                        //     let children = match self.txn_dag.get(txn) {
-                                        //         Some(node) => &node.children,
-                                        //         None => continue,
-                                        //     };
-                                        //     frontier.extend(children);
-                                        // }
-                                        self.preference_cache.remove(&next_txn);
-                                        self.preference_cache.remove(&ct.pref);
-                                        // update conflict set
-                                        ct.pref = next_txn;
-                                        ct.count = 1;
-                                    } else {
-                                        ct.count += 1;
-                                    }
-                                }
-                                if ct.count < count {
-                                    count = ct.count;
-                                }
-                                if ct.has_conflicts {
-                                    has_conflicts = true;
-                                }
+                                ct.count = 0;
                             }
-                            (has_conflicts, count)
-                        }
-                        AvalancheTxn::PlaceHolder => unreachable!(),
-                    };
-
-                    // add accepted txns to commit queue
-                    let mut parents_accepted = true;
-                    for parent in parents {
-                        if self.txn_dag.contains_key(parent) {
-                            parents_accepted = false;
-                            break;
-                        }
-                    }
-
-                    let can_be_accepted = if !has_conflicts {
-                        count > self.beta1 // safe early commitment
-                    } else {
-                        count > self.beta2 // consecutive counter
-                    };
-
-                    pf_trace!(self.id; "txn {} - parents accepted: {}, can_be_accepted: {}, count: {}, have conflicts: {}, pending txns: {}", next_txn, parents_accepted, can_be_accepted, count, has_conflicts, self.txn_dag.len());
-
-                    if parents_accepted && can_be_accepted {
-                        pf_trace!(self.id; "txn {} accepted", next_txn);
-                        self.txn_dag.remove(&next_txn);
-                        if matches!(
-                            avax_txn,
-                            AvalancheTxn::Grant { .. } | AvalancheTxn::Send { .. }
-                        ) {
-                            self.commit_queue.push(next_txn);
                         }
                     }
                 }
             }
-            // TODO: if not enough votes, reset counts to 0
         }
     }
 }

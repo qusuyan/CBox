@@ -1,6 +1,6 @@
 use super::TxnValidation;
 use crate::context::TxnCtx;
-use crate::protocol::crypto::{sha256, Hash};
+use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::{AvalancheTxn, Txn};
 use crate::protocol::CryptoScheme;
 use crate::utils::CopycatError;
@@ -40,17 +40,16 @@ impl TxnValidation for AvalancheTxnValidation {
                 ..
             } => (sender, in_utxo, sender_signature),
             AvalancheTxn::Grant { .. } => {
-                let hash = sha256(&bincode::serialize(&txn)?)?;
-                self.txns_pool.insert(hash, txn);
-                return Ok(Some(Arc::new(TxnCtx { id: hash })));
+                let txn_ctx = TxnCtx::from_txn(&txn)?;
+                return Ok(Some(Arc::new(txn_ctx)));
             }
             AvalancheTxn::Noop { .. } | AvalancheTxn::PlaceHolder => {
                 unreachable!();
             }
         };
 
-        let serialized_txn = bincode::serialize(&txn)?;
-        let hash = sha256(&serialized_txn)?;
+        let txn_ctx = TxnCtx::from_txn(&txn)?;
+        let hash = txn_ctx.id;
 
         if self.txns_pool.get(&hash) != None {
             // txn has already been seem, ignoring...
@@ -69,6 +68,6 @@ impl TxnValidation for AvalancheTxnValidation {
 
         self.txns_pool.insert(hash.clone(), txn);
 
-        Ok(Some(Arc::new(TxnCtx { id: hash })))
+        Ok(Some(Arc::new(txn_ctx)))
     }
 }

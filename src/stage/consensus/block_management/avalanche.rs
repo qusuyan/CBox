@@ -3,14 +3,13 @@ use crate::config::AvalancheConfig;
 
 use crate::context::{BlkCtx, TxnCtx};
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::{sha256, Hash};
+use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::{AvalancheTxn, Txn};
 use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
-use primitive_types::U256;
 use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 
@@ -242,29 +241,28 @@ impl BlockManagement for AvalancheBlockManagement {
             proposer: self.id,
             id: self.blk_counter,
         };
+        let blk_ctx = BlkCtx::from_header_and_txns(&header, txn_ctx)?;
         pf_debug!(self.id; "sending block query {:?} ({} txns)", header, txn_hashs.len());
         let blk = Arc::new(Block { header, txns });
+
         self.blk_counter += 1;
         self.next_propose_time = Instant::now() + self.proposal_timeout;
-        assert!(blk.txns.len() == txn_ctx.len());
-        Ok((
-            blk,
-            Arc::new(BlkCtx {
-                id: U256::zero(), // since we do not use hash to identify txn batches
-                txn_ctx,
-            }),
-        ))
+        Ok((blk, Arc::new(blk_ctx)))
     }
 
     async fn validate_block(
         &mut self,
         block: Arc<Block>,
+        blk_ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
         let mut filtered_txns = vec![];
         let mut blk_txn_ctx = vec![];
-        for txn in block.txns.iter() {
-            let txn_hash = sha256(&bincode::serialize(txn.as_ref())?)?;
 
+        assert!(block.txns.len() == blk_ctx.txn_ctx.len());
+        for idx in 0..block.txns.len() {
+            let txn = &block.txns[idx];
+            let txn_ctx = &blk_ctx.txn_ctx[idx];
+            let txn_hash = txn_ctx.id;
             if let Some((_, txn_ctx)) = self.txn_pool.get(&txn_hash) {
                 // txn has been validated before
                 filtered_txns.push(txn.clone());
@@ -283,12 +281,11 @@ impl BlockManagement for AvalancheBlockManagement {
                     // if noop txn, bypass all tests since it is just used to drive consensus
                     // placeholder txns should not be sent across nodes but if this is the case, keep as is
                     // they do not need to be add to txn pool
-                    (txn.clone(), Arc::new(TxnCtx { id: U256::zero() }))
+                    (txn.clone(), txn_ctx.clone())
                 }
                 AvalancheTxn::Grant { .. } => {
-                    let ctx = Arc::new(TxnCtx { id: txn_hash });
                     self.txn_pool
-                        .insert(txn_hash.clone(), (txn.clone(), ctx.clone()));
+                        .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
                     self.txn_dag.insert(
                         txn_hash,
                         DagNode {
@@ -296,7 +293,7 @@ impl BlockManagement for AvalancheBlockManagement {
                             children: HashSet::new(),
                         },
                     );
-                    (txn.clone(), ctx)
+                    (txn.clone(), txn_ctx.clone())
                 }
                 AvalancheTxn::Send {
                     sender,
@@ -318,9 +315,8 @@ impl BlockManagement for AvalancheBlockManagement {
 
                     if valid {
                         // add to txn pool if valid
-                        let ctx = Arc::new(TxnCtx { id: txn_hash });
                         self.txn_pool
-                            .insert(txn_hash.clone(), (txn.clone(), ctx.clone()));
+                            .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
                         let mut in_frontier = true;
                         for parent in in_utxo.iter() {
                             if let Some(siblings) = self.txn_dag.get_mut(parent) {
@@ -339,15 +335,14 @@ impl BlockManagement for AvalancheBlockManagement {
                                 },
                             );
                         }
-                        (txn.clone(), ctx)
+                        (txn.clone(), txn_ctx.clone())
                     } else {
                         // otherwise put a place holder
-                        (
-                            Arc::new(Txn::Avalanche {
-                                txn: AvalancheTxn::PlaceHolder,
-                            }),
-                            Arc::new(TxnCtx { id: U256::zero() }),
-                        )
+                        let txn = Txn::Avalanche {
+                            txn: AvalancheTxn::PlaceHolder,
+                        };
+                        let txn_ctx = TxnCtx::from_txn(&txn)?;
+                        (Arc::new(txn), Arc::new(txn_ctx))
                     }
                 }
             };
@@ -361,14 +356,8 @@ impl BlockManagement for AvalancheBlockManagement {
             header: block.header.clone(),
             txns: filtered_txns,
         });
-        assert!(blk.txns.len() == blk_txn_ctx.len());
-        Ok(vec![(
-            blk,
-            Arc::new(BlkCtx {
-                id: U256::zero(),
-                txn_ctx: blk_txn_ctx,
-            }),
-        )])
+        let blk_ctx = Arc::new(BlkCtx::from_header_and_txns(&block.header, blk_txn_ctx)?);
+        Ok(vec![(blk, blk_ctx)])
     }
 
     async fn handle_pmaker_msg(&mut self, _msg: Arc<Vec<u8>>) -> Result<(), CopycatError> {

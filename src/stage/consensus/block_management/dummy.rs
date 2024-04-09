@@ -8,7 +8,6 @@ use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 use get_size::GetSize;
-use primitive_types::U256;
 
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
@@ -59,22 +58,16 @@ impl BlockManagement for DummyBlockManagement {
             txns: self.mem_pool.clone(),
         });
         self.mem_pool.clear();
-        let blk_ctx = Arc::new(BlkCtx {
-            id: U256::zero(),
-            txn_ctx: vec![Arc::new(TxnCtx { id: U256::zero() }); new_block.txns.len()],
-        });
+        let blk_ctx = Arc::new(BlkCtx::from_blk(&new_block)?);
         Ok((new_block, blk_ctx))
     }
 
     async fn validate_block(
         &mut self,
         block: Arc<Block>,
+        ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
-        let blk_ctx = Arc::new(BlkCtx {
-            id: U256::zero(),
-            txn_ctx: vec![Arc::new(TxnCtx { id: U256::zero() }); block.txns.len()],
-        });
-        Ok(vec![(block, blk_ctx)])
+        Ok(vec![(block, ctx)])
     }
 
     async fn handle_pmaker_msg(&mut self, _msg: Arc<Vec<u8>>) -> Result<(), CopycatError> {
