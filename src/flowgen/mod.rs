@@ -23,7 +23,7 @@ pub struct Stats {
 pub trait FlowGen {
     async fn setup_txns(&mut self) -> Result<Vec<Arc<Txn>>, CopycatError>;
     async fn wait_next(&self) -> Result<(), CopycatError>;
-    async fn next_txn(&mut self) -> Result<Arc<Txn>, CopycatError>;
+    async fn next_txn_batch(&mut self) -> Result<Vec<Arc<Txn>>, CopycatError>;
     async fn txn_committed(
         &mut self,
         node: NodeId,

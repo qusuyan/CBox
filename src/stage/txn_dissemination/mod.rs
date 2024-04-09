@@ -5,6 +5,7 @@ mod gossip;
 use get_size::GetSize;
 use gossip::GossipTxnDissemination;
 
+use crate::context::TxnCtx;
 use crate::protocol::transaction::Txn;
 use crate::protocol::DissemPattern;
 use crate::utils::{CopycatError, NodeId};
@@ -40,8 +41,8 @@ pub async fn txn_dissemination_thread(
     config: Config,
     enabled: bool,
     peer_messenger: Arc<PeerMessenger>,
-    mut validated_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
-    txn_ready_send: mpsc::Sender<Arc<Txn>>,
+    mut validated_txn_recv: mpsc::Receiver<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>,
+    txn_ready_send: mpsc::Sender<(Arc<Txn>, Arc<TxnCtx>)>,
 ) {
     pf_info!(id; "txn dissemination stage starting...");
 
@@ -49,7 +50,7 @@ pub async fn txn_dissemination_thread(
     let mut batch = vec![];
     let mut txn_dissem_time = Instant::now() + Duration::from_millis(100);
 
-    async fn wait_send_batch(batch: &Vec<(u64, Arc<Txn>)>, timeout: Instant) {
+    async fn wait_send_batch(batch: &Vec<(u64, (Arc<Txn>, Arc<TxnCtx>))>, timeout: Instant) {
         let notify = tokio::sync::Notify::new();
         if batch.len() == 0 {
             notify.notified().await;
@@ -62,7 +63,7 @@ pub async fn txn_dissemination_thread(
     loop {
         tokio::select! {
             new_txn = validated_txn_recv.recv() => {
-                let (src, txn) = match new_txn {
+                let (src, (txn, ctx)) = match new_txn {
                     Some(txn) => txn,
                     None => {
                         pf_error!(id; "validated_txn pipe closed unexpectedly");
@@ -72,13 +73,14 @@ pub async fn txn_dissemination_thread(
 
                 pf_trace!(id; "got from {} new txn {:?}", src, txn);
 
-                batch.push((src, txn))
+                batch.push((src, (txn, ctx)))
             }
 
             _ = wait_send_batch(&batch, txn_dissem_time) => {
-                let send_batch = batch.drain(0..).collect();
+                let send_batch: Vec<(u64, (Arc<Txn>, Arc<TxnCtx>))> = batch.drain(0..).collect();
+                let txns = send_batch.iter().map(|(src, (txn, _))| (*src, txn.clone())).collect();
                 if enabled {
-                    if let Err(e) = txn_dissemination_stage.disseminate(&send_batch).await {
+                    if let Err(e) = txn_dissemination_stage.disseminate(&txns).await {
                         pf_error!(id; "failed to disseminate txn: {:?}", e);
                         continue;
                     }

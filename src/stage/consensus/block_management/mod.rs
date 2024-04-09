@@ -4,6 +4,7 @@ mod bitcoin;
 use bitcoin::BitcoinBlockManagement;
 mod avalanche;
 
+use crate::context::{BlkCtx, TxnCtx};
 use crate::protocol::block::Block;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
@@ -23,11 +24,18 @@ use self::avalanche::AvalancheBlockManagement;
 
 #[async_trait]
 pub trait BlockManagement: Sync + Send {
-    async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError>;
+    async fn record_new_txn(
+        &mut self,
+        txn: Arc<Txn>,
+        ctx: Arc<TxnCtx>,
+    ) -> Result<bool, CopycatError>;
     async fn prepare_new_block(&mut self) -> Result<(), CopycatError>;
     async fn wait_to_propose(&self) -> Result<(), CopycatError>;
-    async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError>;
-    async fn validate_block(&mut self, block: Arc<Block>) -> Result<Vec<Arc<Block>>, CopycatError>;
+    async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError>;
+    async fn validate_block(
+        &mut self,
+        block: Arc<Block>,
+    ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError>;
     async fn handle_pmaker_msg(&mut self, msg: Arc<Vec<u8>>) -> Result<(), CopycatError>;
     async fn handle_peer_blk_req(&mut self, peer: NodeId, blk_id: Hash)
         -> Result<(), CopycatError>;
@@ -67,9 +75,9 @@ pub async fn block_management_thread(
     mut peer_blk_req_recv: mpsc::Receiver<(NodeId, Hash)>,
     // mut peer_blk_resp_recv: mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,
     peer_messenger: Arc<PeerMessenger>,
-    mut txn_ready_recv: mpsc::Receiver<Arc<Txn>>,
+    mut txn_ready_recv: mpsc::Receiver<(Arc<Txn>, Arc<TxnCtx>)>,
     mut pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
-    new_block_send: mpsc::Sender<(NodeId, Vec<Arc<Block>>)>,
+    new_block_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
 ) {
     pf_info!(id; "block management stage starting...");
 
@@ -87,10 +95,10 @@ pub async fn block_management_thread(
         tokio::select! {
             new_txn = txn_ready_recv.recv() => {
                 match new_txn {
-                    Some(txn) => {
-                        pf_trace!(id; "got new txn {:?}", txn);
+                    Some((txn, ctx)) => {
+                        pf_trace!(id; "got new txn {:?} {:?}", ctx, txn);
                         txns_recv += 1;
-                        if let Err(e) = block_management_stage.record_new_txn(txn).await {
+                        if let Err(e) = block_management_stage.record_new_txn(txn, ctx).await {
                             pf_error!(id; "failed to record new txn: {:?}", e);
                             continue;
                         }
@@ -117,11 +125,11 @@ pub async fn block_management_thread(
                 }
 
                 match block_management_stage.get_new_block().await {
-                    Ok(block) => {
+                    Ok((block, ctx)) => {
                         pf_debug!(id; "proposing new block {:?}", block);
                         self_blks_sent += 1;
                         self_txns_sent += block.txns.len();
-                        if let Err(e) = new_block_send.send((id, vec![block])).await {
+                        if let Err(e) = new_block_send.send((id, vec![(block, ctx)])).await {
                             pf_error!(id; "failed to send to new_block pipe: {:?}", e);
                             continue;
                         }
@@ -153,7 +161,7 @@ pub async fn block_management_thread(
                 match block_management_stage.validate_block(new_block.clone()).await {
                     Ok(new_tail) => {
                         if !new_tail.is_empty() {
-                            for blk in new_tail.iter() {
+                            for (blk, _) in new_tail.iter() {
                                 peer_blks_sent += 1;
                                 peer_txns_sent += blk.txns.len();
                             }

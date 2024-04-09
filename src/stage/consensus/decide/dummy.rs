@@ -1,4 +1,5 @@
 use super::Decision;
+use crate::context::BlkCtx;
 use crate::protocol::block::Block;
 use crate::transaction::Txn;
 use crate::utils::CopycatError;
@@ -31,9 +32,10 @@ impl Decision for DummyDecision {
     async fn new_tail(
         &mut self,
         _src: NodeId,
-        new_tail: Vec<Arc<Block>>,
+        new_tail: Vec<(Arc<Block>, Arc<BlkCtx>)>,
     ) -> Result<(), CopycatError> {
-        self.blocks_to_commit.append(&mut VecDeque::from(new_tail));
+        let blocks_to_commit = new_tail.into_iter().map(|(blk, _)| blk);
+        self.blocks_to_commit.extend(blocks_to_commit);
         Ok(())
     }
 

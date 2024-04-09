@@ -1,5 +1,6 @@
 use super::BlockManagement;
 
+use crate::context::{BlkCtx, TxnCtx};
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
@@ -7,6 +8,7 @@ use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 use get_size::GetSize;
+use primitive_types::U256;
 
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
@@ -27,7 +29,11 @@ impl DummyBlockManagement {
 
 #[async_trait]
 impl BlockManagement for DummyBlockManagement {
-    async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError> {
+    async fn record_new_txn(
+        &mut self,
+        txn: Arc<Txn>,
+        _ctx: Arc<TxnCtx>,
+    ) -> Result<bool, CopycatError> {
         self.mem_pool.push(txn);
         Ok(true)
     }
@@ -47,17 +53,28 @@ impl BlockManagement for DummyBlockManagement {
         }
     }
 
-    async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError> {
+    async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
         let new_block = Arc::new(Block {
             header: BlockHeader::Dummy,
             txns: self.mem_pool.clone(),
         });
         self.mem_pool.clear();
-        Ok(new_block)
+        let blk_ctx = Arc::new(BlkCtx {
+            id: U256::zero(),
+            txn_ctx: vec![Arc::new(TxnCtx { id: U256::zero() }); new_block.txns.len()],
+        });
+        Ok((new_block, blk_ctx))
     }
 
-    async fn validate_block(&mut self, block: Arc<Block>) -> Result<Vec<Arc<Block>>, CopycatError> {
-        Ok(vec![block])
+    async fn validate_block(
+        &mut self,
+        block: Arc<Block>,
+    ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
+        let blk_ctx = Arc::new(BlkCtx {
+            id: U256::zero(),
+            txn_ctx: vec![Arc::new(TxnCtx { id: U256::zero() }); block.txns.len()],
+        });
+        Ok(vec![(block, blk_ctx)])
     }
 
     async fn handle_pmaker_msg(&mut self, _msg: Arc<Vec<u8>>) -> Result<(), CopycatError> {

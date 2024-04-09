@@ -298,6 +298,7 @@ fn main() {
         // wait when setup txns are propogated over the network
         tokio::time::sleep(Duration::from_secs(10)).await;
         log::info!("flow generation starts");
+        let mut txns_sent = 0;
 
         loop {
             tokio::select! {
@@ -307,23 +308,27 @@ fn main() {
                         continue;
                     }
 
-                    let next_req = match flow_gen.next_txn().await {
-                        Ok(txn) => txn,
+                    let next_req_batch = match flow_gen.next_txn_batch().await {
+                        Ok(txns) => txns,
                         Err(e) => {
                             log::error!("get available request failed: {e:?}");
                             continue;
                         }
                     };
 
-                    let receiving_nodes = if txn_span == 0 {
-                        node_map.iter().collect()
-                    } else {
-                        node_map.iter().choose_multiple(&mut rng, txn_span)
-                    };
-                    for (id, node) in receiving_nodes {
-                        if let Err(e) = node.send_req(next_req.clone()).await {
-                            log::error!("sending next request to node {id} failed: {e:?}");
-                            return;
+                    txns_sent += next_req_batch.len();
+
+                    for next_req in next_req_batch.into_iter() {
+                        let receiving_nodes = if txn_span == 0 {
+                            node_map.iter().collect()
+                        } else {
+                            node_map.iter().choose_multiple(&mut rng, txn_span)
+                        };
+                        for (id, node) in receiving_nodes {
+                            if let Err(e) = node.send_req(next_req.clone()).await {
+                                log::error!("sending next request to node {id} failed: {e:?}");
+                                return;
+                            }
                         }
                     }
                 }
@@ -358,6 +363,8 @@ fn main() {
                     stats_file
                         .write_fmt(format_args!("{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence))
                         .expect("write stats failed");
+                    log::info!("In the last minute: txns_sent: {}", txns_sent);
+                    txns_sent = 0;
                     report_time += Duration::from_secs(60);
                 }
             }

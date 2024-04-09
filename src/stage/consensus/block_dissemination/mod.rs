@@ -8,6 +8,7 @@ mod sampling;
 use sampling::SamplingBlockDissemination;
 
 use crate::config::Config;
+use crate::context::BlkCtx;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::DissemPattern;
@@ -43,8 +44,8 @@ pub async fn block_dissemination_thread(
     dissem_pattern: DissemPattern,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    mut new_block_recv: mpsc::Receiver<(NodeId, Vec<Arc<Block>>)>,
-    block_ready_send: mpsc::Sender<(NodeId, Vec<Arc<Block>>)>,
+    mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
+    block_ready_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
 ) {
     pf_info!(id; "block dissemination stage starting...");
 
@@ -61,7 +62,7 @@ pub async fn block_dissemination_thread(
         };
 
         // only disseminate the last block
-        let new_blk = match new_tail.last() {
+        let (new_blk, _) = match new_tail.last() {
             Some(blk) => blk,
             None => continue,
         };

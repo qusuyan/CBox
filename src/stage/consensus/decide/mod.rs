@@ -5,6 +5,7 @@ use bitcoin::BitcoinDecision;
 mod avalanche;
 use avalanche::AvalancheDecision;
 
+use crate::context::BlkCtx;
 use crate::protocol::block::Block;
 use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
@@ -22,7 +23,7 @@ pub trait Decision: Sync + Send {
     async fn new_tail(
         &mut self,
         src: NodeId,
-        new_tail: Vec<Arc<Block>>,
+        new_tail: Vec<(Arc<Block>, Arc<BlkCtx>)>,
     ) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
@@ -57,7 +58,7 @@ pub async fn decision_thread(
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
     mut peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
-    mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<Arc<Block>>)>,
+    mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
 ) {
     pf_info!(id; "decision stage starting...");
@@ -82,7 +83,7 @@ pub async fn decision_thread(
                 };
 
                 pf_debug!(id; "got new chain tail from {}: {:?}", src, new_tail);
-                for blk in new_tail.iter() {
+                for (blk, _) in new_tail.iter() {
                     blks_recv += 1;
                     txns_recv += blk.txns.len();
                 }

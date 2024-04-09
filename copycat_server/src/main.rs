@@ -169,17 +169,19 @@ pub fn main() {
                         continue;
                     }
 
-                    let next_req = match flow_gen.next_txn().await {
-                        Ok(txn) => txn,
+                    let next_req_batch = match flow_gen.next_txn_batch().await {
+                        Ok(txns) => txns,
                         Err(e) => {
                             log::error!("get available request failed: {e:?}");
                             continue;
                         }
                     };
 
-                    if let Err(e) = node.send_req(next_req).await {
-                        log::error!("sending next request failed: {e:?}");
-                        continue;
+                    for next_req in next_req_batch.into_iter() {
+                        if let Err(e) = node.send_req(next_req).await {
+                            log::error!("sending next request failed: {e:?}");
+                            continue;
+                        }
                     }
                 }
 

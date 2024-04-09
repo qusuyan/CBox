@@ -1,4 +1,5 @@
 use super::TxnValidation;
+use crate::context::TxnCtx;
 use crate::protocol::crypto::{sha256, Hash};
 use crate::protocol::transaction::{AvalancheTxn, Txn};
 use crate::protocol::CryptoScheme;
@@ -25,7 +26,7 @@ impl AvalancheTxnValidation {
 
 #[async_trait]
 impl TxnValidation for AvalancheTxnValidation {
-    async fn validate(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError> {
+    async fn validate(&mut self, txn: Arc<Txn>) -> Result<Option<Arc<TxnCtx>>, CopycatError> {
         let avax_txn = match txn.as_ref() {
             Txn::Avalanche { txn } => txn,
             _ => unreachable!(),
@@ -41,7 +42,7 @@ impl TxnValidation for AvalancheTxnValidation {
             AvalancheTxn::Grant { .. } => {
                 let hash = sha256(&bincode::serialize(&txn)?)?;
                 self.txns_pool.insert(hash, txn);
-                return Ok(true);
+                return Ok(Some(Arc::new(TxnCtx { id: hash })));
             }
             AvalancheTxn::Noop { .. } | AvalancheTxn::PlaceHolder => {
                 unreachable!();
@@ -53,7 +54,7 @@ impl TxnValidation for AvalancheTxnValidation {
 
         if self.txns_pool.get(&hash) != None {
             // txn has already been seem, ignoring...
-            return Ok(false);
+            return Ok(None);
         }
 
         // first check if the signature is valid
@@ -63,11 +64,11 @@ impl TxnValidation for AvalancheTxnValidation {
             .verify(txn_sender, &serialized_in_txo, txn_sender_signature)
             .await?
         {
-            return Ok(false);
+            return Ok(None);
         }
 
         self.txns_pool.insert(hash.clone(), txn);
 
-        Ok(true)
+        Ok(Some(Arc::new(TxnCtx { id: hash })))
     }
 }

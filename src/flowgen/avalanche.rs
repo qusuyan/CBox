@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
 const UNSET: usize = 0;
+const MAX_BATCH_FREQ: usize = 1;
 
 struct ChainInfo {
     chain_length: u64,
@@ -22,7 +23,8 @@ struct ChainInfo {
 
 pub struct AvalancheFlowGen {
     max_inflight: usize,
-    frequency: usize,
+    batch_frequency: usize,
+    batch_size: usize,
     crypto: CryptoScheme,
     utxos: HashMap<PubKey, VecDeque<(Hash, u64)>>,
     accounts: Vec<(PubKey, PrivKey)>,
@@ -49,9 +51,17 @@ impl AvalancheFlowGen {
             accounts.push((pubkey, privkey));
         }
 
+        let batch_frequency = MAX_BATCH_FREQ;
+        let batch_size = if frequency == UNSET {
+            1000
+        } else {
+            frequency / MAX_BATCH_FREQ
+        };
+
         Self {
             max_inflight,
-            frequency,
+            batch_frequency,
+            batch_size,
             crypto,
             utxos,
             accounts,
@@ -86,12 +96,12 @@ impl FlowGen for AvalancheFlowGen {
     async fn wait_next(&self) -> Result<(), CopycatError> {
         loop {
             if self.max_inflight == UNSET || self.in_flight.len() < self.max_inflight {
-                if self.frequency != UNSET {
+                if self.batch_frequency != UNSET {
                     // poisson interarrival time
                     let interarrival_time = {
                         let mut rng = rand::thread_rng();
                         let u: f64 = rng.gen();
-                        -(1f64 - u).ln() / self.frequency as f64
+                        -(1f64 - u).ln() / self.batch_frequency as f64
                     };
                     tokio::time::sleep(Duration::from_secs_f64(interarrival_time)).await
                 }
@@ -101,53 +111,57 @@ impl FlowGen for AvalancheFlowGen {
         }
     }
 
-    async fn next_txn(&mut self) -> Result<Arc<Txn>, CopycatError> {
-        let (sender, remainder, recver, out_utxo, txn) = loop {
-            let sender = rand::random::<usize>() % self.accounts.len();
-            let mut receiver = rand::random::<usize>() % (self.accounts.len() - 1);
-            if receiver >= sender {
-                receiver += 1; // avoid sending to self
+    async fn next_txn_batch(&mut self) -> Result<Vec<Arc<Txn>>, CopycatError> {
+        let mut batch = vec![];
+        for _ in 0..self.batch_size {
+            let (sender, remainder, recver, out_utxo, txn) = loop {
+                let sender = rand::random::<usize>() % self.accounts.len();
+                let mut receiver = rand::random::<usize>() % (self.accounts.len() - 1);
+                if receiver >= sender {
+                    receiver += 1; // avoid sending to self
+                }
+
+                let (sender_pk, sender_sk) = self.accounts.get(sender).unwrap();
+                let (recver_pk, _) = self.accounts.get(receiver).unwrap();
+                let sender_utxos = self.utxos.get_mut(sender_pk).unwrap();
+                if sender_utxos.is_empty() {
+                    continue; // retry
+                }
+
+                let (in_utxo_raw, amount) = sender_utxos.pop_front().unwrap();
+                let in_utxo = vec![in_utxo_raw];
+                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
+                let sender_signature = self.crypto.sign(sender_sk, &serialized_in_utxo).await?;
+                let out_utxo = std::cmp::min(amount, 10);
+                let remainder = amount - out_utxo;
+                let txn = Arc::new(Txn::Avalanche {
+                    txn: AvalancheTxn::Send {
+                        sender: *sender_pk,
+                        in_utxo,
+                        receiver: *recver_pk,
+                        out_utxo,
+                        remainder,
+                        sender_signature,
+                    },
+                });
+                break (sender_pk, remainder, recver_pk, out_utxo, txn);
+            };
+
+            let serialized_txn = bincode::serialize(txn.as_ref())?;
+            let txn_hash = sha256(&serialized_txn)?;
+            if remainder > 0 {
+                let sender_utxos = self.utxos.get_mut(sender).unwrap();
+                sender_utxos.push_back((txn_hash.clone(), remainder));
+            }
+            if out_utxo > 0 {
+                let recver_utxos = self.utxos.get_mut(recver).unwrap();
+                recver_utxos.push_back((txn_hash.clone(), out_utxo));
             }
 
-            let (sender_pk, sender_sk) = self.accounts.get(sender).unwrap();
-            let (recver_pk, _) = self.accounts.get(receiver).unwrap();
-            let sender_utxos = self.utxos.get_mut(sender_pk).unwrap();
-            if sender_utxos.is_empty() {
-                continue; // retry
-            }
-
-            let (in_utxo_raw, amount) = sender_utxos.pop_front().unwrap();
-            let in_utxo = vec![in_utxo_raw];
-            let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-            let sender_signature = self.crypto.sign(sender_sk, &serialized_in_utxo).await?;
-            let out_utxo = std::cmp::min(amount, 10);
-            let remainder = amount - out_utxo;
-            let txn = Arc::new(Txn::Avalanche {
-                txn: AvalancheTxn::Send {
-                    sender: *sender_pk,
-                    in_utxo,
-                    receiver: *recver_pk,
-                    out_utxo,
-                    remainder,
-                    sender_signature,
-                },
-            });
-            break (sender_pk, remainder, recver_pk, out_utxo, txn);
-        };
-
-        let serialized_txn = bincode::serialize(txn.as_ref())?;
-        let txn_hash = sha256(&serialized_txn)?;
-        if remainder > 0 {
-            let sender_utxos = self.utxos.get_mut(sender).unwrap();
-            sender_utxos.push_back((txn_hash.clone(), remainder));
+            self.in_flight.insert(txn_hash, Instant::now());
+            batch.push(txn);
         }
-        if out_utxo > 0 {
-            let recver_utxos = self.utxos.get_mut(recver).unwrap();
-            recver_utxos.push_back((txn_hash.clone(), out_utxo));
-        }
-
-        self.in_flight.insert(txn_hash, Instant::now());
-        Ok(txn)
+        Ok(batch)
     }
 
     async fn txn_committed(

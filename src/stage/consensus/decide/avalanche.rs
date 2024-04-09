@@ -1,8 +1,9 @@
 use super::Decision;
 use crate::config::AvalancheConfig;
+use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::{sha256, Hash, PrivKey, PubKey, Signature};
+use crate::protocol::crypto::{Hash, PrivKey, PubKey, Signature};
 use crate::protocol::MsgType;
 use crate::transaction::{AvalancheTxn, Txn};
 use crate::utils::CopycatError;
@@ -41,7 +42,7 @@ pub struct AvalancheDecision {
     vote_thresh: usize,
     beta1: u64,
     beta2: u64,
-    txn_pool: HashMap<Hash, Arc<Txn>>,
+    txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     // txn_dag: HashMap<Hash, DagNode>,
     txn_dag: HashMap<Hash, Vec<Hash>>,
     conflict_sets: HashMap<(Hash, PubKey), ConflictSet>, // the cnt of grant txns is always its confidence
@@ -101,7 +102,7 @@ impl AvalancheDecision {
 
     fn is_preferred(&self, txn_hash: &Hash) -> bool {
         let txn = match self.txn_pool.get(txn_hash) {
-            Some(txn) => txn,
+            Some((txn, _)) => txn,
             None => return false,
         };
 
@@ -237,7 +238,7 @@ impl AvalancheDecision {
                     *confidence += 1;
                     let confidence_score = if *chit { *confidence } else { 0 };
                     // update conflict set
-                    let avax_txn = match self.txn_pool.get(&next_txn).unwrap().as_ref() {
+                    let avax_txn = match self.txn_pool.get(&next_txn).unwrap().0.as_ref() {
                         Txn::Avalanche { txn } => txn,
                         _ => unreachable!(),
                     };
@@ -337,9 +338,9 @@ impl Decision for AvalancheDecision {
     async fn new_tail(
         &mut self,
         src: NodeId,
-        mut new_tail: Vec<Arc<Block>>,
+        mut new_tail: Vec<(Arc<Block>, Arc<BlkCtx>)>,
     ) -> Result<(), CopycatError> {
-        let new_blk = if new_tail.len() < 1 {
+        let (new_blk, new_blk_ctx) = if new_tail.len() < 1 {
             return Ok(());
         } else if new_tail.len() == 1 {
             new_tail.remove(0)
@@ -364,7 +365,11 @@ impl Decision for AvalancheDecision {
         let mut votes = vec![];
         // let mut vote_params = vec![];
         let mut query_txns = vec![];
-        for txn in &new_blk.txns {
+
+        assert!(new_blk.txns.len() == new_blk_ctx.txn_ctx.len());
+        for idx in 0..new_blk.txns.len() {
+            let txn = &new_blk.txns[idx];
+            let txn_ctx = &new_blk_ctx.txn_ctx[idx];
             let avax_txn = match txn.as_ref() {
                 Txn::Avalanche { txn } => txn,
                 _ => unreachable!(),
@@ -373,9 +378,10 @@ impl Decision for AvalancheDecision {
             match avax_txn {
                 AvalancheTxn::Grant { .. } => {
                     // record the txn if never seen it before
-                    let txn_hash = sha256(&bincode::serialize(txn)?)?;
+                    let txn_hash = txn_ctx.id;
                     if !self.txn_pool.contains_key(&txn_hash) {
-                        self.txn_pool.insert(txn_hash.clone(), txn.clone());
+                        self.txn_pool
+                            .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
                         self.txn_dag.insert(txn_hash, vec![]);
                         // self.txn_dag.insert(
                         //     txn_hash,
@@ -395,9 +401,10 @@ impl Decision for AvalancheDecision {
                     sender, in_utxo, ..
                 } => {
                     // record the txn if never seen it before
-                    let txn_hash = sha256(&bincode::serialize(txn)?)?;
+                    let txn_hash = txn_ctx.id;
                     if !self.txn_pool.contains_key(&txn_hash) {
-                        self.txn_pool.insert(txn_hash.clone(), txn.clone());
+                        self.txn_pool
+                            .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
                         self.txn_dag.insert(txn_hash, in_utxo.clone());
                         // self.txn_dag.insert(
                         //     txn_hash.clone(),
@@ -434,9 +441,10 @@ impl Decision for AvalancheDecision {
                     query_txns.push(Some(txn_hash));
                 }
                 AvalancheTxn::Noop { parents } => {
-                    let txn_hash = sha256(&bincode::serialize(txn)?)?;
+                    let txn_hash = txn_ctx.id;
                     if !self.txn_pool.contains_key(&txn_hash) {
-                        self.txn_pool.insert(txn_hash.clone(), txn.clone());
+                        self.txn_pool
+                            .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
                         self.txn_dag.insert(txn_hash, parents.clone());
                         // self.txn_dag.insert(
                         //     txn_hash,
@@ -521,7 +529,7 @@ impl Decision for AvalancheDecision {
         let txns: Vec<Arc<Txn>> = self
             .commit_queue
             .drain(0..)
-            .map(|hash| self.txn_pool.get(&hash).unwrap().clone())
+            .map(|hash| self.txn_pool.get(&hash).unwrap().0.clone())
             .collect();
         pf_debug!(self.id; "committing {} txns", txns.len());
         self.commit_count += 1;

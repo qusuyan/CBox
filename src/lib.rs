@@ -2,6 +2,7 @@
 mod utils;
 mod composition;
 mod config;
+mod context;
 mod flowgen;
 mod node;
 mod peers;
