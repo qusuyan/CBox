@@ -41,8 +41,8 @@ pub async fn txn_dissemination_thread(
     config: Config,
     enabled: bool,
     peer_messenger: Arc<PeerMessenger>,
-    mut validated_txn_recv: mpsc::Receiver<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>,
-    txn_ready_send: mpsc::Sender<(Arc<Txn>, Arc<TxnCtx>)>,
+    mut validated_txn_recv: mpsc::UnboundedReceiver<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>,
+    txn_ready_send: mpsc::UnboundedSender<(Arc<Txn>, Arc<TxnCtx>)>,
 ) {
     pf_info!(id; "txn dissemination stage starting...");
 
@@ -87,7 +87,7 @@ pub async fn txn_dissemination_thread(
                 }
 
                 for (_, txn) in send_batch.into_iter() {
-                    if let Err(e) = txn_ready_send.send(txn).await {
+                    if let Err(e) = txn_ready_send.send(txn) {
                         pf_error!(id; "failed to send to txn_ready pipe: {:?}", e);
                         continue;
                     }

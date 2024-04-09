@@ -27,8 +27,8 @@ pub fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
 pub async fn commit_thread(
     id: NodeId,
     config: Config,
-    mut commit_recv: mpsc::Receiver<(u64, Vec<Arc<Txn>>)>,
-    executed_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
+    mut commit_recv: mpsc::UnboundedReceiver<(u64, Vec<Arc<Txn>>)>,
+    executed_send: mpsc::UnboundedSender<(u64, Vec<Arc<Txn>>)>,
 ) {
     pf_info!(id; "commit stage starting...");
 
@@ -50,7 +50,7 @@ pub async fn commit_thread(
             continue;
         }
 
-        if let Err(e) = executed_send.send((height, txn_batch)).await {
+        if let Err(e) = executed_send.send((height, txn_batch)) {
             pf_error!(id; "failed to send committed txns: {:?}", e);
             continue;
         }

@@ -37,9 +37,9 @@ pub async fn txn_validation_thread(
     id: NodeId,
     config: Config,
     crypto_scheme: CryptoScheme,
-    mut req_recv: mpsc::Receiver<Arc<Txn>>,
-    mut peer_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
-    validated_txn_send: mpsc::Sender<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>,
+    mut req_recv: mpsc::UnboundedReceiver<Arc<Txn>>,
+    mut peer_txn_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Txn>)>,
+    validated_txn_send: mpsc::UnboundedSender<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>,
 ) {
     pf_info!(id; "txn validation stage starting...");
 
@@ -66,7 +66,7 @@ pub async fn txn_validation_thread(
                 match txn_validation_stage.validate(txn.clone()).await {
                     Ok(txn_ctx) => {
                         if let Some(ctx) = txn_ctx {
-                            if let Err(e) = validated_txn_send.send((id, (txn, ctx))).await {
+                            if let Err(e) = validated_txn_send.send((id, (txn, ctx))) {
                                 pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
                             }
                         } else {
@@ -99,7 +99,7 @@ pub async fn txn_validation_thread(
                 match txn_validation_stage.validate(txn.clone()).await {
                     Ok(txn_ctx) => {
                         if let Some(ctx) = txn_ctx {
-                            if let Err(e) = validated_txn_send.send((src, (txn, ctx))).await {
+                            if let Err(e) = validated_txn_send.send((src, (txn, ctx))) {
                                 pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
                             }
                         } else {

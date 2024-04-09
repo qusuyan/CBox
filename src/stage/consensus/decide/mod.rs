@@ -57,9 +57,9 @@ pub async fn decision_thread(
     crypto_scheme: CryptoScheme,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    mut peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
-    mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
-    commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
+    mut peer_consensus_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
+    mut block_ready_recv: mpsc::UnboundedReceiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
+    commit_send: mpsc::UnboundedSender<(u64, Vec<Arc<Txn>>)>,
 ) {
     pf_info!(id; "decision stage starting...");
 
@@ -112,7 +112,7 @@ pub async fn decision_thread(
                 blks_sent += 1;
                 txns_sent += block_to_commit.len();
 
-                if let Err(e) = commit_send.send((height, block_to_commit)).await {
+                if let Err(e) = commit_send.send((height, block_to_commit)) {
                     pf_error!(id; "failed to send to commit pipe: {:?}", e);
                     continue;
                 }

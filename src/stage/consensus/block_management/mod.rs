@@ -72,13 +72,13 @@ pub async fn block_management_thread(
     id: NodeId,
     config: Config,
     crypto_scheme: CryptoScheme,
-    mut peer_blk_recv: mpsc::Receiver<(NodeId, Arc<Block>)>,
-    mut peer_blk_req_recv: mpsc::Receiver<(NodeId, Hash)>,
+    mut peer_blk_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Block>)>,
+    mut peer_blk_req_recv: mpsc::UnboundedReceiver<(NodeId, Hash)>,
     // mut peer_blk_resp_recv: mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,
     peer_messenger: Arc<PeerMessenger>,
-    mut txn_ready_recv: mpsc::Receiver<(Arc<Txn>, Arc<TxnCtx>)>,
-    mut pacemaker_recv: mpsc::Receiver<Arc<Vec<u8>>>,
-    new_block_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
+    mut txn_ready_recv: mpsc::UnboundedReceiver<(Arc<Txn>, Arc<TxnCtx>)>,
+    mut pacemaker_recv: mpsc::UnboundedReceiver<Arc<Vec<u8>>>,
+    new_block_send: mpsc::UnboundedSender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
 ) {
     pf_info!(id; "block management stage starting...");
 
@@ -92,7 +92,7 @@ pub async fn block_management_thread(
     let mut peer_blks_sent = 0;
     let mut txns_recv = 0;
 
-    let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
+    let (pending_blk_sender, mut pending_blk_recver) = mpsc::unbounded_channel();
 
     loop {
         tokio::select! {
@@ -132,7 +132,7 @@ pub async fn block_management_thread(
                         pf_debug!(id; "proposing new block {:?}", block);
                         self_blks_sent += 1;
                         self_txns_sent += block.txns.len();
-                        if let Err(e) = new_block_send.send((id, vec![(block, ctx)])).await {
+                        if let Err(e) = new_block_send.send((id, vec![(block, ctx)])) {
                             pf_error!(id; "failed to send to new_block pipe: {:?}", e);
                             continue;
                         }
@@ -170,7 +170,7 @@ pub async fn block_management_thread(
                             return;
                         }
                     };
-                    if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
+                    if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))) {
                         pf_error!(id; "failed to send blk_context: {:?}", e);
                     }
                 });
@@ -192,7 +192,7 @@ pub async fn block_management_thread(
                                     peer_blks_sent += 1;
                                     peer_txns_sent += blk.txns.len();
                                 }
-                                if let Err(e) = new_block_send.send((src, new_tail)).await {
+                                if let Err(e) = new_block_send.send((src, new_tail)) {
                                     pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
                                     continue;
                                 }

@@ -18,7 +18,7 @@ fn get_pacemaker(
     _id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
+    mut peer_pmaker_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
 ) -> Box<dyn Pacemaker> {
     match config {
         Config::Dummy => Box::new(DummyPacemaker {}),
@@ -31,8 +31,8 @@ pub async fn pacemaker_thread(
     id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    peer_pmaker_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
-    should_propose_send: mpsc::Sender<Arc<Vec<u8>>>,
+    peer_pmaker_recv: mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
+    should_propose_send: mpsc::UnboundedSender<Arc<Vec<u8>>>,
 ) {
     pf_info!(id; "pacemaker starting...");
 
@@ -49,7 +49,7 @@ pub async fn pacemaker_thread(
 
         pf_debug!(id; "got pacemaker peer message {:?}", propose_msg);
 
-        if let Err(e) = should_propose_send.send(propose_msg).await {
+        if let Err(e) = should_propose_send.send(propose_msg) {
             pf_error!(id; "failed to send to should_propose pipe: {:?}", e);
             continue;
         }

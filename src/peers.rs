@@ -29,22 +29,22 @@ impl PeerMessenger {
     ) -> Result<
         (
             Self,
-            mpsc::Receiver<(NodeId, Arc<Txn>)>,
-            mpsc::Receiver<(NodeId, Arc<Block>)>,
-            mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
-            mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
-            mpsc::Receiver<(NodeId, Hash)>,
+            mpsc::UnboundedReceiver<(NodeId, Arc<Txn>)>,
+            mpsc::UnboundedReceiver<(NodeId, Arc<Block>)>,
+            mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
+            mpsc::UnboundedReceiver<(NodeId, Arc<Vec<u8>>)>,
+            mpsc::UnboundedReceiver<(NodeId, Hash)>,
             // mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,
         ),
         CopycatError,
     > {
         let (send_half, recv_half) = mailbox_client::new_stub(id).await?;
 
-        let (rx_txn_send, rx_txn_recv) = mpsc::channel(0x1000000);
-        let (rx_blk_send, rx_blk_recv) = mpsc::channel(0x100000);
-        let (rx_consensus_send, rx_consensus_recv) = mpsc::channel(0x100000);
-        let (rx_pmaker_send, rx_pmaker_recv) = mpsc::channel(0x100000);
-        let (rx_blk_req_send, rx_blk_req_recv) = mpsc::channel(0x100000);
+        let (rx_txn_send, rx_txn_recv) = mpsc::unbounded_channel();
+        let (rx_blk_send, rx_blk_recv) = mpsc::unbounded_channel();
+        let (rx_consensus_send, rx_consensus_recv) = mpsc::unbounded_channel();
+        let (rx_pmaker_send, rx_pmaker_recv) = mpsc::unbounded_channel();
+        let (rx_blk_req_send, rx_blk_req_recv) = mpsc::unbounded_channel();
         // let (rx_blk_resp_send, rx_blk_resp_recv) = mpsc::channel(0x100000);
 
         // put receiver runtime on a separate thread for the bug here: https://github.com/tokio-rs/tokio/issues/4730
@@ -146,11 +146,11 @@ impl PeerMessenger {
     async fn peer_receiver_thread(
         id: NodeId,
         mut transport_hub: ClientStubRecvHalf<MsgType>,
-        rx_txn_send: mpsc::Sender<(NodeId, Arc<Txn>)>,
-        rx_blk_send: mpsc::Sender<(NodeId, Arc<Block>)>,
-        rx_consensus_send: mpsc::Sender<(NodeId, Arc<Vec<u8>>)>,
-        rx_pmaker_send: mpsc::Sender<(NodeId, Arc<Vec<u8>>)>,
-        rx_blk_req_send: mpsc::Sender<(NodeId, Hash)>,
+        rx_txn_send: mpsc::UnboundedSender<(NodeId, Arc<Txn>)>,
+        rx_blk_send: mpsc::UnboundedSender<(NodeId, Arc<Block>)>,
+        rx_consensus_send: mpsc::UnboundedSender<(NodeId, Arc<Vec<u8>>)>,
+        rx_pmaker_send: mpsc::UnboundedSender<(NodeId, Arc<Vec<u8>>)>,
+        rx_blk_req_send: mpsc::UnboundedSender<(NodeId, Hash)>,
         // rx_blk_resp_send: mpsc::Sender<(NodeId, (Hash, Arc<Block>))>,
     ) {
         pf_info!(id; "peer receiver thread started");
@@ -162,28 +162,28 @@ impl PeerMessenger {
                     match content {
                         MsgType::NewTxn { txn_batch } => {
                             for txn in txn_batch {
-                                if let Err(e) = rx_txn_send.send((src, Arc::new(txn))).await {
+                                if let Err(e) = rx_txn_send.send((src, Arc::new(txn))) {
                                     pf_error!(id; "rx_txn_send failed: {:?}", e)
                                 }
                             }
                         }
                         MsgType::NewBlock { blk } => {
-                            if let Err(e) = rx_blk_send.send((src, Arc::new(blk))).await {
+                            if let Err(e) = rx_blk_send.send((src, Arc::new(blk))) {
                                 pf_error!(id; "rx_blk_send failed: {:?}", e)
                             }
                         }
                         MsgType::ConsensusMsg { msg } => {
-                            if let Err(e) = rx_consensus_send.send((src, Arc::new(msg))).await {
+                            if let Err(e) = rx_consensus_send.send((src, Arc::new(msg))) {
                                 pf_error!(id; "rx_consensus_send failed: {:?}", e)
                             }
                         }
                         MsgType::PMakerMsg { msg } => {
-                            if let Err(e) = rx_pmaker_send.send((src, Arc::new(msg))).await {
+                            if let Err(e) = rx_pmaker_send.send((src, Arc::new(msg))) {
                                 pf_error!(id; "rx_pmaker_send failed: {:?}", e)
                             }
                         }
                         MsgType::BlockReq { blk_id } => {
-                            if let Err(e) = rx_blk_req_send.send((src, blk_id)).await {
+                            if let Err(e) = rx_blk_req_send.send((src, blk_id)) {
                                 pf_error!(id; "rx_pmaker_send failed: {:?}", e)
                             }
                         } // MsgType::BlockResp { id, blk } => {

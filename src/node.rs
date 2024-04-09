@@ -19,7 +19,7 @@ use crate::stage::txn_validation::txn_validation_thread;
 // use crate::state::ChainState;
 
 pub struct Node {
-    req_send: mpsc::Sender<Arc<Txn>>,
+    req_send: mpsc::UnboundedSender<Arc<Txn>>,
     // _state: Arc<ChainState>,
     // actor threads
     _peer_messenger: Arc<PeerMessenger>,
@@ -41,7 +41,7 @@ impl Node {
         config: Config,
         dissem_txns: bool,
         neighbors: HashSet<NodeId>,
-    ) -> Result<(Self, mpsc::Receiver<(u64, Vec<Arc<Txn>>)>), CopycatError> {
+    ) -> Result<(Self, mpsc::UnboundedReceiver<(u64, Vec<Arc<Txn>>)>), CopycatError> {
         pf_trace!(id; "starting: {:?}", chain_type);
 
         // let state = Arc::new(ChainState::new(chain_type));
@@ -58,14 +58,14 @@ impl Node {
 
         let peer_messenger = Arc::new(peer_messenger);
 
-        let (req_send, req_recv) = mpsc::channel::<Arc<Txn>>(0x1000000);
-        let (validated_txn_send, validated_txn_recv) = mpsc::channel(0x1000000);
-        let (txn_ready_send, txn_ready_recv) = mpsc::channel(0x1000000);
-        let (pacemaker_send, pacemaker_recv) = mpsc::channel(0x1000000);
-        let (new_block_send, new_block_recv) = mpsc::channel(0x1000000);
-        let (block_ready_send, block_ready_recv) = mpsc::channel(0x1000000);
-        let (commit_send, commit_recv) = mpsc::channel(0x1000000);
-        let (executed_send, executed_recv) = mpsc::channel(0x1000000);
+        let (req_send, req_recv) = mpsc::unbounded_channel::<Arc<Txn>>();
+        let (validated_txn_send, validated_txn_recv) = mpsc::unbounded_channel();
+        let (txn_ready_send, txn_ready_recv) = mpsc::unbounded_channel();
+        let (pacemaker_send, pacemaker_recv) = mpsc::unbounded_channel();
+        let (new_block_send, new_block_recv) = mpsc::unbounded_channel();
+        let (block_ready_send, block_ready_recv) = mpsc::unbounded_channel();
+        let (commit_send, commit_recv) = mpsc::unbounded_channel();
+        let (executed_send, executed_recv) = mpsc::unbounded_channel();
 
         let _txn_validation_handle = tokio::spawn(txn_validation_thread(
             id,
@@ -163,7 +163,7 @@ impl Node {
     // }
 
     pub async fn send_req(&self, txn: Arc<Txn>) -> Result<(), CopycatError> {
-        if let Err(e) = self.req_send.send(txn).await {
+        if let Err(e) = self.req_send.send(txn) {
             return Err(CopycatError(format!("{e:?}")));
         }
         Ok(())
