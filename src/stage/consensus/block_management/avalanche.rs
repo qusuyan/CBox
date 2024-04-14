@@ -180,15 +180,15 @@ impl BlockManagement for AvalancheBlockManagement {
         Ok(true)
     }
 
-    async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
-        loop {
+    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
+        let blk_full = loop {
             if self.curr_batch.len() > self.blk_len {
-                break;
+                break true;
             }
 
             let next_txn = match self.dag_frontier.pop_front() {
                 Some(txn) => txn,
-                None => break,
+                None => break false,
             };
 
             let node = self.txn_dag.remove(&next_txn).unwrap();
@@ -207,9 +207,9 @@ impl BlockManagement for AvalancheBlockManagement {
             }
 
             self.curr_batch.push(next_txn);
-        }
+        };
 
-        Ok(())
+        Ok(blk_full)
     }
 
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {

@@ -52,10 +52,17 @@ impl BitcoinFlowGen {
             accounts.push((pubkey, privkey));
         }
 
+        let batch_frequency = MAX_BATCH_FREQ;
+        let batch_size = if frequency == UNSET {
+            max_inflight
+        } else {
+            frequency / MAX_BATCH_FREQ
+        };
+
         Self {
             max_inflight,
-            batch_frequency: MAX_BATCH_FREQ,
-            batch_size: frequency / MAX_BATCH_FREQ,
+            batch_frequency,
+            batch_size,
             crypto,
             utxos,
             accounts,
@@ -107,7 +114,7 @@ impl FlowGen for BitcoinFlowGen {
 
     async fn next_txn_batch(&mut self) -> Result<Vec<Arc<Txn>>, CopycatError> {
         let mut batch = vec![];
-        for _ in 0..self.batch_size {
+        for _ in 0..std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len()) {
             let (sender, remainder, recver, out_utxo, txn) = loop {
                 let sender = rand::random::<usize>() % self.accounts.len();
                 let mut receiver = rand::random::<usize>() % (self.accounts.len() - 1);

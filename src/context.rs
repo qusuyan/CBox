@@ -5,6 +5,7 @@ use crate::protocol::crypto::{sha256, Hash};
 use crate::transaction::{AvalancheTxn, Txn};
 use crate::CopycatError;
 
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -12,7 +13,6 @@ pub struct TxnCtx {
     pub id: Hash,
 }
 
-#[derive(Debug)]
 pub struct BlkCtx {
     pub id: Hash,
     pub txn_ctx: Vec<Arc<TxnCtx>>,
@@ -74,5 +74,14 @@ impl BlkCtx {
             id: blk_id,
             txn_ctx,
         })
+    }
+}
+
+impl Debug for BlkCtx {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.debug_struct("BlkCtx")
+            .field("id", &self.id)
+            .field("num_txns", &self.txn_ctx.len())
+            .finish()
     }
 }
