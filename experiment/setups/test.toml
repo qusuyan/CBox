@@ -2,13 +2,13 @@
 num_iterations = 1
 
 [parameters]
-config = "difficulty=27+commit_depth=6"
+chain-type = "avalanche"
+cluster-threads = 32
 disable-txn-dissem = true
-dissem = ["broadcast", "gossip"]
-exp-time = 1800
+dissem = "sample"
+exp-time = 400
 frequency = 0
 max-inflight-txns = 100000
-node-threads = 4
-num-machines = 6
-num-nodes = [12, 24, 36, 48, 60, 72, 84, 96]
-topo-skewness = 2.0
+num-accounts = 100
+num-machines = 2
+num-nodes = 12

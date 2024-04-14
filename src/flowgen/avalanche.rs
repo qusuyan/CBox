@@ -113,7 +113,12 @@ impl FlowGen for AvalancheFlowGen {
 
     async fn next_txn_batch(&mut self) -> Result<Vec<Arc<Txn>>, CopycatError> {
         let mut batch = vec![];
-        for _ in 0..std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len()) {
+        let batch_size = if self.max_inflight == UNSET {
+            self.batch_size
+        } else {
+            std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len())
+        };
+        for _ in 0..batch_size {
             let (sender, remainder, recver, out_utxo, txn) = loop {
                 let sender = rand::random::<usize>() % self.accounts.len();
                 let mut receiver = rand::random::<usize>() % (self.accounts.len() - 1);
