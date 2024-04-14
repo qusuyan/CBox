@@ -50,6 +50,7 @@ pub struct AvalancheDecision {
     confidence: HashMap<Hash, (bool, u64)>,              // (has_chit, confidence)
     // for voting
     query_pool: HashMap<(NodeId, u64), Vec<Option<Hash>>>, // TODO: add timeouts
+    finished_query: HashSet<(NodeId, u64)>,
     votes: HashMap<(NodeId, u64), (usize, Vec<usize>)>,
     preference_cache: HashMap<Hash, bool>,
     // blocks ready to be committed
@@ -89,6 +90,7 @@ impl AvalancheDecision {
             conflict_sets: HashMap::new(),
             confidence: HashMap::new(),
             query_pool: HashMap::new(),
+            finished_query: HashSet::new(),
             votes: HashMap::new(),
             preference_cache: HashMap::new(),
             commit_queue: vec![],
@@ -194,6 +196,11 @@ impl AvalancheDecision {
     }
 
     fn handle_votes(&mut self, blk_id: (NodeId, u64), src: NodeId, votes: Vec<bool>) {
+        // ignore extra votes
+        if self.finished_query.contains(&blk_id) {
+            return;
+        }
+
         pf_trace!(self.id; "getting vote for block query {:?} from {}", blk_id, src);
         let (votes_received, accept_votes) = self
             .votes
@@ -207,14 +214,16 @@ impl AvalancheDecision {
             }
         }
 
-        // check if good to accept
-        let txns = match self.query_pool.get(&blk_id) {
-            Some(blk) => blk,
-            None => return, // have not got the block query yet, will do the check when it arrives
-        };
+        if *votes_received >= self.k {
+            let txns = match self.query_pool.remove(&blk_id) {
+                Some(txns) => txns,
+                None => return, // if the batch has not yet been received or if the batch is already committed
+            };
 
-        assert!(txns.len() == accept_votes.len());
-        if *votes_received == self.k {
+            let (_, accept_votes) = self.votes.remove(&blk_id).unwrap();
+            assert!(txns.len() == accept_votes.len());
+            self.finished_query.insert(blk_id);
+
             for idx in 0..txns.len() {
                 let txn_hash = match txns[idx] {
                     Some(hash) => hash,
@@ -323,6 +332,7 @@ impl AvalancheDecision {
                         if parents_accepted && can_be_accepted {
                             pf_trace!(self.id; "txn {} accepted", next_txn);
                             self.txn_dag.remove(&next_txn);
+                            self.preference_cache.remove(&next_txn);
                             if matches!(
                                 avax_txn,
                                 AvalancheTxn::Grant { .. } | AvalancheTxn::Send { .. }

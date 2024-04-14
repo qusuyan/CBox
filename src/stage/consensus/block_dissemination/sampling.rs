@@ -24,7 +24,7 @@ impl SamplingBlockDissemination {
         Self {
             me,
             peer_messenger,
-            neighbors: sample_size,
+            neighbors: sample_size - 1, // get rid of self
         }
     }
 }

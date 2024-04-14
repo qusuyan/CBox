@@ -29,7 +29,7 @@ pub trait BlockManagement: Sync + Send {
         txn: Arc<Txn>,
         ctx: Arc<TxnCtx>,
     ) -> Result<bool, CopycatError>;
-    async fn prepare_new_block(&mut self) -> Result<(), CopycatError>;
+    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError>; // return a bool indicating if the block is full
     async fn wait_to_propose(&self) -> Result<(), CopycatError>;
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError>;
     async fn validate_block(
@@ -83,7 +83,10 @@ pub async fn block_management_thread(
     pf_info!(id; "block management stage starting...");
 
     let mut block_management_stage = get_blk_creation(id, config, crypto_scheme, peer_messenger);
-    let mut batch_prepare_time = Instant::now() + Duration::from_millis(100);
+
+    let batch_prepare_timeout = Duration::from_millis(10);
+    let mut batch_prepare_time = Instant::now() + batch_prepare_timeout;
+    let mut is_blk_full = false;
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
     let mut self_txns_sent = 0;
@@ -113,12 +116,13 @@ pub async fn block_management_thread(
                 }
             },
 
-            _ = tokio::time::sleep_until(batch_prepare_time) => {
-                if let Err(e) = block_management_stage.prepare_new_block().await {
-                    pf_error!(id; "failed to prepare new block: {:?}", e);
-                }
+            _ = tokio::time::sleep_until(batch_prepare_time), if !is_blk_full => {
+                match block_management_stage.prepare_new_block().await {
+                    Ok(blk_full) => is_blk_full = blk_full,
+                    Err(e) => pf_error!(id; "failed to prepare new block: {:?}", e),
 
-                batch_prepare_time = Instant::now() + Duration::from_millis(100);
+                }
+                batch_prepare_time = Instant::now() + batch_prepare_timeout;
             },
 
             wait_result = block_management_stage.wait_to_propose() => {
@@ -126,6 +130,8 @@ pub async fn block_management_thread(
                     pf_error!(id; "wait to propose failed: {:?}", e);
                     continue;
                 }
+
+                is_blk_full = false;
 
                 match block_management_stage.get_new_block().await {
                     Ok((block, ctx)) => {
@@ -185,24 +191,26 @@ pub async fn block_management_thread(
                     }
                 };
 
+                is_blk_full = false;
+
                 match block_management_stage.validate_block(peer_blk, peer_blk_ctx).await {
-                        Ok(new_tail) => {
-                            if !new_tail.is_empty() {
-                                for (blk, _) in new_tail.iter() {
-                                    peer_blks_sent += 1;
-                                    peer_txns_sent += blk.txns.len();
-                                }
-                                if let Err(e) = new_block_send.send((src, new_tail)) {
-                                    pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
-                                    continue;
-                                }
+                    Ok(new_tail) => {
+                        if !new_tail.is_empty() {
+                            for (blk, _) in new_tail.iter() {
+                                peer_blks_sent += 1;
+                                peer_txns_sent += blk.txns.len();
+                            }
+                            if let Err(e) = new_block_send.send((src, new_tail)) {
+                                pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
+                                continue;
                             }
                         }
-                        Err(e) => {
-                            pf_error!(id; "failed to validate block: {:?}", e);
-                            continue;
-                        }
                     }
+                    Err(e) => {
+                        pf_error!(id; "failed to validate block: {:?}", e);
+                        continue;
+                    }
+                }
             }
 
             pmaker_msg = pacemaker_recv.recv() => {

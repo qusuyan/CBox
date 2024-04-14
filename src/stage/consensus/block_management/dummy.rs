@@ -37,8 +37,8 @@ impl BlockManagement for DummyBlockManagement {
         Ok(true)
     }
 
-    async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
-        Ok(())
+    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
+        Ok(true)
     }
 
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {

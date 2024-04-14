@@ -222,22 +222,22 @@ impl BlockManagement for BitcoinBlockManagement {
         Ok(true)
     }
 
-    async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
+    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
         let start_time = Instant::now();
 
         let mut modified = false;
         let mut execution_delay = Duration::from_secs(0);
 
         // if block is not full yet, try adding new txns
-        loop {
+        let blk_full = loop {
             // block is large enough
             if self.block_size > 0x100000 {
-                break;
+                break true;
             }
 
             let txn_hash = match self.pending_txns.pop_front() {
                 Some(hash) => hash,
-                None => break, // no pending transactions
+                None => break false, // no pending transactions
             };
 
             // check for double spending
@@ -305,7 +305,7 @@ impl BlockManagement for BitcoinBlockManagement {
                 },
                 _ => unreachable!(),
             };
-        }
+        };
 
         tokio::time::sleep(execution_delay).await;
 
@@ -320,7 +320,7 @@ impl BlockManagement for BitcoinBlockManagement {
             pf_debug!(self.id; "preparing new block takes {:?}, execution delay is {:?}", runtime, execution_delay);
         }
 
-        Ok(())
+        Ok(blk_full)
     }
 
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
