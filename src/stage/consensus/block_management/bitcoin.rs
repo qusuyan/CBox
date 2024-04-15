@@ -500,9 +500,13 @@ impl BlockManagement for BitcoinBlockManagement {
 
             pf_debug!(self.id; "block {} arrived early, still waiting for its ancestor {}", block_hash, parent);
             // request the missing ancestor from peers
+            let mut buf = [0u8; 32];
+            parent.to_little_endian(&mut buf);
             self.peer_messenger
                 .gossip(
-                    MsgType::BlockReq { blk_id: *parent },
+                    MsgType::BlockReq {
+                        msg: Vec::from(buf),
+                    },
                     HashSet::from([self.id]),
                 )
                 .await?;
@@ -726,7 +730,7 @@ impl BlockManagement for BitcoinBlockManagement {
         Ok(new_chain)
     }
 
-    async fn handle_pmaker_msg(&mut self, msg: Arc<Vec<u8>>) -> Result<(), CopycatError> {
+    async fn handle_pmaker_msg(&mut self, msg: Vec<u8>) -> Result<(), CopycatError> {
         if msg.len() == 0 {
             return Err(CopycatError(String::from(
                 "got empty message from pacemaker",
@@ -739,17 +743,14 @@ impl BlockManagement for BitcoinBlockManagement {
     async fn handle_peer_blk_req(
         &mut self,
         peer: NodeId,
-        blk_id: Hash,
+        msg: Vec<u8>,
     ) -> Result<(), CopycatError> {
         // only return the req if the block is known
+        let blk_id = U256::from_little_endian(&msg);
         if let Some((blk, _, _)) = self.block_pool.get(&blk_id) {
             self.peer_messenger
                 .send(
                     peer,
-                    // MsgType::BlockResp {
-                    //     id: blk_id,
-                    //     blk: blk.as_ref().clone(),
-                    // },
                     MsgType::NewBlock {
                         blk: blk.as_ref().clone(),
                     },

@@ -393,7 +393,14 @@ impl Decision for AvalancheDecision {
         pf_trace!(self.id; "getting new batch of txns {:?} - txns: {:?}", new_blk, new_blk.txns);
 
         let (proposer, blk_id) = match new_blk.header {
-            BlockHeader::Avalanche { proposer, id } => (proposer, id),
+            BlockHeader::Avalanche {
+                proposer,
+                id,
+                depth,
+            } => {
+                assert!(depth == 0);
+                (proposer, id)
+            }
             _ => unreachable!(),
         };
 
@@ -579,11 +586,7 @@ impl Decision for AvalancheDecision {
         Ok((self.commit_count, txns))
     }
 
-    async fn handle_peer_msg(
-        &mut self,
-        src: NodeId,
-        content: Arc<Vec<u8>>,
-    ) -> Result<(), CopycatError> {
+    async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError> {
         let peer_pk = self.neighbor_pks.entry(src).or_insert_with(|| {
             let (pk, _) = self.crypto_scheme.gen_key_pair(src.into());
             pk

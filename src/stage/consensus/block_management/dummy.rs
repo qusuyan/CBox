@@ -2,7 +2,6 @@ use super::BlockManagement;
 
 use crate::context::{BlkCtx, TxnCtx};
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
 
@@ -70,14 +69,14 @@ impl BlockManagement for DummyBlockManagement {
         Ok(vec![(block, ctx)])
     }
 
-    async fn handle_pmaker_msg(&mut self, _msg: Arc<Vec<u8>>) -> Result<(), CopycatError> {
+    async fn handle_pmaker_msg(&mut self, _msg: Vec<u8>) -> Result<(), CopycatError> {
         Ok(())
     }
 
     async fn handle_peer_blk_req(
         &mut self,
         _peer: NodeId,
-        _blk_id: Hash,
+        _msg: Vec<u8>,
     ) -> Result<(), CopycatError> {
         unimplemented!()
     }

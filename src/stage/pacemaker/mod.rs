@@ -11,14 +11,14 @@ use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait Pacemaker: Sync + Send {
-    async fn wait_to_propose(&self) -> Result<Arc<Vec<u8>>, CopycatError>;
+    async fn wait_to_propose(&self) -> Result<Vec<u8>, CopycatError>;
 }
 
 fn get_pacemaker(
     _id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
+    mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
 ) -> Box<dyn Pacemaker> {
     match config {
         Config::Dummy => Box::new(DummyPacemaker {}),
@@ -31,8 +31,8 @@ pub async fn pacemaker_thread(
     id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    peer_pmaker_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
-    should_propose_send: mpsc::Sender<Arc<Vec<u8>>>,
+    peer_pmaker_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
+    should_propose_send: mpsc::Sender<Vec<u8>>,
 ) {
     pf_info!(id; "pacemaker starting...");
 

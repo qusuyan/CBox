@@ -61,7 +61,7 @@ impl Decision for DummyDecision {
     async fn handle_peer_msg(
         &mut self,
         _src: NodeId,
-        _content: Arc<Vec<u8>>,
+        _content: Vec<u8>,
     ) -> Result<(), CopycatError> {
         unreachable!();
     }

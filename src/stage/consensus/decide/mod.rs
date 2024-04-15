@@ -27,11 +27,7 @@ pub trait Decision: Sync + Send {
     ) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
-    async fn handle_peer_msg(
-        &mut self,
-        src: NodeId,
-        content: Arc<Vec<u8>>,
-    ) -> Result<(), CopycatError>;
+    async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError>;
 }
 
 fn get_decision(
@@ -57,7 +53,7 @@ pub async fn decision_thread(
     crypto_scheme: CryptoScheme,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    mut peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
+    mut peer_consensus_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
 ) {

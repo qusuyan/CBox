@@ -24,6 +24,9 @@ pub enum BlockHeader {
         // only include data to uniquely identify each rounds of vote
         proposer: NodeId,
         id: u64,
+        // for querying depending txns that current node has not seen yet
+        // new batches have depth 0, and the txns parents would have depth 1, and their parents would have depth 2, etc
+        depth: usize,
     },
 }
 
