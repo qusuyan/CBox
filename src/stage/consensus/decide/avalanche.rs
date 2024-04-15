@@ -201,7 +201,7 @@ impl AvalancheDecision {
             return;
         }
 
-        pf_trace!(self.id; "getting vote for block query {:?} from {}", blk_id, src);
+        pf_trace!(self.id; "getting vote for block query {:?} from {}: {:?}", blk_id, src, votes);
         let (votes_received, accept_votes) = self
             .votes
             .entry(blk_id)
