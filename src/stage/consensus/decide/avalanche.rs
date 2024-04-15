@@ -390,7 +390,7 @@ impl Decision for AvalancheDecision {
             unreachable!("Avalanche blocks are in DAG not chain")
         };
 
-        pf_trace!(self.id; "getting new batch of txns {:?}", new_blk.header);
+        pf_trace!(self.id; "getting new batch of txns {:?} - txns: {:?}", new_blk, new_blk.txns);
 
         let (proposer, blk_id) = match new_blk.header {
             BlockHeader::Avalanche { proposer, id } => (proposer, id),
