@@ -349,7 +349,7 @@ impl BlockManagement for AvalancheBlockManagement {
                     pf_debug!(self.id; "Validating Send txn");
                     // verify signature
                     let serialized_in_txo = bincode::serialize(in_utxo)?;
-                    let mut valid = !self
+                    let mut valid = self
                         .crypto_scheme
                         .verify(sender, &serialized_in_txo, sender_signature)
                         .await?;
