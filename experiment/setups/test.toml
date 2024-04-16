@@ -9,5 +9,5 @@ exp-time = 200
 frequency = 0
 max-inflight-txns = 100000
 num-accounts = 100
-num-machines = 5
+num-machines = 2
 num-nodes = 10

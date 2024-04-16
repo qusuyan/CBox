@@ -3,7 +3,7 @@
 
 echo $@
 
-export RUST_LOG=info,mailbox=error
+export RUST_LOG=info
 export RUST_BACKTRACE=full
 
 BUILDTYPE=$1
@@ -30,7 +30,9 @@ else
     DISABLE_TXN_DISSEM="--disable-txn-dissem"
 fi
 
-./blockchain_copycat/target/${BUILDTYPE}/copycat_cluster -i ${ID} -t ${THREADS} \
+# ./blockchain_copycat/target/${BUILDTYPE}/copycat_cluster -i ${ID} -t ${THREADS} \
+perf record -F 20 --call-graph dwarf ./blockchain_copycat/target/debug/copycat_cluster -i ${ID} -t ${THREADS} \
     -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} -d ${DISSEM} \
     -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} \
     ${DISABLE_TXN_DISSEM} ${CONFIG_ARG} --topology bench_topo.json
+    
