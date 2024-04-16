@@ -285,6 +285,7 @@ impl BlockManagement for AvalancheBlockManagement {
         block: Arc<Block>,
         blk_ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
+        pf_debug!(self.id; "Validating block {:?}", block);
         assert!(block.txns.len() == blk_ctx.txn_ctx.len());
 
         let (proposer, blk_id, depth) = match block.header {
@@ -356,12 +357,11 @@ impl BlockManagement for AvalancheBlockManagement {
                         let (is_valid, txn_missing_deps) = self.validate_txn(avax_txn)?;
                         pf_debug!(self.id; "Validating txn returned is_valid: {}, missing_deps: {:?}", is_valid, txn_missing_deps);
                         if txn_missing_deps.len() > 0 {
-                            if !is_valid {
-                                return Ok(vec![]);
+                            if is_valid {
+                                // todo: add missing deps to the missing deps set of batch
+                                blk_missing_deps.extend(txn_missing_deps);
+                                pending_txns.push(idx);
                             }
-                            // todo: add missing deps to the missing deps set of batch
-                            blk_missing_deps.extend(txn_missing_deps);
-                            pending_txns.push(idx);
                             valid = false;
                         } else {
                             valid = is_valid;

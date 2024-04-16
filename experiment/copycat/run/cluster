@@ -3,7 +3,7 @@
 
 echo $@
 
-export RUST_LOG=info,copycat::stage::consensus::block_management=debug,mailbox=error
+export RUST_LOG=info,copycat::stage::consensus::block_management::avalanche=debug,mailbox=error
 export RUST_BACKTRACE=1
 
 BUILDTYPE=$1
