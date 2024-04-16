@@ -353,6 +353,7 @@ impl BlockManagement for AvalancheBlockManagement {
                         .crypto_scheme
                         .verify(sender, &serialized_in_txo, sender_signature)
                         .await?;
+                    pf_debug!(self.id; "Signature verification result - is valid: {}", valid);
 
                     // verify validity
                     if valid {
