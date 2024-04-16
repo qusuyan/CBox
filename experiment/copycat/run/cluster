@@ -4,7 +4,7 @@
 echo $@
 
 export RUST_LOG=info,copycat::stage::consensus::block_management::avalanche=debug,mailbox=error
-export RUST_BACKTRACE=1
+export RUST_BACKTRACE=full
 
 BUILDTYPE=$1
 ID=$2

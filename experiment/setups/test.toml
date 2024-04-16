@@ -2,6 +2,7 @@
 num_iterations = 1
 
 [parameters]
+build-type = "debug"
 chain-type = "avalanche"
 cluster-threads = 32
 disable-txn-dissem = true

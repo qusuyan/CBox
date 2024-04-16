@@ -352,6 +352,7 @@ impl BlockManagement for AvalancheBlockManagement {
                         .crypto_scheme
                         .verify(sender, &serialized_in_txo, sender_signature)
                         .await?;
+                    let mut pending = false;
 
                     // verify validity
                     if valid {
@@ -362,6 +363,7 @@ impl BlockManagement for AvalancheBlockManagement {
                                 // todo: add missing deps to the missing deps set of batch
                                 blk_missing_deps.extend(txn_missing_deps);
                                 pending_txns.push(idx);
+                                pending = true;
                             }
                             valid = false;
                         } else {
@@ -392,18 +394,24 @@ impl BlockManagement for AvalancheBlockManagement {
                         }
                         (txn.clone(), txn_ctx.clone())
                     } else {
-                        // otherwise put a place holder
-                        let txn = Txn::Avalanche {
-                            txn: AvalancheTxn::PlaceHolder,
-                        };
-                        let txn_ctx = TxnCtx::from_txn(&txn)?;
-                        (Arc::new(txn), Arc::new(txn_ctx))
+                        if pending {
+                            (txn.clone(), txn_ctx.clone())
+                        } else {
+                            // otherwise put a place holder
+                            let txn = Txn::Avalanche {
+                                txn: AvalancheTxn::PlaceHolder,
+                            };
+                            let txn_ctx = TxnCtx::from_txn(&txn)?;
+                            (Arc::new(txn), Arc::new(txn_ctx))
+                        }
                     }
                 }
             };
             filtered_txns.push(txn);
             blk_txn_ctx.push(txn_ctx);
         }
+
+        assert!(filtered_txns.len() == block.txns.len());
 
         // missing some dependencies, so handle this request when receiving dependencies from peers
         if blk_missing_deps.len() > 0 {
@@ -493,8 +501,6 @@ impl BlockManagement for AvalancheBlockManagement {
                 blk_txn_ctx = curr_txn_ctx;
             }
         }
-
-        assert!(filtered_txns.len() == block.txns.len());
 
         let blk = Arc::new(Block {
             header: block.header.clone(),
