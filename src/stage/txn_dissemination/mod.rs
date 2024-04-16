@@ -31,7 +31,7 @@ fn get_txn_dissemination(
     match dissem_pattern {
         DissemPattern::Broadcast => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)),
         DissemPattern::Gossip => Box::new(GossipTxnDissemination::new(id, peer_messenger)),
-        DissemPattern::Sample => Box::new(GossipTxnDissemination::new(id, peer_messenger)), // TODO: use gossip for now
+        DissemPattern::Sample => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)), // TODO: use gossip for now
     }
 }
 
