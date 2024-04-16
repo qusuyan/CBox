@@ -346,19 +346,17 @@ impl BlockManagement for AvalancheBlockManagement {
                     sender_signature,
                     ..
                 } => {
-                    pf_debug!(self.id; "Validating Send txn");
                     // verify signature
                     let serialized_in_txo = bincode::serialize(in_utxo)?;
                     let mut valid = self
                         .crypto_scheme
                         .verify(sender, &serialized_in_txo, sender_signature)
                         .await?;
-                    pf_debug!(self.id; "Signature verification result - is valid: {}", valid);
 
                     // verify validity
                     if valid {
                         let (is_valid, txn_missing_deps) = self.validate_txn(avax_txn)?;
-                        pf_debug!(self.id; "Validating txn returned is_valid: {}, missing_deps: {:?}", is_valid, txn_missing_deps);
+                        pf_trace!(self.id; "Validating txn returned is_valid: {}, missing_deps: {:?}", is_valid, txn_missing_deps);
                         if txn_missing_deps.len() > 0 {
                             if is_valid {
                                 // todo: add missing deps to the missing deps set of batch
@@ -375,6 +373,13 @@ impl BlockManagement for AvalancheBlockManagement {
                         // add to txn pool if valid
                         self.txn_pool
                             .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
+                        self.txn_dag.insert(
+                            txn_hash,
+                            DagNode {
+                                num_parents: in_utxo.len(),
+                                children: HashSet::new(),
+                            },
+                        );
                         let mut in_frontier = true;
                         for parent in in_utxo.iter() {
                             if let Some(siblings) = self.txn_dag.get_mut(parent) {
@@ -384,14 +389,6 @@ impl BlockManagement for AvalancheBlockManagement {
                         }
                         if in_frontier {
                             self.dag_frontier.push_back(txn_hash);
-                        } else {
-                            self.txn_dag.insert(
-                                txn_hash,
-                                DagNode {
-                                    num_parents: in_utxo.len(),
-                                    children: HashSet::new(),
-                                },
-                            );
                         }
                         (txn.clone(), txn_ctx.clone())
                     } else {
@@ -469,6 +466,13 @@ impl BlockManagement for AvalancheBlockManagement {
                         // add to txn_pool
                         self.txn_pool
                             .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
+                        self.txn_dag.insert(
+                            txn_hash,
+                            DagNode {
+                                num_parents: in_utxo.len(),
+                                children: HashSet::new(),
+                            },
+                        );
                         let mut in_frontier = true;
                         for parent in in_utxo.iter() {
                             if let Some(siblings) = self.txn_dag.get_mut(parent) {
@@ -478,14 +482,6 @@ impl BlockManagement for AvalancheBlockManagement {
                         }
                         if in_frontier {
                             self.dag_frontier.push_back(txn_hash);
-                        } else {
-                            self.txn_dag.insert(
-                                txn_hash,
-                                DagNode {
-                                    num_parents: in_utxo.len(),
-                                    children: HashSet::new(),
-                                },
-                            );
                         }
                     }
                 }
