@@ -272,7 +272,7 @@ impl BlockManagement for AvalancheBlockManagement {
             depth: 0,
         };
         let blk_ctx = BlkCtx::from_header_and_txns(&header, txn_ctx)?;
-        pf_debug!(self.id; "sending block query {:?} ({} txns)", header, txn_hashs.len());
+        pf_trace!(self.id; "sending block query {:?} ({} txns)", header, txn_hashs.len());
         let blk = Arc::new(Block { header, txns });
 
         self.blk_counter += 1;
