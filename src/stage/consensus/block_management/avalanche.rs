@@ -355,6 +355,9 @@ impl BlockManagement for AvalancheBlockManagement {
                     if valid {
                         let (is_valid, txn_missing_deps) = self.validate_txn(avax_txn)?;
                         if txn_missing_deps.len() > 0 {
+                            if !is_valid {
+                                return Ok(vec![]);
+                            }
                             // todo: add missing deps to the missing deps set of batch
                             blk_missing_deps.extend(txn_missing_deps);
                             pending_txns.push(idx);
@@ -403,6 +406,7 @@ impl BlockManagement for AvalancheBlockManagement {
 
         // missing some dependencies, so handle this request when receiving dependencies from peers
         if blk_missing_deps.len() > 0 {
+            pf_debug!(self.id; "querying proposer {} for missing txns: {:?}", proposer, blk_missing_deps);
             let peer_req = PeerReq {
                 proposer,
                 blk_id,
