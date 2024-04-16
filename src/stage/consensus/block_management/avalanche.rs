@@ -47,6 +47,8 @@ pub struct AvalancheBlockManagement {
     // for requesting missing txns
     peer_messenger: Arc<PeerMessenger>,
     pending_blks: HashMap<(NodeId, u64, usize), (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>, Vec<usize>)>,
+    // for control loop
+    blk_quota: usize,
 }
 
 impl AvalancheBlockManagement {
@@ -71,6 +73,7 @@ impl AvalancheBlockManagement {
             _notify: Notify::new(),
             peer_messenger,
             pending_blks: HashMap::new(),
+            blk_quota: 0,
         }
     }
 }
@@ -210,6 +213,11 @@ impl BlockManagement for AvalancheBlockManagement {
     }
 
     async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
+        // do nothing if we cannot propose more batches
+        if self.blk_quota == 0 {
+            return Ok(true);
+        }
+
         let blk_full = loop {
             if self.curr_batch.len() > self.blk_len {
                 break true;
@@ -242,15 +250,17 @@ impl BlockManagement for AvalancheBlockManagement {
     }
 
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
-        if self.curr_batch.len() == 0 {
-            // TODO: add noop txns so that parent txns can get voted on
-            // sleep forever
+        // TODO: add noop txns so that parent txns can get voted on
+        if self.blk_quota == 0 || self.curr_batch.len() == 0 {
+            // we have nothing to propose, sleep forever
             loop {
                 self._notify.notified().await;
             }
         } else if self.curr_batch.len() >= self.blk_len {
+            // we got a complete block, can propose
             return Ok(());
         } else {
+            // we got some txns in block, wait for timeout
             tokio::time::sleep_until(self.next_propose_time).await;
             return Ok(());
         }
@@ -258,6 +268,7 @@ impl BlockManagement for AvalancheBlockManagement {
 
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
         //TODO: add noop txns to drive consensus as needed
+        assert!(self.blk_quota > 0);
         let txn_hashs: Vec<Hash> = self.curr_batch.drain(0..).collect();
         let txns_with_ctx: Vec<(Arc<Txn>, Arc<TxnCtx>)> = txn_hashs
             .iter()
@@ -277,6 +288,7 @@ impl BlockManagement for AvalancheBlockManagement {
 
         self.blk_counter += 1;
         self.next_propose_time = Instant::now() + self.proposal_timeout;
+        self.blk_quota -= 1;
         Ok((blk, Arc::new(blk_ctx)))
     }
 
@@ -515,7 +527,8 @@ impl BlockManagement for AvalancheBlockManagement {
     }
 
     async fn handle_pmaker_msg(&mut self, _msg: Vec<u8>) -> Result<(), CopycatError> {
-        todo!();
+        self.blk_quota += 1;
+        Ok(())
     }
 
     async fn handle_peer_blk_req(

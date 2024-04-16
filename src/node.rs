@@ -64,6 +64,7 @@ impl Node {
         let (pacemaker_send, pacemaker_recv) = mpsc::channel(0x1000000);
         let (new_block_send, new_block_recv) = mpsc::channel(0x1000000);
         let (block_ready_send, block_ready_recv) = mpsc::channel(0x1000000);
+        let (pmaker_feedback_send, pmaker_feedback_recv) = mpsc::channel(0x1000000);
         let (commit_send, commit_recv) = mpsc::channel(0x1000000);
         let (executed_send, executed_recv) = mpsc::channel(0x1000000);
 
@@ -91,6 +92,7 @@ impl Node {
             config.clone(),
             peer_messenger.clone(),
             peer_pmaker_recv,
+            pmaker_feedback_recv,
             pacemaker_send,
         ));
 
@@ -124,6 +126,7 @@ impl Node {
             peer_consensus_recv,
             block_ready_recv,
             commit_send,
+            pmaker_feedback_send,
         ));
 
         let _commit_handle = tokio::spawn(commit_thread(

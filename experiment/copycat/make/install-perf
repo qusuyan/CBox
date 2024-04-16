@@ -1,0 +1,5 @@
+#! /bin/bash
+
+sudo apt-get update -y
+sudo apt-get install linux-tools-common linux-tools-generic linux-tools-`uname -r` -y
+sudo sysctl kernel.perf_event_paranoid=2

@@ -2,13 +2,12 @@
 num_iterations = 1
 
 [parameters]
-build-type = "debug"
 chain-type = "avalanche"
 cluster-threads = 32
 dissem = "sample"
-exp-time = 400
+exp-time = 200
 frequency = 0
 max-inflight-txns = 100000
 num-accounts = 100
-num-machines = 6
-num-nodes = 6
+num-machines = 5
+num-nodes = 10

@@ -216,6 +216,7 @@ pub async fn block_management_thread(
             pmaker_msg = pacemaker_recv.recv() => {
                 match pmaker_msg {
                     Some(msg) => {
+                        pf_debug!(id; "got pmaker msg");
                         if let Err(e) = block_management_stage.handle_pmaker_msg(msg).await {
                             pf_error!(id; "failed to handle pacemaker message: {:?}", e);
                             continue;

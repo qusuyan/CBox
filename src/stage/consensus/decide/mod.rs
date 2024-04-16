@@ -35,6 +35,7 @@ fn get_decision(
     crypto_scheme: CryptoScheme,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
+    pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
 ) -> Box<dyn Decision> {
     match config {
         Config::Dummy => Box::new(DummyDecision::new()),
@@ -44,6 +45,7 @@ fn get_decision(
             crypto_scheme,
             config,
             peer_messenger,
+            pmaker_feedback_send,
         )),
     }
 }
@@ -56,10 +58,17 @@ pub async fn decision_thread(
     mut peer_consensus_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
+    pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
 ) {
     pf_info!(id; "decision stage starting...");
 
-    let mut decision_stage = get_decision(id, crypto_scheme, config, peer_messenger);
+    let mut decision_stage = get_decision(
+        id,
+        crypto_scheme,
+        config,
+        peer_messenger,
+        pmaker_feedback_send,
+    );
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
     let mut blks_sent = 0;

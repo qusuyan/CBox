@@ -11,6 +11,7 @@ use crate::{CryptoScheme, NodeId};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 
@@ -63,6 +64,8 @@ pub struct AvalancheDecision {
     peer_messenger: Arc<PeerMessenger>,
     neighbor_pks: HashMap<NodeId, PubKey>,
     sk: PrivKey,
+    // control loop
+    pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
 }
 
 impl AvalancheDecision {
@@ -71,6 +74,7 @@ impl AvalancheDecision {
         crypto_scheme: CryptoScheme,
         config: AvalancheConfig,
         peer_messenger: Arc<PeerMessenger>,
+        pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
     ) -> Self {
         // pk can be generated deterministically on demand
         let (_, sk) = crypto_scheme.gen_key_pair(id.into());
@@ -101,6 +105,7 @@ impl AvalancheDecision {
             peer_messenger,
             neighbor_pks: HashMap::new(),
             sk,
+            pmaker_feedback_send,
         }
     }
 
@@ -195,10 +200,15 @@ impl AvalancheDecision {
         true
     }
 
-    fn handle_votes(&mut self, blk_id: (NodeId, u64), src: NodeId, votes: Vec<bool>) {
+    async fn handle_votes(
+        &mut self,
+        blk_id: (NodeId, u64),
+        src: NodeId,
+        votes: Vec<bool>,
+    ) -> Result<(), CopycatError> {
         // ignore extra votes
         if self.finished_query.contains(&blk_id) {
-            return;
+            return Ok(());
         }
 
         pf_trace!(self.id; "getting vote for block query {:?} from {}: {:?}", blk_id, src, votes);
@@ -217,7 +227,7 @@ impl AvalancheDecision {
         if *votes_received >= self.k {
             let txns = match self.query_pool.remove(&blk_id) {
                 Some(txns) => txns,
-                None => return, // if the batch has not yet been received or if the batch is already committed
+                None => return Ok(()), // if the batch has not yet been received or if the batch is already committed
             };
 
             let (_, accept_votes) = self.votes.remove(&blk_id).unwrap();
@@ -371,7 +381,12 @@ impl AvalancheDecision {
                     }
                 }
             }
+
+            // send to pmaker a batch is voted
+            self.pmaker_feedback_send.send(vec![]).await?;
         }
+
+        Ok(())
     }
 }
 
@@ -540,7 +555,8 @@ impl Decision for AvalancheDecision {
         if proposer == self.id {
             // if queried by myself, record block and and handle votes locally
             self.query_pool.insert((proposer, blk_id), query_txns);
-            self.handle_votes((proposer, blk_id), self.id, votes);
+            self.handle_votes((proposer, blk_id), self.id, votes)
+                .await?;
         } else {
             // otherwise, send votes to peer that queries the block
             let msg_content = ((proposer, blk_id), votes);
@@ -601,7 +617,7 @@ impl Decision for AvalancheDecision {
             .verify(&peer_pk, &serialized_content, &msg.signature)
             .await?
         {
-            self.handle_votes(blk_id, src, votes)
+            self.handle_votes(blk_id, src, votes).await?;
         }
 
         Ok(())

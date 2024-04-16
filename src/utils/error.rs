@@ -28,3 +28,4 @@ impl_from_error!(bincode::Error);
 impl_from_error!(toml::de::Error);
 impl_from_error!(std::io::Error);
 impl_from_error!(serde_json::Error);
+impl_from_error!(tokio::sync::mpsc::error::SendError<Vec<u8>>);

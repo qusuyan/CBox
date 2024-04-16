@@ -7,6 +7,7 @@ required-packages = ["python3"]
 home-runner = []
 
 [make-targets]
+install-perf = []
 install-rust = []
 setup-copycat = [["branch", "main"], ["buildtype", "release"]]
 setup-mailbox = [["branch", "main"]]
