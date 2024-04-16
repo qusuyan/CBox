@@ -503,7 +503,11 @@ impl BlockManagement for AvalancheBlockManagement {
         }
 
         let blk = Arc::new(Block {
-            header: block.header.clone(),
+            header: BlockHeader::Avalanche {
+                proposer,
+                id: blk_id,
+                depth: curr_depth,
+            },
             txns: filtered_txns,
         });
         let blk_ctx = Arc::new(BlkCtx::from_header_and_txns(&block.header, blk_txn_ctx)?);
