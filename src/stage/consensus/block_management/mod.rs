@@ -191,6 +191,7 @@ pub async fn block_management_thread(
                     }
                 };
 
+                pf_debug!(id; "Validating block {:?}", peer_blk);
                 match block_management_stage.validate_block(peer_blk, peer_blk_ctx).await {
                         Ok(new_tail) => {
                             if !new_tail.is_empty() {
