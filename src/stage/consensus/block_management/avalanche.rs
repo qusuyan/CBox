@@ -285,7 +285,7 @@ impl BlockManagement for AvalancheBlockManagement {
         block: Arc<Block>,
         blk_ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
-        pf_debug!(self.id; "Validating block {:?}", block);
+        pf_trace!(self.id; "Validating block {:?}", block);
         assert!(block.txns.len() == blk_ctx.txn_ctx.len());
 
         let (proposer, blk_id, depth) = match block.header {
@@ -325,6 +325,7 @@ impl BlockManagement for AvalancheBlockManagement {
                     // if noop txn, bypass all tests since it is just used to drive consensus
                     // placeholder txns should not be sent across nodes but if this is the case, keep as is
                     // they do not need to be add to txn pool
+                    pf_debug!(self.id; "Validating Noop / Placeholder");
                     (txn.clone(), txn_ctx.clone())
                 }
                 AvalancheTxn::Grant { .. } => {
@@ -345,6 +346,7 @@ impl BlockManagement for AvalancheBlockManagement {
                     sender_signature,
                     ..
                 } => {
+                    pf_debug!(self.id; "Validating Send txn");
                     // verify signature
                     let serialized_in_txo = bincode::serialize(in_utxo)?;
                     let mut valid = !self
