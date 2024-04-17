@@ -3,7 +3,7 @@
 
 echo $@
 
-export RUST_LOG=info,mailbox=error
+export RUST_LOG=info
 export RUST_BACKTRACE=full
 
 BUILDTYPE=$1

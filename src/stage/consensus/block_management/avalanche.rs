@@ -427,7 +427,7 @@ impl BlockManagement for AvalancheBlockManagement {
 
         // missing some dependencies, so handle this request when receiving dependencies from peers
         if blk_missing_deps.len() > 0 {
-            pf_info!(self.id; "querying proposer {} for missing txns at block {} depth {}: {:?}", proposer, blk_id, depth + 1, blk_missing_deps);
+            pf_debug!(self.id; "querying proposer {} for missing txns at block {} depth {}: {:?}", proposer, blk_id, depth + 1, blk_missing_deps);
             let peer_req = PeerReq {
                 proposer,
                 blk_id,
