@@ -369,7 +369,7 @@ impl BlockManagement for AvalancheBlockManagement {
                     // verify validity
                     if valid {
                         let (is_valid, txn_missing_deps) = self.validate_txn(avax_txn)?;
-                        pf_info!(self.id; "Validating txn returned is_valid: {}, missing_deps: {:?}", is_valid, txn_missing_deps);
+                        pf_trace!(self.id; "Validating txn returned is_valid: {}, missing_deps: {:?}", is_valid, txn_missing_deps);
                         if txn_missing_deps.len() > 0 {
                             if is_valid {
                                 // todo: add missing deps to the missing deps set of batch
