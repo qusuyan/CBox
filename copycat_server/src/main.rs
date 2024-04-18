@@ -1,6 +1,7 @@
+use copycat::get_neighbors;
 use copycat::log::colored_level;
-use copycat::{get_flow_gen, get_neighbors};
 use copycat::{ChainType, Config, CryptoScheme, DissemPattern, Node};
+use copycat_flowgen::get_flow_gen;
 
 use std::collections::HashSet;
 use std::io::Write;
@@ -141,6 +142,7 @@ pub fn main() {
 
         let mut flow_gen = get_flow_gen(
             id,
+            vec![id],
             args.accounts,
             args.max_inflight,
             args.frequency,
@@ -148,7 +150,7 @@ pub fn main() {
             args.crypto,
         );
         let init_txns = flow_gen.setup_txns().await.unwrap();
-        for txn in init_txns {
+        for (_, txn) in init_txns {
             if let Err(e) = node.send_req(txn).await {
                 log::error!("failed to send setup txns: {e}");
                 return;
@@ -177,7 +179,7 @@ pub fn main() {
                         }
                     };
 
-                    for next_req in next_req_batch.into_iter() {
+                    for (_, next_req) in next_req_batch.into_iter() {
                         if let Err(e) = node.send_req(next_req).await {
                             log::error!("sending next request failed: {e:?}");
                             continue;

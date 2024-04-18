@@ -1,11 +1,10 @@
 use super::{FlowGen, Stats};
-use crate::context::TxnCtx;
-use crate::protocol::crypto::{Hash, PrivKey, PubKey};
-use crate::protocol::transaction::{BitcoinTxn, Txn};
-use crate::protocol::CryptoScheme;
-use crate::utils::{CopycatError, NodeId};
+use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
+use copycat::protocol::transaction::{AvalancheTxn, Txn};
+use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
 
 use async_trait::async_trait;
+use mailbox::MachineId;
 use rand::Rng;
 
 use std::collections::hash_map::Entry;
@@ -22,34 +21,47 @@ struct ChainInfo {
     total_committed: u64, // includes false commits
 }
 
-pub struct BitcoinFlowGen {
+pub struct AvalancheFlowGen {
     max_inflight: usize,
     batch_frequency: usize,
     batch_size: usize,
     crypto: CryptoScheme,
-    utxos: HashMap<PubKey, VecDeque<(Hash, u64)>>,
-    accounts: Vec<(PubKey, PrivKey)>,
+    node_list: Vec<NodeId>,
+    utxos: HashMap<NodeId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
+    accounts: HashMap<NodeId, Vec<(PubKey, PrivKey)>>,
     in_flight: HashMap<Hash, Instant>,
     num_completed_txns: u64,
     chain_info: HashMap<NodeId, ChainInfo>,
     total_time_sec: f64,
 }
 
-impl BitcoinFlowGen {
+impl AvalancheFlowGen {
     pub fn new(
-        id: NodeId,
+        id: MachineId,
+        node_list: Vec<NodeId>,
         num_accounts: usize,
         max_inflight: usize,
         frequency: usize,
         crypto: CryptoScheme,
     ) -> Self {
-        let mut accounts = Vec::new();
+        let accounts_per_node = num_accounts / node_list.len();
+        assert!(accounts_per_node > 1);
+
+        let mut accounts = HashMap::new();
         let mut utxos = HashMap::new();
-        for i in 0..num_accounts as u64 {
-            let seed = ((id as u128) << 64) | i as u128;
-            let (pubkey, privkey) = crypto.gen_key_pair(seed);
-            utxos.insert(pubkey.clone(), VecDeque::new());
-            accounts.push((pubkey, privkey));
+        for node in node_list.iter() {
+            for i in 0..accounts_per_node as u64 {
+                let seed = ((id as u128) << 64) | i as u128;
+                let (pubkey, privkey) = crypto.gen_key_pair(seed);
+                utxos
+                    .entry(*node)
+                    .or_insert(HashMap::new())
+                    .insert(pubkey.clone(), VecDeque::new());
+                accounts
+                    .entry(*node)
+                    .or_insert(vec![])
+                    .push((pubkey, privkey));
+            }
         }
 
         let batch_frequency = MAX_BATCH_FREQ;
@@ -64,6 +76,7 @@ impl BitcoinFlowGen {
             batch_frequency,
             batch_size,
             crypto,
+            node_list,
             utxos,
             accounts,
             in_flight: HashMap::new(),
@@ -75,20 +88,21 @@ impl BitcoinFlowGen {
 }
 
 #[async_trait]
-impl FlowGen for BitcoinFlowGen {
-    async fn setup_txns(&mut self) -> Result<Vec<Arc<Txn>>, CopycatError> {
+impl FlowGen for AvalancheFlowGen {
+    async fn setup_txns(&mut self) -> Result<Vec<(NodeId, Arc<Txn>)>, CopycatError> {
         let mut txns = Vec::new();
-        for (account, utxos) in self.utxos.iter_mut() {
-            let txn = Txn::Bitcoin {
-                txn: BitcoinTxn::Grant {
-                    out_utxo: 100,
-                    receiver: *account,
-                },
-            };
-            let txn_ctx = TxnCtx::from_txn(&txn)?;
-            let hash = txn_ctx.id;
-            utxos.push_back((hash, 100));
-            txns.push(Arc::new(txn));
+        for (node, utxo_map) in self.utxos.iter_mut() {
+            for (account, utxos) in utxo_map.iter_mut() {
+                let txn = Txn::Avalanche {
+                    txn: AvalancheTxn::Grant {
+                        out_utxo: 100,
+                        receiver: *account,
+                    },
+                };
+                let txn_ctx = TxnCtx::from_txn(&txn)?;
+                utxos.push_back((txn_ctx.id, 100));
+                txns.push((*node, Arc::new(txn)));
+            }
         }
 
         Ok(txns)
@@ -112,7 +126,7 @@ impl FlowGen for BitcoinFlowGen {
         }
     }
 
-    async fn next_txn_batch(&mut self) -> Result<Vec<Arc<Txn>>, CopycatError> {
+    async fn next_txn_batch(&mut self) -> Result<Vec<(NodeId, Arc<Txn>)>, CopycatError> {
         let mut batch = vec![];
         let batch_size = if self.max_inflight == UNSET {
             self.batch_size
@@ -120,16 +134,20 @@ impl FlowGen for BitcoinFlowGen {
             std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len())
         };
         for _ in 0..batch_size {
+            let node = self.node_list[rand::random::<usize>() % self.node_list.len()];
+            let accounts = self.accounts.get(&node).unwrap();
+            let utxos = self.utxos.get_mut(&node).unwrap();
+
             let (sender, remainder, recver, out_utxo, txn) = loop {
-                let sender = rand::random::<usize>() % self.accounts.len();
-                let mut receiver = rand::random::<usize>() % (self.accounts.len() - 1);
+                let sender = rand::random::<usize>() % accounts.len();
+                let mut receiver = rand::random::<usize>() % (accounts.len() - 1);
                 if receiver >= sender {
                     receiver += 1; // avoid sending to self
                 }
 
-                let (sender_pk, sender_sk) = self.accounts.get(sender).unwrap();
-                let (recver_pk, _) = self.accounts.get(receiver).unwrap();
-                let sender_utxos = self.utxos.get_mut(sender_pk).unwrap();
+                let (sender_pk, sender_sk) = accounts.get(sender).unwrap();
+                let (recver_pk, _) = accounts.get(receiver).unwrap();
+                let sender_utxos = utxos.get_mut(sender_pk).unwrap();
                 if sender_utxos.is_empty() {
                     continue; // retry
                 }
@@ -140,17 +158,14 @@ impl FlowGen for BitcoinFlowGen {
                 let sender_signature = self.crypto.sign(sender_sk, &serialized_in_utxo).await?;
                 let out_utxo = std::cmp::min(amount, 10);
                 let remainder = amount - out_utxo;
-                let txn = Arc::new(Txn::Bitcoin {
-                    txn: BitcoinTxn::Send {
+                let txn = Arc::new(Txn::Avalanche {
+                    txn: AvalancheTxn::Send {
                         sender: *sender_pk,
                         in_utxo,
                         receiver: *recver_pk,
                         out_utxo,
                         remainder,
                         sender_signature,
-                        script_bytes: 400,
-                        script_runtime: Duration::from_millis(1),
-                        script_succeed: true,
                     },
                 });
                 break (sender_pk, remainder, recver_pk, out_utxo, txn);
@@ -159,16 +174,16 @@ impl FlowGen for BitcoinFlowGen {
             let txn_ctx = TxnCtx::from_txn(&txn)?;
             let txn_hash = txn_ctx.id;
             if remainder > 0 {
-                let sender_utxos = self.utxos.get_mut(sender).unwrap();
+                let sender_utxos = utxos.get_mut(sender).unwrap();
                 sender_utxos.push_back((txn_hash.clone(), remainder));
             }
             if out_utxo > 0 {
-                let recver_utxos = self.utxos.get_mut(recver).unwrap();
+                let recver_utxos = utxos.get_mut(recver).unwrap();
                 recver_utxos.push_back((txn_hash.clone(), out_utxo));
             }
 
             self.in_flight.insert(txn_hash, Instant::now());
-            batch.push(txn);
+            batch.push((node, txn));
         }
         Ok(batch)
     }
