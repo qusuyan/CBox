@@ -65,4 +65,6 @@ impl Decision for DummyDecision {
     ) -> Result<(), CopycatError> {
         unreachable!();
     }
+
+    fn report(&mut self) {}
 }

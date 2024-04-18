@@ -760,6 +760,8 @@ impl BlockManagement for BitcoinBlockManagement {
         Ok(())
     }
 
+    fn report(&mut self) {}
+
     //     async fn handle_peer_blk_resp(
     //         &mut self,
     //         peer: NodeId,

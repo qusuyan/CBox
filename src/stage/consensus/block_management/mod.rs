@@ -39,6 +39,7 @@ pub trait BlockManagement: Sync + Send {
     async fn handle_pmaker_msg(&mut self, msg: Vec<u8>) -> Result<(), CopycatError>;
     async fn handle_peer_blk_req(&mut self, peer: NodeId, msg: Vec<u8>)
         -> Result<(), CopycatError>;
+    fn report(&mut self);
     // async fn handle_peer_blk_resp(
     //     &mut self,
     //     peer: NodeId,
@@ -96,6 +97,8 @@ pub async fn block_management_thread(
     let mut peer_txns_sent = 0;
     let mut peer_blks_sent = 0;
     let mut txns_recv = 0;
+    let mut peer_blks_recv = 0;
+    let mut peer_txns_recv = 0;
 
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
 
@@ -191,6 +194,8 @@ pub async fn block_management_thread(
                     }
                 };
 
+                peer_blks_recv += 1;
+                peer_txns_recv += peer_blk.txns.len();
                 pf_debug!(id; "Validating block {:?}", peer_blk);
                 match block_management_stage.validate_block(peer_blk, peer_blk_ctx).await {
                         Ok(new_tail) => {
@@ -246,12 +251,16 @@ pub async fn block_management_thread(
             }
 
             _ = tokio::time::sleep_until(report_timeout) => {
-                pf_info!(id; "In the last minute: txns_recv: {}, self_blks_sent: {}, self_txns_sent: {}, peer_blks_sent: {}, peer_txns_sent: {}", txns_recv, self_blks_sent, self_txns_sent, peer_blks_sent, peer_txns_sent);
+                pf_info!(id; "In the last minute: txns_recv: {}, peer_blks_recv: {}, peer_txns_recv: {}", txns_recv, peer_blks_recv, peer_txns_recv);
+                pf_info!(id; "In the last minute: self_blks_sent: {}, self_txns_sent: {}, peer_blks_sent: {}, peer_txns_sent: {}", self_blks_sent, self_txns_sent, peer_blks_sent, peer_txns_sent);
+                block_management_stage.report();
                 txns_recv = 0;
                 self_blks_sent = 0;
                 self_txns_sent = 0;
                 peer_blks_sent = 0;
                 peer_txns_sent = 0;
+                peer_blks_recv = 0;
+                peer_txns_recv = 0;
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
 

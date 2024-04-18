@@ -93,10 +93,10 @@ impl CliArgs {
         //     self.accounts = 10000
         // }
 
-        if self.disable_txn_dissem && self.txn_span > 0 {
-            log::warn!("currently does not support sending flow generation to different nodes when transaction dissemination is disabled");
-            self.txn_span = 0;
-        }
+        // if self.disable_txn_dissem && self.txn_span > 0 {
+        //     log::warn!("currently does not support sending flow generation to different nodes when transaction dissemination is disabled");
+        //     self.txn_span = 0;
+        // }
 
         if matches!(self.chain, ChainType::Avalanche)
             && !matches!(self.dissem_pattern, DissemPattern::Sample)
@@ -194,10 +194,15 @@ fn main() {
     let txn_span = args.txn_span;
     let mut req_dsts = HashMap::new();
     for idx in 0..local_nodes.len() {
-        let mut dsts = vec![];
-        for offset in 0..txn_span {
-            dsts.push(local_nodes[(idx + offset) % local_nodes.len()]);
-        }
+        let dsts = if txn_span == 0 {
+            local_nodes.clone()
+        } else {
+            let mut dsts = vec![];
+            for offset in 0..txn_span {
+                dsts.push(local_nodes[(idx + offset) % local_nodes.len()]);
+            }
+            dsts
+        };
         req_dsts.insert(local_nodes[idx], dsts);
     }
 
@@ -275,7 +280,6 @@ fn main() {
 
         // run flowgen
         let mut flow_gen = get_flow_gen(
-            id,
             local_nodes,
             num_accounts,
             max_inflight,

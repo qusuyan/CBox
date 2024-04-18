@@ -81,6 +81,8 @@ impl BlockManagement for DummyBlockManagement {
         unimplemented!()
     }
 
+    fn report(&mut self) {}
+
     // async fn handle_peer_blk_resp(
     //     &mut self,
     //     _peer: NodeId,

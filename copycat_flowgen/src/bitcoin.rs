@@ -36,7 +36,6 @@ pub struct BitcoinFlowGen {
 
 impl BitcoinFlowGen {
     pub fn new(
-        id: NodeId,
         node_list: Vec<NodeId>,
         num_accounts: usize,
         max_inflight: usize,
@@ -50,7 +49,7 @@ impl BitcoinFlowGen {
         let mut utxos = HashMap::new();
         for node in node_list.iter() {
             for i in 0..accounts_per_node as u64 {
-                let seed = ((id as u128) << 64) | i as u128;
+                let seed = ((*node as u128) << 64) | i as u128;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
                 utxos
                     .entry(*node)

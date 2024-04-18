@@ -13,7 +13,6 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
-use tokio::time::{Duration, Instant};
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -55,10 +54,7 @@ pub struct AvalancheDecision {
     votes: HashMap<(NodeId, u64), (usize, Vec<usize>)>,
     preference_cache: HashMap<Hash, bool>,
     // blocks ready to be committed
-    commit_queue: Vec<Hash>,
-    commit_count: u64,
-    batch_emission_time: Instant,
-    batch_emission_timeout: Duration,
+    commit_queue: VecDeque<(u64, Vec<Hash>)>,
     _notify: Notify,
     // for p2p comm
     peer_messenger: Arc<PeerMessenger>,
@@ -66,6 +62,9 @@ pub struct AvalancheDecision {
     sk: PrivKey,
     // control loop
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
+    // statistics for debugging
+    is_strongly_preferred_calls: usize,
+    is_preferred_checks: usize,
 }
 
 impl AvalancheDecision {
@@ -78,7 +77,6 @@ impl AvalancheDecision {
     ) -> Self {
         // pk can be generated deterministically on demand
         let (_, sk) = crypto_scheme.gen_key_pair(id.into());
-        let batch_emission_timeout = Duration::from_secs_f64(config.commit_timeout_secs);
         let vote_thresh = (config.k as f64 * config.alpha).ceil() as usize;
         pf_info!(id; "vote threshold is {}", vote_thresh);
 
@@ -97,23 +95,19 @@ impl AvalancheDecision {
             finished_query: HashSet::new(),
             votes: HashMap::new(),
             preference_cache: HashMap::new(),
-            commit_queue: vec![],
-            commit_count: 0,
-            batch_emission_time: Instant::now() + batch_emission_timeout,
-            batch_emission_timeout,
+            commit_queue: VecDeque::new(),
             _notify: Notify::new(),
             peer_messenger,
             neighbor_pks: HashMap::new(),
             sk,
             pmaker_feedback_send,
+            is_strongly_preferred_calls: 0,
+            is_preferred_checks: 0,
         }
     }
 
     fn is_preferred(&self, txn_hash: &Hash) -> bool {
-        let txn = match self.txn_pool.get(txn_hash) {
-            Some((txn, _)) => txn,
-            None => return false,
-        };
+        let (txn, _) = self.txn_pool.get(txn_hash).unwrap();
 
         let avax_txn = match txn.as_ref() {
             Txn::Avalanche { txn } => txn,
@@ -170,10 +164,13 @@ impl AvalancheDecision {
     // }
 
     fn is_strongly_preferred(&mut self, txn_hash: &Hash) -> bool {
+        self.is_strongly_preferred_calls += 1;
+
         let mut frontier = VecDeque::new();
         frontier.push_back(txn_hash);
 
         while let Some(hash) = frontier.pop_front() {
+            self.is_preferred_checks += 1;
             // first check if the txn is already accpeted
             let parents = match self.txn_dag.get(hash) {
                 Some(parents) => parents,
@@ -229,6 +226,7 @@ impl AvalancheDecision {
                 Some(txns) => txns,
                 None => return Ok(()), // if the batch has not yet been received or if the batch is already committed
             };
+            let mut txns_to_be_committed = vec![];
 
             let (_, accept_votes) = self.votes.remove(&blk_id).unwrap();
             assert!(txns.len() == accept_votes.len());
@@ -346,7 +344,7 @@ impl AvalancheDecision {
                                 avax_txn,
                                 AvalancheTxn::Grant { .. } | AvalancheTxn::Send { .. }
                             ) {
-                                self.commit_queue.push(next_txn);
+                                txns_to_be_committed.push(next_txn);
                             }
                         }
                     }
@@ -382,6 +380,8 @@ impl AvalancheDecision {
                 }
             }
 
+            self.commit_queue
+                .push_back((blk_id.1, txns_to_be_committed));
             // send to pmaker a batch is voted
             self.pmaker_feedback_send.send(vec![]).await?;
         }
@@ -584,22 +584,18 @@ impl Decision for AvalancheDecision {
         if self.commit_queue.len() == 0 {
             self._notify.notified().await; // sleep forever
             pf_error!(self.id; "decide stage waking up unexpectedly");
-        } else {
-            tokio::time::sleep_until(self.batch_emission_time).await;
         }
         Ok(())
     }
 
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
-        let txns: Vec<Arc<Txn>> = self
-            .commit_queue
-            .drain(0..)
+        let (blk_id, txn_hashes) = self.commit_queue.pop_front().unwrap();
+        let txns: Vec<Arc<Txn>> = txn_hashes
+            .into_iter()
             .map(|hash| self.txn_pool.get(&hash).unwrap().0.clone())
             .collect();
         pf_debug!(self.id; "committing {} txns", txns.len());
-        self.commit_count += 1;
-        self.batch_emission_time = Instant::now() + self.batch_emission_timeout;
-        Ok((self.commit_count, txns))
+        Ok((blk_id, txns))
     }
 
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError> {
@@ -621,5 +617,11 @@ impl Decision for AvalancheDecision {
         }
 
         Ok(())
+    }
+
+    fn report(&mut self) {
+        pf_info!(self.id; "In the last minute: is_strongly_preferred_calls: {}, is_preferred_checks: {}", self.is_strongly_preferred_calls, self.is_preferred_checks);
+        self.is_strongly_preferred_calls = 0;
+        self.is_preferred_checks = 0;
     }
 }

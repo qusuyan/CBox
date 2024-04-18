@@ -141,7 +141,6 @@ pub fn main() {
             };
 
         let mut flow_gen = get_flow_gen(
-            id,
             vec![id],
             args.accounts,
             args.max_inflight,

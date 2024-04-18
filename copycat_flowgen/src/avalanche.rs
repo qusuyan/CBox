@@ -4,10 +4,8 @@ use copycat::protocol::transaction::{AvalancheTxn, Txn};
 use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
 
 use async_trait::async_trait;
-use mailbox::MachineId;
 use rand::Rng;
 
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
@@ -15,8 +13,8 @@ use tokio::time::{Duration, Instant};
 const UNSET: usize = 0;
 const MAX_BATCH_FREQ: usize = 1;
 
-struct ChainInfo {
-    chain_length: u64,
+struct DagInfo {
+    num_blks: u64,
     txn_count: HashMap<u64, u64>,
     total_committed: u64, // includes false commits
 }
@@ -31,13 +29,12 @@ pub struct AvalancheFlowGen {
     accounts: HashMap<NodeId, Vec<(PubKey, PrivKey)>>,
     in_flight: HashMap<Hash, Instant>,
     num_completed_txns: u64,
-    chain_info: HashMap<NodeId, ChainInfo>,
+    dag_info: HashMap<NodeId, DagInfo>,
     total_time_sec: f64,
 }
 
 impl AvalancheFlowGen {
     pub fn new(
-        id: MachineId,
         node_list: Vec<NodeId>,
         num_accounts: usize,
         max_inflight: usize,
@@ -51,7 +48,7 @@ impl AvalancheFlowGen {
         let mut utxos = HashMap::new();
         for node in node_list.iter() {
             for i in 0..accounts_per_node as u64 {
-                let seed = ((id as u128) << 64) | i as u128;
+                let seed = ((*node as u128) << 64) | i as u128;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
                 utxos
                     .entry(*node)
@@ -64,11 +61,10 @@ impl AvalancheFlowGen {
             }
         }
 
-        let batch_frequency = MAX_BATCH_FREQ;
-        let batch_size = if frequency == UNSET {
-            max_inflight
+        let (batch_size, batch_frequency) = if frequency == UNSET {
+            (max_inflight, UNSET)
         } else {
-            frequency / MAX_BATCH_FREQ
+            (frequency / MAX_BATCH_FREQ, MAX_BATCH_FREQ)
         };
 
         Self {
@@ -82,7 +78,7 @@ impl AvalancheFlowGen {
             in_flight: HashMap::new(),
             num_completed_txns: 0,
             total_time_sec: 0.0,
-            chain_info: HashMap::new(),
+            dag_info: HashMap::new(),
         }
     }
 }
@@ -195,21 +191,16 @@ impl FlowGen for AvalancheFlowGen {
         blk_height: u64,
     ) -> Result<(), CopycatError> {
         // avoid counting blocks that are
-        let chain_info = match self.chain_info.entry(node) {
-            Entry::Occupied(e) => e.into_mut(),
-            Entry::Vacant(e) => e.insert(ChainInfo {
-                chain_length: 0,
-                txn_count: HashMap::new(),
-                total_committed: 0,
-            }),
-        };
+        let chain_info = self.dag_info.entry(node).or_insert(DagInfo {
+            num_blks: 0,
+            txn_count: HashMap::new(),
+            total_committed: 0,
+        });
 
-        assert!(blk_height <= chain_info.chain_length + 1); // make sure we are not skipping over some parents
-        for height in blk_height..chain_info.chain_length + 1 {
-            chain_info.txn_count.remove(&height);
+        if let Some(_) = chain_info.txn_count.insert(blk_height, txns.len() as u64) {
+        } else {
+            chain_info.num_blks += 1;
         }
-        chain_info.txn_count.insert(blk_height, txns.len() as u64);
-        chain_info.chain_length = blk_height + 1;
         chain_info.total_committed += txns.len() as u64;
 
         for txn in txns {
@@ -217,7 +208,14 @@ impl FlowGen for AvalancheFlowGen {
             let hash = txn_ctx.id;
             let start_time = match self.in_flight.remove(&hash) {
                 Some(time) => time,
-                None => continue, // unrecognized txn, possibly generated from another node
+                None => {
+                    // if let Txn::Avalanche { txn: avax_txn } = txn.as_ref() {
+                    //     if matches!(avax_txn, AvalancheTxn::Send { .. }) {
+                    //         log::warn!("unrecognized txn");
+                    //     }
+                    // }
+                    continue;
+                } // unrecognized txn, possibly generated from another node
             };
 
             let commit_latency = Instant::now() - start_time;
@@ -235,15 +233,15 @@ impl FlowGen for AvalancheFlowGen {
             self.total_time_sec / self.num_completed_txns as f64
         };
         let (num_committed, chain_length, acc_commit_confidence) = self
-            .chain_info
+            .dag_info
             .values()
             .map(|info| {
-                let num_committed = (1..info.chain_length)
-                    .map(|height| info.txn_count.get(&height).unwrap())
+                let num_committed = (1..info.num_blks)
+                    .map(|height| info.txn_count.get(&height).unwrap_or(&0))
                     .sum();
                 (
                     num_committed,
-                    info.chain_length,
+                    info.num_blks,
                     num_committed as f64 / info.total_committed as f64,
                 )
             })
@@ -255,10 +253,10 @@ impl FlowGen for AvalancheFlowGen {
                 )
             })
             .unwrap_or((0, 0, 0f64));
-        let commit_confidence = if self.chain_info.len() == 0 {
+        let commit_confidence = if self.dag_info.len() == 0 {
             1f64
         } else {
-            acc_commit_confidence / self.chain_info.len() as f64
+            acc_commit_confidence / self.dag_info.len() as f64
         };
         Stats {
             latency,

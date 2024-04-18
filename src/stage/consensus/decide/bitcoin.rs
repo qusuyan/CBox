@@ -135,4 +135,6 @@ impl Decision for BitcoinDecision {
     ) -> Result<(), CopycatError> {
         unreachable!("Bitcoin consensus can be done locally")
     }
+
+    fn report(&mut self) {}
 }

@@ -8,7 +8,6 @@ use avalanche::AvalancheFlowGen;
 
 use async_trait::async_trait;
 use copycat::{transaction::Txn, ChainType, CopycatError, CryptoScheme, NodeId};
-use mailbox::MachineId;
 
 use std::sync::Arc;
 
@@ -34,7 +33,6 @@ pub trait FlowGen {
 }
 
 pub fn get_flow_gen(
-    id: MachineId,
     node_list: Vec<NodeId>,
     num_accounts: usize,
     max_inflight: usize,
@@ -44,7 +42,6 @@ pub fn get_flow_gen(
 ) -> Box<dyn FlowGen> {
     match chain {
         ChainType::Bitcoin => Box::new(BitcoinFlowGen::new(
-            id,
             node_list,
             num_accounts,
             max_inflight,
@@ -52,7 +49,6 @@ pub fn get_flow_gen(
             crypto,
         )),
         ChainType::Avalanche => Box::new(AvalancheFlowGen::new(
-            id,
             node_list,
             num_accounts,
             max_inflight,
