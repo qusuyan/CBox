@@ -4,10 +4,13 @@ num_iterations = 1
 [parameters]
 chain-type = "avalanche"
 cluster-threads = 32
+config = "k=3"
+disable-txn-dissem = true
 dissem = "sample"
 exp-time = 200
 frequency = 0
 max-inflight-txns = 100000
-num-accounts = 100
-num-machines = 10
-num-nodes = 10
+num-accounts = 800
+num-machines = 2
+num-nodes = 12
+txn-span = 1

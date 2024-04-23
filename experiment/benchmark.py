@@ -95,7 +95,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         cluster.copy_to(addr, "bench_topo.json", f'{cluster.workdir}/bench_topo.json')
 
     # compute 
-    num_flow_gen = 1 if params["disable-txn-dissem"] else params["num-machines"] if params["single-process-cluster"] else params["num-nodes"]
+    num_flow_gen = 1 if params["disable-txn-dissem"] else params["num-machines"]
     num_accounts = int(params["num-accounts"] / num_flow_gen)
     max_inflight = int(params["max-inflight-txns"] / num_flow_gen)
     frequency = int(params["frequency"] / num_flow_gen)
@@ -161,14 +161,14 @@ if __name__ == "__main__":
         "node-threads": 8,
         "mailbox-threads": 8,
         "cluster-threads": 40,
-        "network-delay": 150, # in millis
-        "network-bw": 25000000, # in B/s
+        "network-delay": 70, # in millis
+        "network-bw": 100000000, # in B/s
         "chain-type": "bitcoin",
         "exp-time": 300, # in s
         "num-accounts": 10000,
         "max-inflight-txns": 100000,
         "frequency": 0,
-        "txn-span": 0,
+        "txn-span": 1,
         "config": "",
         "topo-degree": 3,
         "topo-skewness": 0.0, # uniform

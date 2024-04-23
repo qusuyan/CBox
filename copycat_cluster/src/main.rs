@@ -35,6 +35,10 @@ struct CliArgs {
     #[clap(long, short = 't', default_value_t = 8)]
     num_threads: u64,
 
+    /// Number of concurrent TCP streams between each pair of peers
+    #[clap(long, short = 'o', default_value_t = 1)]
+    num_conn_per_peer: usize,
+
     /// The type of blockchain
     #[arg(long, short = 'c', value_enum, default_value = "dummy")]
     chain: ChainType,
@@ -227,7 +231,7 @@ fn main() {
 
     runtime.block_on(async {
         // start mailbox
-        let _mailbox = match Mailbox::init(id, machine_list, pipe_info).await {
+        let _mailbox = match Mailbox::init(id, machine_list, pipe_info, args.num_conn_per_peer).await {
             Ok(mailbox) => mailbox,
             Err(e) => {
                 log::error!("Mailbox initialization failed with error {:?}", e);
