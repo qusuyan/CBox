@@ -1,7 +1,7 @@
 use super::BlockManagement;
 
+use crate::context::{BlkCtx, TxnCtx};
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
 
@@ -27,13 +27,17 @@ impl DummyBlockManagement {
 
 #[async_trait]
 impl BlockManagement for DummyBlockManagement {
-    async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError> {
+    async fn record_new_txn(
+        &mut self,
+        txn: Arc<Txn>,
+        _ctx: Arc<TxnCtx>,
+    ) -> Result<bool, CopycatError> {
         self.mem_pool.push(txn);
         Ok(true)
     }
 
-    async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
-        Ok(())
+    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
+        Ok(true)
     }
 
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
@@ -47,30 +51,37 @@ impl BlockManagement for DummyBlockManagement {
         }
     }
 
-    async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError> {
+    async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
         let new_block = Arc::new(Block {
             header: BlockHeader::Dummy,
             txns: self.mem_pool.clone(),
         });
         self.mem_pool.clear();
-        Ok(new_block)
+        let blk_ctx = Arc::new(BlkCtx::from_blk(&new_block)?);
+        Ok((new_block, blk_ctx))
     }
 
-    async fn validate_block(&mut self, block: Arc<Block>) -> Result<Vec<Arc<Block>>, CopycatError> {
-        Ok(vec![block])
+    async fn validate_block(
+        &mut self,
+        block: Arc<Block>,
+        ctx: Arc<BlkCtx>,
+    ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
+        Ok(vec![(block, ctx)])
     }
 
-    async fn handle_pmaker_msg(&mut self, _msg: Arc<Vec<u8>>) -> Result<(), CopycatError> {
+    async fn handle_pmaker_msg(&mut self, _msg: Vec<u8>) -> Result<(), CopycatError> {
         Ok(())
     }
 
     async fn handle_peer_blk_req(
         &mut self,
         _peer: NodeId,
-        _blk_id: Hash,
+        _msg: Vec<u8>,
     ) -> Result<(), CopycatError> {
         unimplemented!()
     }
+
+    fn report(&mut self) {}
 
     // async fn handle_peer_blk_resp(
     //     &mut self,

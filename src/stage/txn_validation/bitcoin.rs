@@ -1,5 +1,6 @@
 use super::TxnValidation;
-use crate::protocol::crypto::{sha256, Hash};
+use crate::context::TxnCtx;
+use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::{BitcoinTxn, Txn};
 use crate::protocol::CryptoScheme;
 use crate::utils::CopycatError;
@@ -25,7 +26,7 @@ impl BitcoinTxnValidation {
 
 #[async_trait]
 impl TxnValidation for BitcoinTxnValidation {
-    async fn validate(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError> {
+    async fn validate(&mut self, txn: Arc<Txn>) -> Result<Option<Arc<TxnCtx>>, CopycatError> {
         let bitcoin_txn = match txn.as_ref() {
             Txn::Bitcoin { txn } => txn,
             _ => unreachable!(),
@@ -39,19 +40,19 @@ impl TxnValidation for BitcoinTxnValidation {
                 ..
             } => (sender, in_utxo, sender_signature),
             BitcoinTxn::Grant { .. } => {
-                let hash = sha256(&bincode::serialize(&txn)?)?;
-                self.txns_pool.insert(hash, txn);
-                return Ok(true);
+                let txn_ctx = TxnCtx::from_txn(&txn)?;
+                self.txns_pool.insert(txn_ctx.id, txn);
+                return Ok(Some(Arc::new(txn_ctx)));
             }
-            BitcoinTxn::Incentive { .. } => return Ok(false),
+            BitcoinTxn::Incentive { .. } => return Ok(None),
         };
 
-        let serialized_txn = bincode::serialize(&txn)?;
-        let hash = sha256(&serialized_txn)?;
+        let txn_ctx = TxnCtx::from_txn(&txn)?;
+        let hash = txn_ctx.id;
 
         if self.txns_pool.get(&hash) != None {
             // txn has already been seem, ignoring...
-            return Ok(false);
+            return Ok(None);
         }
 
         // first check if the signature is valid
@@ -61,11 +62,11 @@ impl TxnValidation for BitcoinTxnValidation {
             .verify(txn_sender, &serialized_in_txo, txn_sender_signature)
             .await?
         {
-            return Ok(false);
+            return Ok(None);
         }
 
         self.txns_pool.insert(hash.clone(), txn);
 
-        Ok(true)
+        Ok(Some(Arc::new(txn_ctx)))
     }
 }

@@ -2,8 +2,9 @@ use mailbox::Mailbox;
 
 use copycat::log::colored_level;
 use copycat::Node;
-use copycat::{fully_connected_topology, get_flow_gen, get_topology};
+use copycat::{fully_connected_topology, get_topology};
 use copycat::{ChainType, Config, CryptoScheme, DissemPattern};
+use copycat_flowgen::get_flow_gen;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -11,8 +12,6 @@ use std::io::Write;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
-
-use rand::{seq::IteratorRandom, thread_rng};
 
 use clap::Parser;
 
@@ -94,10 +93,10 @@ impl CliArgs {
         //     self.accounts = 10000
         // }
 
-        if self.disable_txn_dissem && self.txn_span > 0 {
-            log::warn!("currently does not support sending flow generation to different nodes when transaction dissemination is disabled");
-            self.txn_span = 0;
-        }
+        // if self.disable_txn_dissem && self.txn_span > 0 {
+        //     log::warn!("currently does not support sending flow generation to different nodes when transaction dissemination is disabled");
+        //     self.txn_span = 0;
+        // }
 
         if matches!(self.chain, ChainType::Avalanche)
             && !matches!(self.dissem_pattern, DissemPattern::Sample)
@@ -193,6 +192,20 @@ fn main() {
 
     // get flow generation metrics
     let txn_span = args.txn_span;
+    let mut req_dsts = HashMap::new();
+    for idx in 0..local_nodes.len() {
+        let dsts = if txn_span == 0 {
+            local_nodes.clone()
+        } else {
+            let mut dsts = vec![];
+            for offset in 0..txn_span {
+                dsts.push(local_nodes[(idx + offset) % local_nodes.len()]);
+            }
+            dsts
+        };
+        req_dsts.insert(local_nodes[idx], dsts);
+    }
+
     let max_inflight = args.max_inflight;
     let frequency = args.frequency;
     let num_accounts = args.accounts;
@@ -213,8 +226,6 @@ fn main() {
         .expect("Creating new runtime failed");
 
     runtime.block_on(async {
-        let mut rng = thread_rng();
-
         // start mailbox
         let _mailbox = match Mailbox::init(id, machine_list, pipe_info).await {
             Ok(mailbox) => mailbox,
@@ -269,7 +280,7 @@ fn main() {
 
         // run flowgen
         let mut flow_gen = get_flow_gen(
-            id,
+            local_nodes,
             num_accounts,
             max_inflight,
             frequency,
@@ -278,12 +289,9 @@ fn main() {
         );
         let init_txns = flow_gen.setup_txns().await.unwrap();
 
-        for txn in init_txns {
-            let receiving_nodes = if txn_span == 0 {
-                node_map.iter().collect()
-            } else {
-                node_map.iter().choose_multiple(&mut rng, txn_span)
-            };
+        for (dst_node, txn) in init_txns {
+            let receiving_node_ids = req_dsts.get(&dst_node).unwrap();
+            let receiving_nodes = receiving_node_ids.iter().map(|node_id| (node_id, node_map.get(node_id).unwrap()));
             for (id, node) in receiving_nodes {
                 if let Err(e) = node.send_req(txn.clone()).await {
                     log::error!("failed to send setup txns to node {id}: {e}");
@@ -298,6 +306,7 @@ fn main() {
         // wait when setup txns are propogated over the network
         tokio::time::sleep(Duration::from_secs(10)).await;
         log::info!("flow generation starts");
+        let mut txns_sent = 0;
 
         loop {
             tokio::select! {
@@ -307,23 +316,24 @@ fn main() {
                         continue;
                     }
 
-                    let next_req = match flow_gen.next_txn().await {
-                        Ok(txn) => txn,
+                    let next_req_batch = match flow_gen.next_txn_batch().await {
+                        Ok(txns) => txns,
                         Err(e) => {
                             log::error!("get available request failed: {e:?}");
                             continue;
                         }
                     };
 
-                    let receiving_nodes = if txn_span == 0 {
-                        node_map.iter().collect()
-                    } else {
-                        node_map.iter().choose_multiple(&mut rng, txn_span)
-                    };
-                    for (id, node) in receiving_nodes {
-                        if let Err(e) = node.send_req(next_req.clone()).await {
-                            log::error!("sending next request to node {id} failed: {e:?}");
-                            return;
+                    txns_sent += next_req_batch.len();
+
+                    for (dst_node, next_req) in next_req_batch.into_iter() {
+                        let receiving_node_ids = req_dsts.get(&dst_node).unwrap();
+                        let receiving_nodes = receiving_node_ids.iter().map(|node_id| (node_id, node_map.get(node_id).unwrap()));
+                        for (id, node) in receiving_nodes {
+                            if let Err(e) = node.send_req(next_req.clone()).await {
+                                log::error!("sending next request to node {id} failed: {e:?}");
+                                return;
+                            }
                         }
                     }
                 }
@@ -358,6 +368,8 @@ fn main() {
                     stats_file
                         .write_fmt(format_args!("{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence))
                         .expect("write stats failed");
+                    log::info!("In the last minute: txns_sent: {}", txns_sent);
+                    txns_sent = 0;
                     report_time += Duration::from_secs(60);
                 }
             }

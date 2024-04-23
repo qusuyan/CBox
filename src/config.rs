@@ -34,7 +34,7 @@ pub struct AvalancheConfig {
     pub beta1: u64,
     pub beta2: u64,
     pub proposal_timeout_secs: f64,
-    pub commit_timeout_secs: f64,
+    pub max_inflight_blk: usize,
 }
 
 // https://arxiv.org/pdf/1906.08936.pdf
@@ -47,7 +47,7 @@ impl Default for AvalancheConfig {
             beta1: 11,
             beta2: 150,
             proposal_timeout_secs: 5.0,
-            commit_timeout_secs: 5.0,
+            max_inflight_blk: 40, // 40 * blk_len ~ 1800 txns / blk (bitcoin)
         }
     }
 }
@@ -60,7 +60,7 @@ impl Config {
                 config: parsed_config!(input => BitcoinConfig; difficulty, commit_depth, compute_power)?,
             }),
             ChainType::Avalanche => Ok(Config::Avalanche {
-                config: parsed_config!(input => AvalancheConfig; blk_len, k, alpha, beta1, beta2, proposal_timeout_secs)?,
+                config: parsed_config!(input => AvalancheConfig; blk_len, k, alpha, beta1, beta2, proposal_timeout_secs, max_inflight_blk)?,
             }),
         }
     }

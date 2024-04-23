@@ -3,8 +3,8 @@
 
 echo $@
 
-export RUST_LOG=debug
-export RUST_BACKTRACE=1
+export RUST_LOG=info
+export RUST_BACKTRACE=full
 
 BUILDTYPE=$1
 ID=$2
@@ -34,3 +34,4 @@ fi
     -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} -d ${DISSEM} \
     -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} \
     ${DISABLE_TXN_DISSEM} ${CONFIG_ARG} --topology bench_topo.json
+    

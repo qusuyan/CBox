@@ -7,14 +7,15 @@ required-packages = ["python3"]
 home-runner = []
 
 [make-targets]
+install-perf = []
 install-rust = []
-setup-copycat = [["branch", "main"], ["build_type", "release"]]
+setup-copycat = [["branch", "main"], ["buildtype", "release"]]
 setup-mailbox = [["branch", "main"]]
 
 [run-targets]
 cleanup = []
 cluster = [
-  ["build_type", "release"],
+  ["buildtype", "release"],
   ["id", "@POS"],
   ["threads", "32"],
   ["chain_type", "bitcoin"],
@@ -27,9 +28,9 @@ cluster = [
   ["config", ""],
 ]
 date = []
-mailbox = [["build_type", "release"], ["id", "@POS"], ["threads", "8"]]
+mailbox = [["buildtype", "release"], ["id", "@POS"], ["threads", "8"]]
 node = [
-  ["build_type", "release"],
+  ["buildtype", "release"],
   ["machine_id", "@POS"],
   ["local_id", "0"],
   ["threads", "8"],

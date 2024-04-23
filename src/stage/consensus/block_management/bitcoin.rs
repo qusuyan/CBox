@@ -1,9 +1,10 @@
 use super::BlockManagement;
 use crate::config::BitcoinConfig;
+use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::{sha256, DummyMerkleTree, Hash, PubKey};
+use crate::protocol::crypto::{DummyMerkleTree, Hash, PubKey};
 use crate::protocol::transaction::{BitcoinTxn, Txn};
 use crate::protocol::{CryptoScheme, MsgType};
 use crate::utils::{CopycatError, NodeId};
@@ -25,8 +26,8 @@ const HEADER_HASH_TIME: f64 = 0.0000019;
 pub struct BitcoinBlockManagement {
     id: NodeId,
     crypto_scheme: CryptoScheme,
-    txn_pool: HashMap<Hash, Arc<Txn>>,
-    block_pool: HashMap<Hash, (Arc<Block>, u64)>,
+    txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
+    block_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>, u64)>,
     utxo: HashSet<(Hash, PubKey)>,
     chain_tail: Hash,
     difficulty: u8, // hash has at most 256 bits
@@ -78,7 +79,7 @@ impl BitcoinBlockManagement {
         if self.chain_tail.is_zero() {
             0u64
         } else {
-            let (_, chain_tail_height) = self.block_pool.get(&self.chain_tail).unwrap();
+            let (_, _, chain_tail_height) = self.block_pool.get(&self.chain_tail).unwrap();
             *chain_tail_height
         }
     }
@@ -89,7 +90,7 @@ impl BitcoinBlockManagement {
                 let mut longest_tail = block_hash;
                 let mut longest_tail_height = height;
                 for child in children {
-                    self.block_pool.get_mut(&child).unwrap().1 = height + 1;
+                    self.block_pool.get_mut(&child).unwrap().2 = height + 1;
                     let (new_decendant, new_decendant_height) =
                         self.update_orphans_and_return_tail(child, height + 1);
                     if new_decendant_height > longest_tail_height {
@@ -138,7 +139,7 @@ impl BitcoinBlockManagement {
                     // first check that input transactions exists, we can check for double spend later as a block
                     // add values together to find total input value
                     let utxo = match self.txn_pool.get(in_utxo_hash) {
-                        Some(txn) => match txn.as_ref() {
+                        Some((txn, _)) => match txn.as_ref() {
                             Txn::Bitcoin { txn } => txn,
                             _ => unreachable!(),
                         },
@@ -196,8 +197,12 @@ impl BitcoinBlockManagement {
 
 #[async_trait]
 impl BlockManagement for BitcoinBlockManagement {
-    async fn record_new_txn(&mut self, txn: Arc<Txn>) -> Result<bool, CopycatError> {
-        let txn_hash = sha256(&bincode::serialize(txn.as_ref())?)?;
+    async fn record_new_txn(
+        &mut self,
+        txn: Arc<Txn>,
+        ctx: Arc<TxnCtx>,
+    ) -> Result<bool, CopycatError> {
+        let txn_hash = ctx.id;
         // ignore duplicate txns
         if self.txn_pool.contains_key(&txn_hash) {
             return Ok(false);
@@ -212,31 +217,31 @@ impl BlockManagement for BitcoinBlockManagement {
             return Ok(false);
         }
 
-        self.txn_pool.insert(txn_hash.clone(), txn.clone());
+        self.txn_pool.insert(txn_hash.clone(), (txn, ctx));
         self.pending_txns.push_back(txn_hash);
         Ok(true)
     }
 
-    async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
+    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
         let start_time = Instant::now();
 
         let mut modified = false;
         let mut execution_delay = Duration::from_secs(0);
 
         // if block is not full yet, try adding new txns
-        loop {
+        let blk_full = loop {
             // block is large enough
             if self.block_size > 0x100000 {
-                break;
+                break true;
             }
 
             let txn_hash = match self.pending_txns.pop_front() {
                 Some(hash) => hash,
-                None => break, // no pending transactions
+                None => break false, // no pending transactions
             };
 
             // check for double spending
-            let txn = self.txn_pool.get(&txn_hash).unwrap();
+            let (txn, _) = self.txn_pool.get(&txn_hash).unwrap();
             match txn.as_ref() {
                 Txn::Bitcoin { txn: bitcoin_txn } => match bitcoin_txn {
                     BitcoinTxn::Send {
@@ -300,7 +305,7 @@ impl BlockManagement for BitcoinBlockManagement {
                 },
                 _ => unreachable!(),
             };
-        }
+        };
 
         tokio::time::sleep(execution_delay).await;
 
@@ -315,7 +320,7 @@ impl BlockManagement for BitcoinBlockManagement {
             pf_debug!(self.id; "preparing new block takes {:?}, execution delay is {:?}", runtime, execution_delay);
         }
 
-        Ok(())
+        Ok(blk_full)
     }
 
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
@@ -328,27 +333,28 @@ impl BlockManagement for BitcoinBlockManagement {
         }
     }
 
-    async fn get_new_block(&mut self) -> Result<Arc<Block>, CopycatError> {
+    async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
         // TODO: add incentive txn
-        let txns: Vec<Arc<Txn>> = self
+        let txns_with_ctx: Vec<(Arc<Txn>, Arc<TxnCtx>)> = self
             .block_under_construction
             .drain(0..)
             .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone())
             .collect();
-        let block = Arc::new(Block {
-            header: BlockHeader::Bitcoin {
-                prev_hash: self.chain_tail.clone(),
-                merkle_root: self.merkle_root.clone().unwrap().0, // TODO
-                nonce: 1, // use nonce = 1 to indicate valid pow
-            },
-            txns,
-        });
+        let txns = txns_with_ctx.iter().map(|(txn, _)| txn.clone()).collect();
+        let txn_ctxs = txns_with_ctx.into_iter().map(|(_, ctx)| ctx).collect();
 
-        let serialized = &bincode::serialize(&block.header)?;
-        let hash = sha256(&serialized)?;
+        let header = BlockHeader::Bitcoin {
+            prev_hash: self.chain_tail.clone(),
+            merkle_root: self.merkle_root.clone().unwrap().0, // TODO
+            nonce: 1,                                         // use nonce = 1 to indicate valid pow
+        };
+        let block_ctx = Arc::new(BlkCtx::from_header_and_txns(&header, txn_ctxs)?);
+        let hash = block_ctx.id;
+        let block = Arc::new(Block { header, txns });
+
         let chain_length = self.get_chain_length();
         self.block_pool
-            .insert(hash.clone(), (block.clone(), chain_length + 1));
+            .insert(hash, (block.clone(), block_ctx.clone(), chain_length + 1));
         self.chain_tail = hash;
 
         for utxo in self.new_utxo.drain() {
@@ -376,12 +382,15 @@ impl BlockManagement for BitcoinBlockManagement {
         self.pow_time = None;
         self.block_size = 0;
 
-        Ok(block)
+        Ok((block, block_ctx))
     }
 
-    async fn validate_block(&mut self, block: Arc<Block>) -> Result<Vec<Arc<Block>>, CopycatError> {
-        let serialized = bincode::serialize(&block.header)?;
-        let block_hash = sha256(&serialized)?;
+    async fn validate_block(
+        &mut self,
+        block: Arc<Block>,
+        blk_ctx: Arc<BlkCtx>,
+    ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
+        let block_hash = blk_ctx.id;
         if self.block_pool.contains_key(&block_hash) {
             // duplicate, do nothing
             return Ok(vec![]);
@@ -403,6 +412,41 @@ impl BlockManagement for BitcoinBlockManagement {
             return Ok(vec![]); // invalid POW
         }
 
+        // validate txns
+        assert!(block.txns.len() == blk_ctx.txn_ctx.len());
+        for idx in 0..block.txns.len() {
+            let txn = &block.txns[idx];
+            let txn_ctx = &blk_ctx.txn_ctx[idx];
+            let txn_hash = txn_ctx.id;
+            let bitcoin_txn = match txn.as_ref() {
+                Txn::Bitcoin { txn } => txn,
+                _ => unreachable!(),
+            };
+
+            // validate transaction
+            if !self.txn_pool.contains_key(&txn_hash) {
+                if let BitcoinTxn::Send {
+                    sender,
+                    in_utxo,
+                    sender_signature,
+                    ..
+                } = bitcoin_txn
+                {
+                    let serialized_in_utxo = bincode::serialize(in_utxo)?;
+                    if !self
+                        .crypto_scheme
+                        .verify(sender, &serialized_in_utxo, sender_signature)
+                        .await?
+                    {
+                        return Ok(vec![]);
+                    }
+                }
+                if !self.validate_txn(bitcoin_txn)? {
+                    return Ok(vec![]);
+                }
+            };
+        }
+
         // merkle root verification
         let merkle_tree = DummyMerkleTree(merkle_root.clone());
         if !merkle_tree.verify(block.txns.len()).await? {
@@ -414,7 +458,7 @@ impl BlockManagement for BitcoinBlockManagement {
             1u64
         } else {
             match self.block_pool.get(prev_hash) {
-                Some((_, parent_height)) => {
+                Some((_, _, parent_height)) => {
                     if *parent_height > 0 {
                         parent_height + 1
                     } else {
@@ -424,8 +468,9 @@ impl BlockManagement for BitcoinBlockManagement {
                 None => 0,
             }
         };
+
         self.block_pool
-            .insert(block_hash.clone(), (block.clone(), blk_height));
+            .insert(block_hash.clone(), (block.clone(), blk_ctx, blk_height));
 
         if blk_height == 0 {
             // we are missing an ancestor, adding it to orphan blocks
@@ -442,7 +487,7 @@ impl BlockManagement for BitcoinBlockManagement {
             let mut parent = prev_hash;
             loop {
                 assert!(!parent.is_zero());
-                if let Some((block, height)) = self.block_pool.get(parent) {
+                if let Some((block, _, height)) = self.block_pool.get(parent) {
                     assert!(*height == 0);
                     parent = match &block.header {
                         BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
@@ -455,9 +500,13 @@ impl BlockManagement for BitcoinBlockManagement {
 
             pf_debug!(self.id; "block {} arrived early, still waiting for its ancestor {}", block_hash, parent);
             // request the missing ancestor from peers
+            let mut buf = [0u8; 32];
+            parent.to_little_endian(&mut buf);
             self.peer_messenger
                 .gossip(
-                    MsgType::BlockReq { blk_id: *parent },
+                    MsgType::BlockReq {
+                        msg: Vec::from(buf),
+                    },
                     HashSet::from([self.id]),
                 )
                 .await?;
@@ -467,7 +516,7 @@ impl BlockManagement for BitcoinBlockManagement {
         // there might be decendants of this block update child heights and use them as new chain tail
         let (new_tail, new_tail_height) =
             self.update_orphans_and_return_tail(block_hash, blk_height);
-        let (new_tail_block, _) = self.block_pool.get(&new_tail).unwrap();
+        let (new_tail_block, new_tail_ctx, _) = self.block_pool.get(&new_tail).unwrap();
         let new_tail_parent = match &new_tail_block.header {
             BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
             _ => unreachable!(),
@@ -485,13 +534,14 @@ impl BlockManagement for BitcoinBlockManagement {
         }
 
         // find blocks belonging to the diverging chain up to the common ancestor
-        let mut new_chain: Vec<Arc<Block>> = vec![new_tail_block.clone()];
+        let mut new_chain: Vec<(Arc<Block>, Arc<BlkCtx>)> =
+            vec![(new_tail_block.clone(), new_tail_ctx.clone())];
         let mut new_tail_ancester = new_tail_parent;
         let mut new_tail_ancester_height = new_tail_height - 1;
         while new_tail_ancester_height > chain_length {
-            let (parent, parent_height) = self.block_pool.get(new_tail_ancester).unwrap();
+            let (parent, ctx, parent_height) = self.block_pool.get(new_tail_ancester).unwrap();
             assert!(new_tail_ancester_height == *parent_height);
-            new_chain.push(parent.clone());
+            new_chain.push((parent.clone(), ctx.clone()));
             new_tail_ancester = match &parent.header {
                 BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
                 _ => unreachable!(),
@@ -500,21 +550,21 @@ impl BlockManagement for BitcoinBlockManagement {
         }
 
         // find the old tail
-        let mut old_chain: Vec<Arc<Block>> = vec![];
+        let mut old_chain: Vec<(Arc<Block>, Arc<BlkCtx>)> = vec![];
         let mut old_tail_ancester = &self.chain_tail;
         loop {
             if new_tail_ancester == old_tail_ancester {
                 // found a common ancester, break
                 break;
             }
-            let (new_tail_parent, new_tail_parent_height) =
+            let (new_tail_parent, new_tail_ctx, new_tail_parent_height) =
                 self.block_pool.get(new_tail_ancester).unwrap();
-            let (old_tail_parent, old_tail_parent_height) =
+            let (old_tail_parent, old_tail_ctx, old_tail_parent_height) =
                 self.block_pool.get(old_tail_ancester).unwrap();
             assert!(new_tail_parent_height == old_tail_parent_height);
 
-            new_chain.push(new_tail_parent.clone());
-            old_chain.push(old_tail_parent.clone());
+            new_chain.push((new_tail_parent.clone(), new_tail_ctx.clone()));
+            old_chain.push((old_tail_parent.clone(), old_tail_ctx.clone()));
 
             new_tail_ancester = match &new_tail_parent.header {
                 BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
@@ -530,11 +580,13 @@ impl BlockManagement for BitcoinBlockManagement {
         let mut undo_utxo_spent: HashSet<(Hash, PubKey)> = HashSet::new();
         let mut undo_new_utxo: HashSet<(Hash, PubKey)> = HashSet::new();
         let mut undo_txns: HashSet<Hash> = HashSet::new();
-        for undo_blk in old_chain {
+        for (undo_blk, undo_blk_ctx) in old_chain {
             // add old tail parent to undo set
-            for txn in undo_blk.txns.iter().rev() {
-                // undo_txns.push(txn.clone());
-                let txn_hash = sha256(&bincode::serialize(txn)?)?;
+            assert!(undo_blk.txns.len() == undo_blk_ctx.txn_ctx.len());
+            for idx in (0..undo_blk.txns.len()).rev() {
+                let txn = &undo_blk.txns[idx];
+                let txn_ctx = &undo_blk_ctx.txn_ctx[idx];
+                let txn_hash = txn_ctx.id;
                 match txn.as_ref() {
                     Txn::Bitcoin { txn } => match txn {
                         BitcoinTxn::Send {
@@ -583,39 +635,16 @@ impl BlockManagement for BitcoinBlockManagement {
         let mut new_utxos = undo_utxo_spent;
         let mut utxos_spent = undo_new_utxo;
         let mut txns_applied: HashSet<Hash> = HashSet::new();
-        for new_block in new_chain.iter() {
-            for txn in new_block.txns.iter() {
-                let txn_hash = sha256(&bincode::serialize(txn)?)?;
+        for (new_block, new_block_ctx) in new_chain.iter() {
+            assert!(new_block.txns.len() == new_block_ctx.txn_ctx.len());
+            for idx in 0..new_block.txns.len() {
+                let txn = &new_block.txns[idx];
+                let txn_ctx = &new_block_ctx.txn_ctx[idx];
+                let txn_hash = txn_ctx.id;
                 let bitcoin_txn = match txn.as_ref() {
                     Txn::Bitcoin { txn } => txn,
                     _ => unreachable!(),
                 };
-
-                // validate transaction
-                if !self.txn_pool.contains_key(&txn_hash) {
-                    if let BitcoinTxn::Send {
-                        sender,
-                        in_utxo,
-                        sender_signature,
-                        ..
-                    } = bitcoin_txn
-                    {
-                        let serialized_in_utxo = bincode::serialize(in_utxo)?;
-                        if !self
-                            .crypto_scheme
-                            .verify(sender, &serialized_in_utxo, sender_signature)
-                            .await?
-                        {
-                            tokio::time::sleep(total_exec_time).await;
-                            return Ok(vec![]);
-                        }
-                    }
-                    if !self.validate_txn(bitcoin_txn)? {
-                        tokio::time::sleep(total_exec_time).await;
-                        return Ok(vec![]);
-                    }
-                    self.txn_pool.insert(txn_hash.clone(), txn.clone());
-                }
 
                 // check for double spending
                 if let BitcoinTxn::Send {
@@ -701,7 +730,7 @@ impl BlockManagement for BitcoinBlockManagement {
         Ok(new_chain)
     }
 
-    async fn handle_pmaker_msg(&mut self, msg: Arc<Vec<u8>>) -> Result<(), CopycatError> {
+    async fn handle_pmaker_msg(&mut self, msg: Vec<u8>) -> Result<(), CopycatError> {
         if msg.len() == 0 {
             return Err(CopycatError(String::from(
                 "got empty message from pacemaker",
@@ -714,17 +743,14 @@ impl BlockManagement for BitcoinBlockManagement {
     async fn handle_peer_blk_req(
         &mut self,
         peer: NodeId,
-        blk_id: Hash,
+        msg: Vec<u8>,
     ) -> Result<(), CopycatError> {
         // only return the req if the block is known
-        if let Some((blk, _)) = self.block_pool.get(&blk_id) {
+        let blk_id = U256::from_little_endian(&msg);
+        if let Some((blk, _, _)) = self.block_pool.get(&blk_id) {
             self.peer_messenger
                 .send(
                     peer,
-                    // MsgType::BlockResp {
-                    //     id: blk_id,
-                    //     blk: blk.as_ref().clone(),
-                    // },
                     MsgType::NewBlock {
                         blk: blk.as_ref().clone(),
                     },
@@ -733,6 +759,8 @@ impl BlockManagement for BitcoinBlockManagement {
         }
         Ok(())
     }
+
+    fn report(&mut self) {}
 
     //     async fn handle_peer_blk_resp(
     //         &mut self,

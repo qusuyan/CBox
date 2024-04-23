@@ -1,4 +1,5 @@
 use super::TxnValidation;
+use crate::context::TxnCtx;
 use crate::protocol::transaction::Txn;
 use crate::utils::CopycatError;
 
@@ -16,7 +17,7 @@ impl DummyTxnValidation {
 
 #[async_trait]
 impl TxnValidation for DummyTxnValidation {
-    async fn validate(&mut self, _txn: Arc<Txn>) -> Result<bool, CopycatError> {
-        Ok(true)
+    async fn validate(&mut self, txn: Arc<Txn>) -> Result<Option<Arc<TxnCtx>>, CopycatError> {
+        Ok(Some(Arc::new(TxnCtx::from_txn(&txn)?)))
     }
 }

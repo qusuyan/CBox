@@ -342,9 +342,21 @@ dependencies = [
  "chrono",
  "clap",
  "copycat",
+ "copycat_flowgen",
  "env_logger",
  "log",
  "mailbox",
+ "tokio",
+]
+
+[[package]]
+name = "copycat_flowgen"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bincode",
+ "copycat",
+ "log",
  "rand",
  "tokio",
 ]
@@ -368,6 +380,7 @@ dependencies = [
  "bincode",
  "clap",
  "copycat",
+ "copycat_flowgen",
  "env_logger",
  "get-size",
  "lazy_static",

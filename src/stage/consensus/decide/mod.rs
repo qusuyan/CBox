@@ -5,6 +5,7 @@ use bitcoin::BitcoinDecision;
 mod avalanche;
 use avalanche::AvalancheDecision;
 
+use crate::context::BlkCtx;
 use crate::protocol::block::Block;
 use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
@@ -22,15 +23,12 @@ pub trait Decision: Sync + Send {
     async fn new_tail(
         &mut self,
         src: NodeId,
-        new_tail: Vec<Arc<Block>>,
+        new_tail: Vec<(Arc<Block>, Arc<BlkCtx>)>,
     ) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
-    async fn handle_peer_msg(
-        &mut self,
-        src: NodeId,
-        content: Arc<Vec<u8>>,
-    ) -> Result<(), CopycatError>;
+    async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError>;
+    fn report(&mut self);
 }
 
 fn get_decision(
@@ -38,6 +36,7 @@ fn get_decision(
     crypto_scheme: CryptoScheme,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
+    pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
 ) -> Box<dyn Decision> {
     match config {
         Config::Dummy => Box::new(DummyDecision::new()),
@@ -47,6 +46,7 @@ fn get_decision(
             crypto_scheme,
             config,
             peer_messenger,
+            pmaker_feedback_send,
         )),
     }
 }
@@ -56,13 +56,20 @@ pub async fn decision_thread(
     crypto_scheme: CryptoScheme,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    mut peer_consensus_recv: mpsc::Receiver<(NodeId, Arc<Vec<u8>>)>,
-    mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<Arc<Block>>)>,
+    mut peer_consensus_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
+    mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
+    pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
 ) {
     pf_info!(id; "decision stage starting...");
 
-    let mut decision_stage = get_decision(id, crypto_scheme, config, peer_messenger);
+    let mut decision_stage = get_decision(
+        id,
+        crypto_scheme,
+        config,
+        peer_messenger,
+        pmaker_feedback_send,
+    );
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
     let mut blks_sent = 0;
@@ -82,7 +89,7 @@ pub async fn decision_thread(
                 };
 
                 pf_debug!(id; "got new chain tail from {}: {:?}", src, new_tail);
-                for blk in new_tail.iter() {
+                for (blk, _) in new_tail.iter() {
                     blks_recv += 1;
                     txns_recv += blk.txns.len();
                 }
@@ -133,6 +140,7 @@ pub async fn decision_thread(
             },
             _ = tokio::time::sleep_until(report_timeout) => {
                 pf_info!(id; "In the last minute: blks_recv: {}, txns_recv: {}, blks_sent: {}, txns_sent: {}", blks_recv, txns_recv, blks_sent, txns_sent);
+                decision_stage.report();
                 blks_recv = 0;
                 txns_recv = 0;
                 blks_sent = 0;
