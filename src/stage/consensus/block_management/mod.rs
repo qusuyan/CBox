@@ -87,7 +87,7 @@ pub async fn block_management_thread(
 
     let mut block_management_stage = get_blk_creation(id, config, crypto_scheme, peer_messenger);
 
-    let batch_prepare_timeout = Duration::from_millis(10);
+    let batch_prepare_timeout = Duration::from_millis(1);
     let mut batch_prepare_time = Instant::now() + batch_prepare_timeout;
     let mut is_blk_full = false;
 
