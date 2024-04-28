@@ -11,12 +11,13 @@ ID=$2
 THREADS=$3
 CHAIN_TYPE=$4
 DISSEM=$5
-ACCOUNTS=$6
-MAX_INFLIGHT=$7
-FREQUENCY=$8
-TXN_SPAN=$9
-DISABLE_TXN_DISSEM=${10}
-CONFIG=${11}
+CONN_MULTIPLY=$6
+ACCOUNTS=$7
+MAX_INFLIGHT=$8
+FREQUENCY=$9
+TXN_SPAN=${10}
+DISABLE_TXN_DISSEM=${11}
+CONFIG=${12}
 
 if [[ $CONFIG == "" ]]; then
     CONFIG_ARG=""
@@ -24,14 +25,14 @@ else
     CONFIG_ARG="--config ${CONFIG}"
 fi
 
-if [[ $DISABLE_TXN_DISSEM == "false" ]]; then
+if [[ $DISABLE_TXN_DISSEM == "False" ]]; then
     DISABLE_TXN_DISSEM=""
 else
     DISABLE_TXN_DISSEM="--disable-txn-dissem"
 fi
 
-perf record -F 20 --call-graph dwarf ./blockchain_copycat/target/debug/copycat_cluster -i ${ID} -t ${THREADS} \
-    -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} -d ${DISSEM} \
+./blockchain_copycat/target/${BUILDTYPE}/copycat_cluster -i ${ID} -t ${THREADS} \
+    -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} -d ${DISSEM} -o ${CONN_MULTIPLY} \
     -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} \
     ${DISABLE_TXN_DISSEM} ${CONFIG_ARG} --topology bench_topo.json
     

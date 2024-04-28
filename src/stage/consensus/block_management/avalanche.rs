@@ -202,8 +202,8 @@ impl BlockManagement for AvalancheBlockManagement {
 
         let mut in_frontier = true;
         for parent in parents.iter() {
-            if let Some(siblings) = self.txn_dag.get_mut(parent) {
-                siblings.children.insert(txn_hash);
+            if let Some(parent_node) = self.txn_dag.get_mut(parent) {
+                parent_node.children.insert(txn_hash);
                 in_frontier = false;
             }
         }
@@ -226,7 +226,11 @@ impl BlockManagement for AvalancheBlockManagement {
                 None => break false,
             };
 
-            let node = self.txn_dag.remove(&next_txn).unwrap();
+            let node = match self.txn_dag.remove(&next_txn) {
+                Some(node) => node,
+                None => continue,
+            };
+
             for child in node.children {
                 let child_node = match self.txn_dag.get_mut(&child) {
                     Some(node) => node,
@@ -323,15 +327,20 @@ impl BlockManagement for AvalancheBlockManagement {
                 // txn has been validated before
                 filtered_txns.push(txn.clone());
                 blk_txn_ctx.push(txn_ctx.clone());
+                if let Some(dag_node) = self.txn_dag.get(&txn_hash) {
+                    if dag_node.num_parents == 0 {
+                        self.dag_frontier.push_front(txn_hash);
+                    }
+                }
                 continue;
             }
 
-            // I have not seen this txn before, adding to txn_pool and txn_dag so that it will get proposed later
             let avax_txn = match txn.as_ref() {
                 Txn::Avalanche { txn } => txn,
                 _ => unreachable!(),
             };
 
+            // I have not seen this txn before, adding to txn_pool and txn_dag so that it will get proposed later
             let (txn, txn_ctx) = match avax_txn {
                 AvalancheTxn::Noop { .. } | AvalancheTxn::PlaceHolder => {
                     // if noop txn, bypass all tests since it is just used to drive consensus

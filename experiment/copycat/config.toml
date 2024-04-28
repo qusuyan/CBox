@@ -20,6 +20,7 @@ cluster = [
   ["threads", "32"],
   ["chain_type", "bitcoin"],
   ["dissem", "broadcast"],
+  ["conn_multiply", "1"],
   ["accounts", "10000"],
   ["max_inflight", "100000"],
   ["frequency", "0"],
