@@ -37,3 +37,6 @@ interprocess = ["mailbox_client/interprocess"]
 [patch.'ssh://git@github.com/qusuyan/mailbox.git']
 mailbox = {path = "../mailbox"}
 mailbox_client = {path = "../mailbox/mailbox_client"}
+
+[profile.release]
+debug = "line-tables-only"
