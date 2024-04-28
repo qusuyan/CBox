@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
 const UNSET: usize = 0;
-const MAX_BATCH_FREQ: usize = 1;
+const MAX_BATCH_FREQ: usize = 20;
 
 struct ChainInfo {
     chain_length: u64,
@@ -62,11 +62,12 @@ impl BitcoinFlowGen {
             }
         }
 
-        let batch_frequency = MAX_BATCH_FREQ;
-        let batch_size = if frequency == UNSET {
-            max_inflight
+        let (batch_size, batch_frequency) = if frequency == UNSET {
+            (max_inflight, UNSET)
+        } else if frequency < MAX_BATCH_FREQ {
+            (1, frequency)
         } else {
-            frequency / MAX_BATCH_FREQ
+            (frequency / MAX_BATCH_FREQ, MAX_BATCH_FREQ)
         };
 
         Self {

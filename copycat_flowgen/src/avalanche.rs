@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
 const UNSET: usize = 0;
-const MAX_BATCH_FREQ: usize = 1;
+const MAX_BATCH_FREQ: usize = 20; // 20 batches per sec max, or 1 batch every 50 ms
 
 struct DagInfo {
     num_blks: u64,
@@ -63,6 +63,8 @@ impl AvalancheFlowGen {
 
         let (batch_size, batch_frequency) = if frequency == UNSET {
             (max_inflight, UNSET)
+        } else if frequency < MAX_BATCH_FREQ {
+            (1, frequency)
         } else {
             (frequency / MAX_BATCH_FREQ, MAX_BATCH_FREQ)
         };
