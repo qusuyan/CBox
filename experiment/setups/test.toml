@@ -8,7 +8,7 @@ config = "blk_len=40+max_inflight_blk=30"
 conn_multiply = 20
 dissem = "sample"
 exp-time = 320
-frequency = 0
+frequency = 10000
 max-inflight-txns = 100000
 num-accounts = 800
 num-machines = 10

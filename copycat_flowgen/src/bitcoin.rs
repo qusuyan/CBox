@@ -24,6 +24,7 @@ pub struct BitcoinFlowGen {
     max_inflight: usize,
     batch_frequency: usize,
     batch_size: usize,
+    next_batch_time: Instant,
     crypto: CryptoScheme,
     node_list: Vec<NodeId>,
     utxos: HashMap<NodeId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
@@ -74,6 +75,7 @@ impl BitcoinFlowGen {
             max_inflight,
             batch_frequency,
             batch_size,
+            next_batch_time: Instant::now(),
             crypto,
             node_list,
             utxos,
@@ -111,14 +113,8 @@ impl FlowGen for BitcoinFlowGen {
     async fn wait_next(&self) -> Result<(), CopycatError> {
         loop {
             if self.max_inflight == UNSET || self.in_flight.len() < self.max_inflight {
-                if self.batch_frequency != UNSET {
-                    // poisson interarrival time
-                    let interarrival_time = {
-                        let mut rng = rand::thread_rng();
-                        let u: f64 = rng.gen();
-                        -(1f64 - u).ln() / self.batch_frequency as f64
-                    };
-                    tokio::time::sleep(Duration::from_secs_f64(interarrival_time)).await
+                if Instant::now() < self.next_batch_time {
+                    tokio::time::sleep_until(self.next_batch_time).await;
                 }
                 return Ok(());
             }
@@ -187,6 +183,16 @@ impl FlowGen for BitcoinFlowGen {
 
             self.in_flight.insert(txn_hash, Instant::now());
             batch.push((node, txn));
+        }
+
+        if self.batch_frequency != UNSET {
+            // poisson interarrival time
+            let interarrival_time = {
+                let mut rng = rand::thread_rng();
+                let u: f64 = rng.gen();
+                -(1f64 - u).ln() / self.batch_frequency as f64
+            };
+            self.next_batch_time = Instant::now() + Duration::from_secs_f64(interarrival_time);
         }
         Ok(batch)
     }
