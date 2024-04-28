@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
 const UNSET: usize = 0;
-const MAX_BATCH_FREQ: usize = 20; // 20 batches per sec max, or 1 batch every 50 ms
+const MAX_BATCH_FREQ: usize = 100; // 100 batches per sec max, or 1 batch every 10 ms
 
 struct DagInfo {
     num_blks: u64,
