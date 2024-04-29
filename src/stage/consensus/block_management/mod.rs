@@ -100,42 +100,34 @@ pub async fn block_management_thread(
     let mut peer_blks_recv = 0;
     let mut peer_txns_recv = 0;
 
-    let (pending_blk_sender, mut pending_blk_recver) =
-        mpsc::channel::<(NodeId, Arc<Block>, Arc<BlkCtx>)>(0x100000);
+    let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
 
     loop {
         tokio::select! {
-            biased;
-
-            _ = tokio::time::sleep_until(report_timeout) => {
-                pf_info!(id; "In the last minute: txns_recv: {}, peer_blks_recv: {}, peer_txns_recv: {}", txns_recv, peer_blks_recv, peer_txns_recv);
-                pf_info!(id; "In the last minute: self_blks_sent: {}, self_txns_sent: {}, peer_blks_sent: {}, peer_txns_sent: {}", self_blks_sent, self_txns_sent, peer_blks_sent, peer_txns_sent);
-                block_management_stage.report();
-                txns_recv = 0;
-                self_blks_sent = 0;
-                self_txns_sent = 0;
-                peer_blks_sent = 0;
-                peer_txns_sent = 0;
-                peer_blks_recv = 0;
-                peer_txns_recv = 0;
-                report_timeout = Instant::now() + Duration::from_secs(60);
-            }
-
-            pmaker_msg = pacemaker_recv.recv() => {
-                match pmaker_msg {
-                    Some(msg) => {
-                        pf_debug!(id; "got pmaker msg");
-                        if let Err(e) = block_management_stage.handle_pmaker_msg(msg).await {
-                            pf_error!(id; "failed to handle pacemaker message: {:?}", e);
+            new_txn = txn_ready_recv.recv() => {
+                match new_txn {
+                    Some((txn, ctx)) => {
+                        pf_trace!(id; "got new txn {:?} {:?}", ctx, txn);
+                        txns_recv += 1;
+                        if let Err(e) = block_management_stage.record_new_txn(txn, ctx).await {
+                            pf_error!(id; "failed to record new txn: {:?}", e);
                             continue;
                         }
                     },
                     None => {
-                        pf_error!(id; "pacemaker pipe closed unexpectedly");
+                        pf_error!(id; "txn_ready pipe closed unexpectedly");
                         return;
                     }
                 }
-            }
+            },
+
+            _ = tokio::time::sleep_until(batch_prepare_time), if !is_blk_full => {
+                match block_management_stage.prepare_new_block().await {
+                    Ok(blk_full) => is_blk_full = blk_full,
+                    Err(e) => pf_error!(id; "failed to prepare new block: {:?}", e),
+                }
+                batch_prepare_time = Instant::now() + batch_prepare_timeout;
+            },
 
             wait_result = block_management_stage.wait_to_propose() => {
                 if let Err(e) = wait_result {
@@ -161,13 +153,37 @@ pub async fn block_management_thread(
                 }
             },
 
-            _ = tokio::time::sleep_until(batch_prepare_time), if !is_blk_full => {
-                match block_management_stage.prepare_new_block().await {
-                    Ok(blk_full) => is_blk_full = blk_full,
-                    Err(e) => pf_error!(id; "failed to prepare new block: {:?}", e),
-                }
-                batch_prepare_time = Instant::now() + batch_prepare_timeout;
-            },
+            peer_blk = peer_blk_recv.recv() => {
+                let (src, new_block) = match peer_blk {
+                    Some((src, blk)) => {
+                        if src == id {
+                            // ignore blocks proposed by myself
+                            continue;
+                        }
+                        (src, blk)
+                    }
+                    None => {
+                        pf_error!(id; "peer_blk pipe closed unexpectedly");
+                        return;
+                    }
+                };
+
+                pf_debug!(id; "got from {} new block {:?}, computing its context...", src, new_block);
+
+                let blk_sender = pending_blk_sender.clone();
+                tokio::task::spawn(async move {
+                    let blk_ctx = match BlkCtx::from_blk(&new_block) {
+                        Ok(ctx) => ctx,
+                        Err(e) => {
+                            pf_error!(id; "failed to compute blk_context: {:?}", e);
+                            return;
+                        }
+                    };
+                    if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
+                        pf_error!(id; "failed to send blk_context: {:?}", e);
+                    }
+                });
+            }
 
             peer_blk_with_ctx = pending_blk_recver.recv() => {
                 let (src, peer_blk, peer_blk_ctx) = match peer_blk_with_ctx {
@@ -202,54 +218,21 @@ pub async fn block_management_thread(
                     }
             }
 
-            peer_blk = peer_blk_recv.recv() => {
-                let (src, new_block) = match peer_blk {
-                    Some((src, blk)) => {
-                        if src == id {
-                            // ignore blocks proposed by myself
-                            continue;
-                        }
-                        (src, blk)
-                    }
-                    None => {
-                        pf_error!(id; "peer_blk pipe closed unexpectedly");
-                        return;
-                    }
-                };
-
-                pf_debug!(id; "got from {} new block {:?}, computing its context...", src, new_block);
-
-                let blk_sender = pending_blk_sender.clone();
-                tokio::task::spawn(async move {
-                    let blk_ctx = match BlkCtx::from_blk(&new_block) {
-                        Ok(ctx) => ctx,
-                        Err(e) => {
-                            pf_error!(id; "failed to compute blk_context: {:?}", e);
-                            return;
-                        }
-                    };
-                    if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
-                        pf_error!(id; "failed to send blk_context: {:?}", e);
-                    }
-                });
-            }
-
-            new_txn = txn_ready_recv.recv() => {
-                match new_txn {
-                    Some((txn, ctx)) => {
-                        pf_trace!(id; "got new txn {:?} {:?}", ctx, txn);
-                        txns_recv += 1;
-                        if let Err(e) = block_management_stage.record_new_txn(txn, ctx).await {
-                            pf_error!(id; "failed to record new txn: {:?}", e);
+            pmaker_msg = pacemaker_recv.recv() => {
+                match pmaker_msg {
+                    Some(msg) => {
+                        pf_debug!(id; "got pmaker msg");
+                        if let Err(e) = block_management_stage.handle_pmaker_msg(msg).await {
+                            pf_error!(id; "failed to handle pacemaker message: {:?}", e);
                             continue;
                         }
                     },
                     None => {
-                        pf_error!(id; "txn_ready pipe closed unexpectedly");
+                        pf_error!(id; "pacemaker pipe closed unexpectedly");
                         return;
                     }
                 }
-            },
+            }
 
             req = peer_blk_req_recv.recv() => {
                 match req {
@@ -266,6 +249,21 @@ pub async fn block_management_thread(
                     }
                 }
             }
+
+            _ = tokio::time::sleep_until(report_timeout) => {
+                pf_info!(id; "In the last minute: txns_recv: {}, peer_blks_recv: {}, peer_txns_recv: {}", txns_recv, peer_blks_recv, peer_txns_recv);
+                pf_info!(id; "In the last minute: self_blks_sent: {}, self_txns_sent: {}, peer_blks_sent: {}, peer_txns_sent: {}", self_blks_sent, self_txns_sent, peer_blks_sent, peer_txns_sent);
+                block_management_stage.report();
+                txns_recv = 0;
+                self_blks_sent = 0;
+                self_txns_sent = 0;
+                peer_blks_sent = 0;
+                peer_txns_sent = 0;
+                peer_blks_recv = 0;
+                peer_txns_recv = 0;
+                report_timeout = Instant::now() + Duration::from_secs(60);
+            }
+
             // resp = peer_blk_resp_recv.recv() => {
             //     match resp {
             //         Some((src, (id, block))) => {
