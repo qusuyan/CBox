@@ -4,7 +4,7 @@ num_iterations = 1
 [parameters]
 chain-type = "avalanche"
 cluster-threads = 32
-config = "blk_len=40+max_inflight_blk=30"
+config = "blk_len=40"
 conn_multiply = 20
 dissem = "sample"
 exp-time = 320

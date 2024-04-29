@@ -16,6 +16,7 @@ pub struct Stats {
     pub num_committed: u64,
     pub chain_length: u64,
     pub commit_confidence: f64,
+    pub inflight_txns: usize,
 }
 
 #[async_trait]

@@ -274,6 +274,7 @@ impl FlowGen for BitcoinFlowGen {
             num_committed,
             chain_length,
             commit_confidence,
+            inflight_txns: self.in_flight.len(),
         }
     }
 }

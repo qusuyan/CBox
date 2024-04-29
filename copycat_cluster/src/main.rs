@@ -372,7 +372,7 @@ fn main() {
                     stats_file
                         .write_fmt(format_args!("{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence))
                         .expect("write stats failed");
-                    log::info!("In the last minute: txns_sent: {}", txns_sent);
+                    log::info!("In the last minute: txns_sent: {}, inflight_txns: {}", txns_sent, stats.inflight_txns);
                     txns_sent = 0;
                     report_time += Duration::from_secs(60);
                 }
