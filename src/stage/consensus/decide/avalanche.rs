@@ -621,6 +621,7 @@ impl Decision for AvalancheDecision {
 
     fn report(&mut self) {
         pf_info!(self.id; "In the last minute: is_strongly_preferred_calls: {}, is_preferred_checks: {}", self.is_strongly_preferred_calls, self.is_preferred_checks);
+        pf_info!(self.id; "working set size: txn_dag: {}, perference_cache: {}", self.txn_dag.len(), self.preference_cache.len());
         self.is_strongly_preferred_calls = 0;
         self.is_preferred_checks = 0;
     }
