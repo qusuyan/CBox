@@ -306,11 +306,13 @@ fn main() {
 
         log::info!("setup txns sent");
         let start_time = Instant::now();
-        let mut report_time = start_time + Duration::from_secs(60);
+        let report_interval = 60f64;
+        let mut report_time = start_time + Duration::from_secs_f64(report_interval);
         // wait when setup txns are propogated over the network
         tokio::time::sleep(Duration::from_secs(10)).await;
         log::info!("flow generation starts");
         let mut txns_sent = 0;
+        let mut prev_committed = 0;
 
         loop {
             tokio::select! {
@@ -360,7 +362,8 @@ fn main() {
                 _ = tokio::time::sleep_until(report_time) => {
                     let stats = flow_gen.get_stats();
                     let run_time =  (report_time - start_time).as_secs_f64();
-                    let tput = stats.num_committed as f64 / run_time;
+                    let newly_committed = stats.num_committed - prev_committed;
+                    let tput = newly_committed as f64 / report_interval;
                     log::info!(
                         "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit confidence: {}",
                         run_time,
@@ -374,7 +377,8 @@ fn main() {
                         .expect("write stats failed");
                     log::info!("In the last minute: txns_sent: {}, inflight_txns: {}", txns_sent, stats.inflight_txns);
                     txns_sent = 0;
-                    report_time += Duration::from_secs(60);
+                    prev_committed = stats.num_committed;
+                    report_time += Duration::from_secs_f64(report_interval);
                 }
             }
         }

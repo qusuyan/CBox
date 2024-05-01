@@ -4,7 +4,15 @@ num_iterations = 1
 [parameters]
 chain-type = "avalanche"
 cluster-threads = 32
-config = "blk_len=40"
+config = [
+  "blk_len=40+max_inflight_blk=30",
+  "blk_len=40+max_inflight_blk=40",
+  "blk_len=40+max_inflight_blk=50",
+  "blk_len=20+max_inflight_blk=60",
+  "blk_len=20+max_inflight_blk=70",
+  "blk_len=20+max_inflight_blk=80",
+  "blk_len=20+max_inflight_blk=90",
+]
 conn_multiply = 20
 dissem = "sample"
 exp-time = 320
@@ -12,5 +20,5 @@ frequency = 10000
 max-inflight-txns = 100000
 num-accounts = 800
 num-machines = 10
-num-nodes = 50
+num-nodes = [10, 20, 30, 40, 50, 60, 70, 80, 90]
 txn-span = 1

@@ -142,11 +142,14 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
                 files.append((addr, stats_file))
     print(files)
 
-    stats = { "tput": 0 }
+    stats = { "peak_tput": 0 }
+    cumulative_tput = 0
     for (addr, stats_file) in files:
         cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
         df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
-        stats["tput"] = max(stats["tput"], df.iloc[-1]['Throughput (txn/s)'])
+        stats["peak_tput"] = max(stats["peak_tput"], df.loc[:, 'Throughput (txn/s)'].max())
+        cumulative_tput += df.loc[:, 'Throughput (txn/s)'].mean()
+    stats["avg_tput"] = cumulative_tput / len(files)
 
     with open(f"./results/{exp_name}/stats.json", "w") as f:
         json.dump(stats, f, indent=2)
