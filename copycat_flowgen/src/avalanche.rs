@@ -102,12 +102,12 @@ impl FlowGen for AvalancheFlowGen {
             for (account, utxos) in utxo_map.iter_mut() {
                 let txn = Txn::Avalanche {
                     txn: AvalancheTxn::Grant {
-                        out_utxo: 100,
+                        out_utxo: 20,
                         receiver: *account,
                     },
                 };
                 let txn_ctx = TxnCtx::from_txn(&txn)?;
-                utxos.push_back((txn_ctx.id, 100));
+                utxos.push_back((txn_ctx.id, 20));
                 txns.push((*node, Arc::new(txn)));
             }
         }
