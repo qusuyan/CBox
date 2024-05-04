@@ -103,7 +103,7 @@ impl FlowGen for BitcoinFlowGen {
             for (account, utxos) in utxo_map.iter_mut() {
                 let txn = Txn::Bitcoin {
                     txn: BitcoinTxn::Grant {
-                        out_utxo: 100,
+                        out_utxo: 20,
                         receiver: *account,
                     },
                 };

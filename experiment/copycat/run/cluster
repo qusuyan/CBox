@@ -33,6 +33,6 @@ fi
 
 ./blockchain_copycat/target/${BUILDTYPE}/copycat_cluster -i ${ID} -t ${THREADS} \
     -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} -d ${DISSEM} -o ${CONN_MULTIPLY} \
-    -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} \
+    -l 1 -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} \
     ${DISABLE_TXN_DISSEM} ${CONFIG_ARG} --topology bench_topo.json
     
