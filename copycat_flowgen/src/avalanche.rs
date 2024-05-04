@@ -1,10 +1,12 @@
 use super::{FlowGen, Stats};
+use crate::ClientId;
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{AvalancheTxn, Txn};
 use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
 
 use async_trait::async_trait;
 use rand::Rng;
+use tokio::sync::Notify;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -25,38 +27,42 @@ pub struct AvalancheFlowGen {
     batch_size: usize,
     next_batch_time: Instant,
     crypto: CryptoScheme,
-    node_list: Vec<NodeId>,
-    utxos: HashMap<NodeId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
-    accounts: HashMap<NodeId, Vec<(PubKey, PrivKey)>>,
+    client_list: Vec<ClientId>,
+    utxos: HashMap<ClientId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
+    accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
     in_flight: HashMap<Hash, Instant>,
     num_completed_txns: u64,
     dag_info: HashMap<NodeId, DagInfo>,
     total_time_sec: f64,
+    _notify: Notify,
 }
 
 impl AvalancheFlowGen {
     pub fn new(
-        node_list: Vec<NodeId>,
+        client_list: Vec<ClientId>,
         num_accounts: usize,
         max_inflight: usize,
         frequency: usize,
         crypto: CryptoScheme,
     ) -> Self {
-        let accounts_per_node = num_accounts / node_list.len();
-        assert!(accounts_per_node > 1);
+        let accounts_per_node = if client_list.len() == 0 {
+            0
+        } else {
+            num_accounts / client_list.len()
+        };
 
         let mut accounts = HashMap::new();
         let mut utxos = HashMap::new();
-        for node in node_list.iter() {
+        for client in client_list.iter() {
             for i in 0..accounts_per_node as u64 {
-                let seed = ((*node as u128) << 64) | i as u128;
+                let seed = ((*client as u128) << 64) | i as u128;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
                 utxos
-                    .entry(*node)
+                    .entry(*client)
                     .or_insert(HashMap::new())
                     .insert(pubkey.clone(), VecDeque::new());
                 accounts
-                    .entry(*node)
+                    .entry(*client)
                     .or_insert(vec![])
                     .push((pubkey, privkey));
             }
@@ -76,20 +82,21 @@ impl AvalancheFlowGen {
             batch_size,
             next_batch_time: Instant::now(),
             crypto,
-            node_list,
+            client_list,
             utxos,
             accounts,
             in_flight: HashMap::new(),
             num_completed_txns: 0,
             total_time_sec: 0.0,
             dag_info: HashMap::new(),
+            _notify: Notify::new(),
         }
     }
 }
 
 #[async_trait]
 impl FlowGen for AvalancheFlowGen {
-    async fn setup_txns(&mut self) -> Result<Vec<(NodeId, Arc<Txn>)>, CopycatError> {
+    async fn setup_txns(&mut self) -> Result<Vec<(ClientId, Arc<Txn>)>, CopycatError> {
         let mut txns = Vec::new();
         for (node, utxo_map) in self.utxos.iter_mut() {
             for (account, utxos) in utxo_map.iter_mut() {
@@ -109,6 +116,11 @@ impl FlowGen for AvalancheFlowGen {
     }
 
     async fn wait_next(&self) -> Result<(), CopycatError> {
+        // do nothing if no client
+        if self.client_list.len() == 0 {
+            self._notify.notified().await;
+        }
+
         loop {
             if self.max_inflight == UNSET || self.in_flight.len() < self.max_inflight {
                 if Instant::now() < self.next_batch_time {
@@ -120,7 +132,7 @@ impl FlowGen for AvalancheFlowGen {
         }
     }
 
-    async fn next_txn_batch(&mut self) -> Result<Vec<(NodeId, Arc<Txn>)>, CopycatError> {
+    async fn next_txn_batch(&mut self) -> Result<Vec<(ClientId, Arc<Txn>)>, CopycatError> {
         let mut batch = vec![];
         let batch_size = if self.max_inflight == UNSET {
             self.batch_size
@@ -128,7 +140,7 @@ impl FlowGen for AvalancheFlowGen {
             std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len())
         };
         for _ in 0..batch_size {
-            let node = self.node_list[rand::random::<usize>() % self.node_list.len()];
+            let node = self.client_list[rand::random::<usize>() % self.client_list.len()];
             let accounts = self.accounts.get(&node).unwrap();
             let utxos = self.utxos.get_mut(&node).unwrap();
 

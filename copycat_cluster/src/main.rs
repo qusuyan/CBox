@@ -51,6 +51,10 @@ struct CliArgs {
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
     crypto: CryptoScheme,
 
+    /// Number of clients
+    #[arg(long, short = 'l')]
+    num_clients: Option<usize>,
+
     /// Number of user accounts for flow generation
     #[arg(long, short = 'a', default_value = "10000")]
     accounts: usize,
@@ -196,8 +200,12 @@ fn main() {
 
     // get flow generation metrics
     let txn_span = args.txn_span;
+    let client_list: Vec<u64> = match args.num_clients {
+        Some(clients) => (0..clients as u64).collect(),
+        None => (0..local_nodes.len() as u64).collect(),
+    };
     let mut req_dsts = HashMap::new();
-    for idx in 0..local_nodes.len() {
+    for idx in 0..client_list.len() {
         let dsts = if txn_span == 0 {
             local_nodes.clone()
         } else {
@@ -207,7 +215,7 @@ fn main() {
             }
             dsts
         };
-        req_dsts.insert(local_nodes[idx], dsts);
+        req_dsts.insert(client_list[idx], dsts);
     }
 
     let max_inflight = args.max_inflight;
@@ -284,7 +292,7 @@ fn main() {
 
         // run flowgen
         let mut flow_gen = get_flow_gen(
-            local_nodes,
+            client_list,
             num_accounts,
             max_inflight,
             frequency,
@@ -293,8 +301,8 @@ fn main() {
         );
         let init_txns = flow_gen.setup_txns().await.unwrap();
 
-        for (dst_node, txn) in init_txns {
-            let receiving_node_ids = req_dsts.get(&dst_node).unwrap();
+        for (client_id, txn) in init_txns {
+            let receiving_node_ids = req_dsts.get(&client_id).unwrap();
             let receiving_nodes = receiving_node_ids.iter().map(|node_id| (node_id, node_map.get(node_id).unwrap()));
             for (id, node) in receiving_nodes {
                 if let Err(e) = node.send_req(txn.clone()).await {
@@ -332,8 +340,8 @@ fn main() {
 
                     txns_sent += next_req_batch.len();
 
-                    for (dst_node, next_req) in next_req_batch.into_iter() {
-                        let receiving_node_ids = req_dsts.get(&dst_node).unwrap();
+                    for (client_id, next_req) in next_req_batch.into_iter() {
+                        let receiving_node_ids = req_dsts.get(&client_id).unwrap();
                         let receiving_nodes = receiving_node_ids.iter().map(|node_id| (node_id, node_map.get(node_id).unwrap()));
                         for (id, node) in receiving_nodes {
                             if let Err(e) = node.send_req(next_req.clone()).await {
