@@ -292,6 +292,7 @@ fn main() {
 
         // run flowgen
         let mut flow_gen = get_flow_gen(
+            id, 
             client_list,
             num_accounts,
             max_inflight,

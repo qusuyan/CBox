@@ -11,6 +11,7 @@ use copycat::{transaction::Txn, ChainType, CopycatError, CryptoScheme, NodeId};
 
 use std::sync::Arc;
 
+pub type FlowGenId = u64;
 pub type ClientId = u64;
 
 pub struct Stats {
@@ -36,6 +37,7 @@ pub trait FlowGen {
 }
 
 pub fn get_flow_gen(
+    id: FlowGenId,
     client_list: Vec<ClientId>,
     num_accounts: usize,
     max_inflight: usize,
@@ -45,6 +47,7 @@ pub fn get_flow_gen(
 ) -> Box<dyn FlowGen> {
     match chain {
         ChainType::Bitcoin => Box::new(BitcoinFlowGen::new(
+            id,
             client_list,
             num_accounts,
             max_inflight,
@@ -52,6 +55,7 @@ pub fn get_flow_gen(
             crypto,
         )),
         ChainType::Avalanche => Box::new(AvalancheFlowGen::new(
+            id,
             client_list,
             num_accounts,
             max_inflight,

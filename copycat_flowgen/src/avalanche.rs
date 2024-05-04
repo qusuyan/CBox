@@ -1,5 +1,5 @@
 use super::{FlowGen, Stats};
-use crate::ClientId;
+use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{AvalancheTxn, Txn};
 use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
@@ -39,6 +39,7 @@ pub struct AvalancheFlowGen {
 
 impl AvalancheFlowGen {
     pub fn new(
+        id: FlowGenId,
         client_list: Vec<ClientId>,
         num_accounts: usize,
         max_inflight: usize,
@@ -51,11 +52,13 @@ impl AvalancheFlowGen {
             num_accounts / client_list.len()
         };
 
+        let mut i = 0u128;
         let mut accounts = HashMap::new();
         let mut utxos = HashMap::new();
         for client in client_list.iter() {
-            for i in 0..accounts_per_node as u64 {
-                let seed = ((*client as u128) << 64) | i as u128;
+            for _ in 0..accounts_per_node as u64 {
+                let seed = ((id as u128) << 64) | i;
+                i += 1;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
                 utxos
                     .entry(*client)

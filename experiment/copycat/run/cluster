@@ -3,7 +3,7 @@
 
 echo $@
 
-export RUST_LOG=info
+export RUST_LOG=info,copycat::stage::consensus::decide=trace
 export RUST_BACKTRACE=full
 
 BUILDTYPE=$1
