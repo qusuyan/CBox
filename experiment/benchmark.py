@@ -95,14 +95,17 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         cluster.copy_to(addr, "bench_topo.json", f'{cluster.workdir}/bench_topo.json')
 
     # compute 
-    num_flow_gen = 1 if params["disable-txn-dissem"] else params["num-machines"]
+    num_flow_gen = 1 if params["disable-txn-dissem"] else params["num-clients"]
     num_accounts = int(params["num-accounts"] / num_flow_gen)
     max_inflight = int(params["max-inflight-txns"] / num_flow_gen)
     frequency = int(params["frequency"] / num_flow_gen)
 
+    clients_per_machine = int(params["num-clients"] / params["num-machines"])
+    clients_remainder = params["num-clients"] % params["num-machines"]
+
     if params["single-process-cluster"]:
         run_args = [params["build-type"], "@POS", params["cluster-threads"], params["chain-type"], params["dissem"], params["conn_multiply"], 
-                    num_accounts, max_inflight, frequency, params["txn-span"], params["disable-txn-dissem"], params["config"]]
+                    clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["txn-span"], params["disable-txn-dissem"], params["config"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -161,6 +164,7 @@ if __name__ == "__main__":
         "build-type": "release",
         "num-nodes": 4,
         "num-machines": 1,
+        "num-clients": 10,
         "node-threads": 8,
         "mailbox-threads": 8,
         "cluster-threads": 40,

@@ -3,7 +3,7 @@
 
 echo $@
 
-export RUST_LOG=info,copycat::stage::consensus::decide=trace
+export RUST_LOG=info
 export RUST_BACKTRACE=full
 
 BUILDTYPE=$1
@@ -12,12 +12,14 @@ THREADS=$3
 CHAIN_TYPE=$4
 DISSEM=$5
 CONN_MULTIPLY=$6
-ACCOUNTS=$7
-MAX_INFLIGHT=$8
-FREQUENCY=$9
-TXN_SPAN=${10}
-DISABLE_TXN_DISSEM=${11}
-CONFIG=${12}
+NUM_CLIENTS=$7
+CLIENTS_REMAINDER=$8
+ACCOUNTS=$9
+MAX_INFLIGHT=${10}
+FREQUENCY=${11}
+TXN_SPAN=${12}
+DISABLE_TXN_DISSEM=${13}
+CONFIG=${14}
 
 if [[ $CONFIG == "" ]]; then
     CONFIG_ARG=""
@@ -31,8 +33,14 @@ else
     DISABLE_TXN_DISSEM="--disable-txn-dissem"
 fi
 
+if (( $ID < $CLIENTS_REMAINDER )); then
+    CLIENTS=$(( NUM_CLIENTS + 1 ))
+else
+    CLIENTS=$NUM_CLIENTS
+fi
+
 ./blockchain_copycat/target/${BUILDTYPE}/copycat_cluster -i ${ID} -t ${THREADS} \
     -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} -d ${DISSEM} -o ${CONN_MULTIPLY} \
-    -l 1 -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} \
+    -l ${CLIENTS} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} \
     ${DISABLE_TXN_DISSEM} ${CONFIG_ARG} --topology bench_topo.json
     
