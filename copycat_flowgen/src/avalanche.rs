@@ -150,7 +150,7 @@ impl FlowGen for AvalancheFlowGen {
             let utxos = self.utxos.get_mut(&node).unwrap();
 
             let send_utxo_idx = rand::random::<usize>() % utxos.len();
-            let (sender_idx, in_utxo_raw, in_utxo_amount) = utxos[send_utxo_idx];
+            let (sender_idx, in_utxo_raw, in_utxo_amount) = utxos.remove(send_utxo_idx);
             let (sender_pk, sender_sk) = accounts[sender_idx];
 
             let mut recver_idx = rand::random::<usize>() % (accounts.len() - 1);
