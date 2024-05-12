@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use rand::Rng;
 use tokio::sync::Notify;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
@@ -28,7 +28,7 @@ pub struct AvalancheFlowGen {
     next_batch_time: Instant,
     crypto: CryptoScheme,
     client_list: Vec<ClientId>,
-    utxos: HashMap<ClientId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
+    utxos: HashMap<ClientId, Vec<(usize, Hash, u64)>>,
     accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
     in_flight: HashMap<Hash, Instant>,
     num_completed_txns: u64,
@@ -60,10 +60,7 @@ impl AvalancheFlowGen {
                 let seed = ((id as u128) << 64) | i;
                 i += 1;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
-                utxos
-                    .entry(*client)
-                    .or_insert(HashMap::new())
-                    .insert(pubkey.clone(), VecDeque::new());
+                utxos.entry(*client).or_insert(vec![]);
                 accounts
                     .entry(*client)
                     .or_insert(vec![])
@@ -101,16 +98,21 @@ impl AvalancheFlowGen {
 impl FlowGen for AvalancheFlowGen {
     async fn setup_txns(&mut self) -> Result<Vec<(ClientId, Arc<Txn>)>, CopycatError> {
         let mut txns = Vec::new();
-        for (node, utxo_map) in self.utxos.iter_mut() {
-            for (account, utxos) in utxo_map.iter_mut() {
+        for (node, accounts) in self.accounts.iter() {
+            for idx in 0..accounts.len() {
+                let (pk, _) = accounts[idx];
                 let txn = Txn::Avalanche {
                     txn: AvalancheTxn::Grant {
                         out_utxo: 10,
-                        receiver: *account,
+                        receiver: pk,
                     },
                 };
                 let txn_ctx = TxnCtx::from_txn(&txn)?;
-                utxos.push_back((txn_ctx.id, 10));
+                // utxos.push_back((txn_ctx.id, 10));
+                self.utxos
+                    .get_mut(node)
+                    .unwrap()
+                    .push((idx, txn_ctx.id, 10));
                 txns.push((*node, Arc::new(txn)));
             }
         }
@@ -147,48 +149,39 @@ impl FlowGen for AvalancheFlowGen {
             let accounts = self.accounts.get(&node).unwrap();
             let utxos = self.utxos.get_mut(&node).unwrap();
 
-            let (sender, remainder, recver, out_utxo, txn) = loop {
-                let sender = rand::random::<usize>() % accounts.len();
-                let mut receiver = rand::random::<usize>() % (accounts.len() - 1);
-                if receiver >= sender {
-                    receiver += 1; // avoid sending to self
-                }
+            let send_utxo_idx = rand::random::<usize>() % utxos.len();
+            let (sender_idx, in_utxo_raw, in_utxo_amount) = utxos[send_utxo_idx];
+            let (sender_pk, sender_sk) = accounts[sender_idx];
 
-                let (sender_pk, sender_sk) = accounts.get(sender).unwrap();
-                let (recver_pk, _) = accounts.get(receiver).unwrap();
-                let sender_utxos = utxos.get_mut(sender_pk).unwrap();
-                if sender_utxos.is_empty() {
-                    continue; // retry
-                }
+            let mut recver_idx = rand::random::<usize>() % (accounts.len() - 1);
+            if recver_idx >= sender_idx {
+                recver_idx += 1; // avoid sending to self
+            }
+            let (recver_pk, _) = accounts[recver_idx];
 
-                let (in_utxo_raw, amount) = sender_utxos.pop_front().unwrap();
-                let in_utxo = vec![in_utxo_raw];
-                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-                let sender_signature = self.crypto.sign(sender_sk, &serialized_in_utxo).await?;
-                let out_utxo = std::cmp::min(amount, 10);
-                let remainder = amount - out_utxo;
-                let txn = Arc::new(Txn::Avalanche {
-                    txn: AvalancheTxn::Send {
-                        sender: *sender_pk,
-                        in_utxo,
-                        receiver: *recver_pk,
-                        out_utxo,
-                        remainder,
-                        sender_signature,
-                    },
-                });
-                break (sender_pk, remainder, recver_pk, out_utxo, txn);
-            };
+            let in_utxo = vec![in_utxo_raw];
+            let serialized_in_utxo = bincode::serialize(&in_utxo)?;
+            let sender_signature = self.crypto.sign(&sender_sk, &serialized_in_utxo).await?;
+            let out_utxo = std::cmp::min(in_utxo_amount, 10);
+            let remainder = in_utxo_amount - out_utxo;
+            let txn = Arc::new(Txn::Avalanche {
+                txn: AvalancheTxn::Send {
+                    sender: sender_pk,
+                    in_utxo,
+                    receiver: recver_pk,
+                    out_utxo,
+                    remainder,
+                    sender_signature,
+                },
+            });
 
             let txn_ctx = TxnCtx::from_txn(&txn)?;
             let txn_hash = txn_ctx.id;
             if remainder > 0 {
-                let sender_utxos = utxos.get_mut(sender).unwrap();
-                sender_utxos.push_back((txn_hash.clone(), remainder));
+                utxos.push((sender_idx, txn_hash.clone(), remainder));
             }
             if out_utxo > 0 {
-                let recver_utxos = utxos.get_mut(recver).unwrap();
-                recver_utxos.push_back((txn_hash.clone(), out_utxo));
+                utxos.push((recver_idx, txn_hash.clone(), out_utxo));
             }
 
             self.in_flight.insert(txn_hash, Instant::now());
