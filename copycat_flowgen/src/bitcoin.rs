@@ -55,10 +55,10 @@ impl BitcoinFlowGen {
 
         let mut accounts = HashMap::new();
         let mut utxos = HashMap::new();
-        let mut i = 0;
+        let mut i = 0u64;
         for client in client_list.iter() {
             for _ in 0..accounts_per_node as u64 {
-                let seed = ((id as u128) << 64) | i as u128;
+                let seed = (id << 64) | i;
                 i += 1;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
                 utxos

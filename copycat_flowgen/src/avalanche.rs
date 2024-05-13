@@ -52,12 +52,12 @@ impl AvalancheFlowGen {
             num_accounts / client_list.len()
         };
 
-        let mut i = 0u128;
+        let mut i = 0u64;
         let mut accounts = HashMap::new();
         let mut utxos = HashMap::new();
         for client in client_list.iter() {
             for _ in 0..accounts_per_node as u64 {
-                let seed = ((id as u128) << 64) | i;
+                let seed = (id << 64) | i;
                 i += 1;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
                 utxos.entry(*client).or_insert(vec![]);

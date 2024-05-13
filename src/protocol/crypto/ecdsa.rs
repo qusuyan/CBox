@@ -1,15 +1,16 @@
 use super::{PrivKey, PubKey, Signature};
 use crate::utils::CopycatError;
 
-pub fn gen_key_pair(seed: u64) -> (PubKey, PrivKey) {
-    let mut pubkey = [0u8; 32];
-    pubkey[..16].clone_from_slice(&seed.to_le_bytes());
-    let privkey = pubkey.clone();
-    (pubkey, privkey)
+// ECDSA keys are 64 bytes
+pub fn gen_key_pair(_seed: u64) -> (PubKey, PrivKey) {
+    todo!();
+    // let rng = rand::thread_rng();
+    // let sk = ecdsa::SigningKey::random(&mut rng);
+    // let sk = ecdsa::SigningKey::from_bytes(&seed.to_le_bytes());
 }
 
 pub fn sign(_privkey: &PrivKey, _input: &[u8]) -> Result<Signature, CopycatError> {
-    Ok(vec![0; 64])
+    todo!();
 }
 
 pub fn verify(
@@ -17,5 +18,5 @@ pub fn verify(
     _input: &[u8],
     _signature: &Signature,
 ) -> Result<bool, CopycatError> {
-    Ok(true)
+    todo!();
 }
