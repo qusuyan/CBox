@@ -3,7 +3,7 @@ use crate::utils::CopycatError;
 
 pub fn gen_key_pair(seed: u64) -> (PubKey, PrivKey) {
     let mut pubkey = [0u8; 32];
-    pubkey[..16].clone_from_slice(&seed.to_le_bytes());
+    pubkey[..8].clone_from_slice(&seed.to_le_bytes());
     let privkey = pubkey.clone();
     (pubkey, privkey)
 }

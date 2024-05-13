@@ -21,5 +21,5 @@ max-inflight-txns = 4000
 num-accounts = 160
 num-clients = 10
 num-machines = 20
-num-nodes = [40, 80, 120, 160]
+num-nodes = 120
 txn-span = 1
