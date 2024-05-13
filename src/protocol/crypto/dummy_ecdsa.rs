@@ -16,6 +16,7 @@ pub async fn sign(_privkey: &PrivKey, input: &[u8]) -> Result<Signature, Copycat
     const HASH_TIME_PER_BYTE: f64 = 5.24e-9;
     let start = Instant::now();
     let sign_time = HASH_TIME_PER_BYTE * input.len() as f64 + SIGN_TIME;
+    log::info!("signing {} bytes take {} secs", input.len(), sign_time);
     tokio::time::sleep_until(start + Duration::from_secs_f64(sign_time)).await;
     Ok(vec![0; 64])
 }
@@ -29,6 +30,7 @@ pub async fn verify(
     const HASH_TIME_PER_BYTE: f64 = 5.24e-9;
     let start = Instant::now();
     let verify_time = HASH_TIME_PER_BYTE * input.len() as f64 + VERIFY_TIME;
+    log::info!("signing {} bytes take {} secs", input.len(), verify_time);
     tokio::time::sleep_until(start + Duration::from_secs_f64(verify_time)).await;
     Ok(true)
 }
