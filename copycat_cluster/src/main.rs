@@ -138,7 +138,7 @@ fn main() {
 
     log::info!("{:?}", args);
 
-    let txn_crypto = CryptoScheme::Dummy;
+    let txn_crypto = args.crypto;
     let p2p_crypto = args.crypto;
 
     // get mailbox parameters

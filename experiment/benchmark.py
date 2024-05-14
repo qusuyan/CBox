@@ -168,7 +168,7 @@ if __name__ == "__main__":
         "node-threads": 8,
         "mailbox-threads": 8,
         "cluster-threads": 40,
-        "network-delay": 70, # in millis
+        "network-delay": 30, # in millis
         "network-bw": 100000000, # in B/s
         "chain-type": "bitcoin",
         "exp-time": 300, # in s
