@@ -636,7 +636,7 @@ impl Decision for AvalancheDecision {
                 .unwrap_or(false)
             {
                 if let Err(e) = validated_blk_sender.send((src, content)).await {
-                    pf_error!(id; "failed to send validated msg: {:?}", e)
+                    pf_error!(id; "failed to send validated msg: {:?}", e);
                 }
             }
         });
