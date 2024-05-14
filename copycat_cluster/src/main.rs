@@ -138,6 +138,9 @@ fn main() {
 
     log::info!("{:?}", args);
 
+    let txn_crypto = CryptoScheme::Dummy;
+    let p2p_crypto = args.crypto;
+
     // get mailbox parameters
     let machine_config_path = args.machine_config;
     let machine_list = match mailbox::config::read_machine_config(&machine_config_path) {
@@ -256,7 +259,8 @@ fn main() {
                 node_id,
                 args.chain,
                 args.dissem_pattern,
-                args.crypto,
+                txn_crypto,
+                p2p_crypto,
                 node_config.clone(),
                 !args.disable_txn_dissem,
                 topology.remove(&node_id).unwrap_or(HashSet::new()),

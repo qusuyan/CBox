@@ -599,12 +599,16 @@ impl Decision for AvalancheDecision {
     }
 
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError> {
+        let msg: VoteMsg = bincode::deserialize(content.as_ref())?;
+        if self.finished_query.contains(&msg.round) {
+            return Ok(());
+        }
+
         let peer_pk = self.neighbor_pks.entry(src).or_insert_with(|| {
             let (pk, _) = self.crypto_scheme.gen_key_pair(src.into());
             pk
         });
 
-        let msg: VoteMsg = bincode::deserialize(content.as_ref())?;
         let content = (msg.round, msg.votes);
         let serialized_content = bincode::serialize(&content)?;
         let (blk_id, votes) = content;

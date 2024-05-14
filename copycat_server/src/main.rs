@@ -132,7 +132,7 @@ pub fn main() {
 
     runtime.block_on(async {
         let (node, mut executed): (Node, _) =
-            match Node::init(id, args.chain, args.dissem_pattern, args.crypto, config, !args.disable_txn_dissem, neighbors).await {
+            match Node::init(id, args.chain, args.dissem_pattern, args.crypto, args.crypto, config, !args.disable_txn_dissem, neighbors).await {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("failed to start node: {e:?}");
