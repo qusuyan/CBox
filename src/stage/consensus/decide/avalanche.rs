@@ -598,29 +598,55 @@ impl Decision for AvalancheDecision {
         Ok((blk_id, txns))
     }
 
-    async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError> {
+    async fn validate_peer_msg(
+        &mut self,
+        src: NodeId,
+        content: Vec<u8>,
+        validated_blk_sender: mpsc::Sender<(NodeId, Vec<u8>)>,
+    ) -> Result<(), CopycatError> {
         let msg: VoteMsg = bincode::deserialize(content.as_ref())?;
         if self.finished_query.contains(&msg.round) {
             return Ok(());
         }
 
-        let peer_pk = self.neighbor_pks.entry(src).or_insert_with(|| {
-            let (pk, _) = self.crypto_scheme.gen_key_pair(src.into());
-            pk
+        let peer_pk = self
+            .neighbor_pks
+            .entry(src)
+            .or_insert_with(|| {
+                let (pk, _) = self.crypto_scheme.gen_key_pair(src.into());
+                pk
+            })
+            .clone();
+
+        let crypto_scheme = self.crypto_scheme.clone();
+        let id = self.id;
+        // TODO: add compute limitations as needed
+        tokio::task::spawn(async move {
+            let vote_content = (msg.round, msg.votes);
+            let serialized_content = match bincode::serialize(&vote_content) {
+                Ok(content) => content,
+                Err(e) => {
+                    pf_error!(id; "failed to serialize peer msg: {:?}", e);
+                    return;
+                }
+            };
+            if crypto_scheme
+                .verify(&peer_pk, &serialized_content, &msg.signature)
+                .await
+                .unwrap_or(false)
+            {
+                if let Err(e) = validated_blk_sender.send((src, content)).await {
+                    pf_error!(id; "failed to send validated msg: {:?}", e)
+                }
+            }
         });
 
-        let content = (msg.round, msg.votes);
-        let serialized_content = bincode::serialize(&content)?;
-        let (blk_id, votes) = content;
-        if self
-            .crypto_scheme
-            .verify(&peer_pk, &serialized_content, &msg.signature)
-            .await?
-        {
-            self.handle_votes(blk_id, src, votes).await?;
-        }
-
         Ok(())
+    }
+
+    async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError> {
+        let msg: VoteMsg = bincode::deserialize(content.as_ref())?;
+        self.handle_votes(msg.round, src, msg.votes).await
     }
 
     fn report(&mut self) {
