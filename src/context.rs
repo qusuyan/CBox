@@ -26,7 +26,7 @@ impl TxnCtx {
                 let serialized = bincode::serialize(txn)?;
                 sha256(&serialized)?
             }
-            Txn::Avalanche { txn } => match txn {
+            Txn::Avalanche { txn: avax_txn } => match avax_txn {
                 AvalancheTxn::PlaceHolder => U256::zero(),
                 _ => {
                     let serialized = bincode::serialize(txn)?;

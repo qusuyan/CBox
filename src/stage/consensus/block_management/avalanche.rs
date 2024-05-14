@@ -51,6 +51,7 @@ pub struct AvalancheBlockManagement {
     blk_quota: usize,
     // for reporting data and debugging
     blk_quota_recved: usize,
+    signatures_validated: usize,
 }
 
 impl AvalancheBlockManagement {
@@ -77,6 +78,7 @@ impl AvalancheBlockManagement {
             pending_blks: HashMap::new(),
             blk_quota: 0,
             blk_quota_recved: 0,
+            signatures_validated: 0,
         }
     }
 }
@@ -373,6 +375,7 @@ impl BlockManagement for AvalancheBlockManagement {
                         .crypto_scheme
                         .verify(sender, &serialized_in_txo, sender_signature)
                         .await?;
+                    self.signatures_validated += 1;
                     let mut pending = false;
 
                     // verify validity
@@ -604,5 +607,7 @@ impl BlockManagement for AvalancheBlockManagement {
 
     fn report(&mut self) {
         pf_info!(self.id; "blk_quota_recved: {}, blk_quota: {}", self.blk_quota_recved, self.blk_quota);
+        pf_info!(self.id; "In the last minute: signature_validated: {}", self.signatures_validated);
+        self.signatures_validated = 0;
     }
 }
