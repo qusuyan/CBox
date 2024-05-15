@@ -745,9 +745,9 @@ impl BlockManagement for BitcoinBlockManagement {
         peer: NodeId,
         msg: Vec<u8>,
     ) -> Result<(), CopycatError> {
-        // only return the req if the block is known
         let blk_id = U256::from_little_endian(&msg);
         if let Some((blk, _, _)) = self.block_pool.get(&blk_id) {
+            // return the req if the block is known
             self.peer_messenger
                 .send(
                     peer,
@@ -756,6 +756,11 @@ impl BlockManagement for BitcoinBlockManagement {
                     },
                 )
                 .await?
+        } else {
+            // otherwise gossip to other neighbors
+            self.peer_messenger
+                .gossip(MsgType::BlockReq { msg }, HashSet::from([self.id, peer]))
+                .await?;
         }
         Ok(())
     }
