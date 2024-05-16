@@ -13,7 +13,7 @@ use crate::utils::{CopycatError, NodeId};
 use async_trait::async_trait;
 
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{Duration, Instant};
 
 use crate::config::Config;
@@ -100,6 +100,8 @@ pub async fn block_management_thread(
     let mut peer_blks_recv = 0;
     let mut peer_txns_recv = 0;
 
+    let maximum_concurrency = 2;
+    let sem = Arc::new(Semaphore::new(maximum_concurrency));
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
 
     loop {
@@ -171,7 +173,15 @@ pub async fn block_management_thread(
                 pf_debug!(id; "got from {} new block {:?}, computing its context...", src, new_block);
 
                 let blk_sender = pending_blk_sender.clone();
+                let semaphore = sem.clone();
                 tokio::task::spawn(async move {
+                    let permit = match semaphore.acquire().await {
+                        Ok(permit) => permit,
+                        Err(e) => {
+                            pf_error!(id; "failed to acquire concurrency: {:?}", e);
+                            return;
+                        }
+                    };
                     let blk_ctx = match BlkCtx::from_blk(&new_block) {
                         Ok(ctx) => ctx,
                         Err(e) => {
@@ -179,6 +189,7 @@ pub async fn block_management_thread(
                             return;
                         }
                     };
+                    drop(permit);
                     if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
                         pf_error!(id; "failed to send blk_context: {:?}", e);
                     }
