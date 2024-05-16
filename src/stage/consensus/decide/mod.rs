@@ -27,12 +27,6 @@ pub trait Decision: Sync + Send {
     ) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
-    async fn validate_peer_msg(
-        &mut self,
-        src: NodeId,
-        content: Vec<u8>,
-        validated_blk_sender: mpsc::Sender<(NodeId, Vec<u8>)>,
-    ) -> Result<(), CopycatError>;
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError>;
     fn report(&mut self);
 }
@@ -76,8 +70,6 @@ pub async fn decision_thread(
         peer_messenger,
         pmaker_feedback_send,
     );
-
-    let (validated_blk_sender, mut validated_blk_recver) = mpsc::channel(0x100000);
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
     let mut blks_sent = 0;
@@ -141,25 +133,11 @@ pub async fn decision_thread(
                     }
                 };
 
-                if let Err(e) = decision_stage.validate_peer_msg(src, msg, validated_blk_sender.clone()).await {
-                    pf_error!(id; "failed to handle message from peer {}: {:?}", src, e);
-                    continue;
-                }
-            },
-            validated_peer_msg = validated_blk_recver.recv() => {
-                let (src, msg) =  match validated_peer_msg {
-                    Some(msg) => msg,
-                    None => {
-                        pf_error!(id; "peer consensus recv pipe closed unexpectedly");
-                        continue;
-                    }
-                };
-
                 if let Err(e) = decision_stage.handle_peer_msg(src, msg).await {
                     pf_error!(id; "failed to handle message from peer {}: {:?}", src, e);
                     continue;
                 }
-            }
+            },
             _ = tokio::time::sleep_until(report_timeout) => {
                 pf_info!(id; "In the last minute: blks_recv: {}, txns_recv: {}, blks_sent: {}, txns_sent: {}", blks_recv, txns_recv, blks_sent, txns_sent);
                 decision_stage.report();

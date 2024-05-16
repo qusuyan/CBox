@@ -58,15 +58,6 @@ impl Decision for DummyDecision {
         }
     }
 
-    async fn validate_peer_msg(
-        &mut self,
-        _src: NodeId,
-        _content: Vec<u8>,
-        _validated_blk_sender: tokio::sync::mpsc::Sender<(NodeId, Vec<u8>)>,
-    ) -> Result<(), CopycatError> {
-        unreachable!();
-    }
-
     async fn handle_peer_msg(
         &mut self,
         _src: NodeId,
