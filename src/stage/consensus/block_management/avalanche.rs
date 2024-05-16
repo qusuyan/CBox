@@ -6,7 +6,6 @@ use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::{AvalancheTxn, Txn};
-use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -33,7 +32,6 @@ struct PeerReq {
 
 pub struct AvalancheBlockManagement {
     id: NodeId,
-    crypto_scheme: CryptoScheme,
     blk_len: usize,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     txn_dag: HashMap<Hash, DagNode>,
@@ -55,16 +53,10 @@ pub struct AvalancheBlockManagement {
 }
 
 impl AvalancheBlockManagement {
-    pub fn new(
-        id: NodeId,
-        crypto_scheme: CryptoScheme,
-        config: AvalancheConfig,
-        peer_messenger: Arc<PeerMessenger>,
-    ) -> Self {
+    pub fn new(id: NodeId, config: AvalancheConfig, peer_messenger: Arc<PeerMessenger>) -> Self {
         let proposal_timeout = Duration::from_secs_f64(config.proposal_timeout_secs);
         Self {
             id,
-            crypto_scheme,
             blk_len: config.blk_len,
             txn_pool: HashMap::new(),
             txn_dag: HashMap::new(),
@@ -363,23 +355,10 @@ impl BlockManagement for AvalancheBlockManagement {
                     );
                     (txn.clone(), txn_ctx.clone())
                 }
-                AvalancheTxn::Send {
-                    sender,
-                    in_utxo,
-                    sender_signature,
-                    ..
-                } => {
-                    // verify signature
-                    let serialized_in_txo = bincode::serialize(in_utxo)?;
-                    let mut valid = self
-                        .crypto_scheme
-                        .verify(sender, &serialized_in_txo, sender_signature)
-                        .await?;
-                    self.signatures_validated += 1;
-                    let mut pending = false;
-
+                AvalancheTxn::Send { in_utxo, .. } => {
                     // verify validity
-                    if valid {
+                    let mut pending = false;
+                    let valid = {
                         let (is_valid, txn_missing_deps) = self.validate_txn(avax_txn)?;
                         pf_trace!(self.id; "Validating txn returned is_valid: {}, missing_deps: {:?}", is_valid, txn_missing_deps);
                         if txn_missing_deps.len() > 0 {
@@ -389,11 +368,11 @@ impl BlockManagement for AvalancheBlockManagement {
                                 pending_txns.push(idx);
                                 pending = true;
                             }
-                            valid = false;
+                            false
                         } else {
-                            valid = is_valid;
+                            is_valid
                         }
-                    }
+                    };
 
                     if valid {
                         // add to txn pool if valid

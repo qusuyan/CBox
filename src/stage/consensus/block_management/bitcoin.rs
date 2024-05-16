@@ -6,7 +6,7 @@ use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::{DummyMerkleTree, Hash, PubKey};
 use crate::protocol::transaction::{BitcoinTxn, Txn};
-use crate::protocol::{CryptoScheme, MsgType};
+use crate::protocol::MsgType;
 use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -25,7 +25,6 @@ const HEADER_HASH_TIME: f64 = 0.0000019;
 
 pub struct BitcoinBlockManagement {
     id: NodeId,
-    crypto_scheme: CryptoScheme,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     block_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>, u64)>,
     utxo: HashSet<(Hash, PubKey)>,
@@ -47,15 +46,9 @@ pub struct BitcoinBlockManagement {
 }
 
 impl BitcoinBlockManagement {
-    pub fn new(
-        id: NodeId,
-        crypto_scheme: CryptoScheme,
-        config: BitcoinConfig,
-        peer_messenger: Arc<PeerMessenger>,
-    ) -> Self {
+    pub fn new(id: NodeId, config: BitcoinConfig, peer_messenger: Arc<PeerMessenger>) -> Self {
         Self {
             id,
-            crypto_scheme,
             txn_pool: HashMap::new(),
             block_pool: HashMap::new(),
             utxo: HashSet::new(),
@@ -425,22 +418,6 @@ impl BlockManagement for BitcoinBlockManagement {
 
             // validate transaction
             if !self.txn_pool.contains_key(&txn_hash) {
-                if let BitcoinTxn::Send {
-                    sender,
-                    in_utxo,
-                    sender_signature,
-                    ..
-                } = bitcoin_txn
-                {
-                    let serialized_in_utxo = bincode::serialize(in_utxo)?;
-                    if !self
-                        .crypto_scheme
-                        .verify(sender, &serialized_in_utxo, sender_signature)
-                        .await?
-                    {
-                        return Ok(vec![]);
-                    }
-                }
                 if !self.validate_txn(bitcoin_txn)? {
                     return Ok(vec![]);
                 }
