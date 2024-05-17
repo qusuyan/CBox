@@ -36,6 +36,7 @@ pub struct AvalancheBlockManagement {
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     txn_dag: HashMap<Hash, DagNode>,
     dag_frontier: VecDeque<Hash>,
+    peer_queried_frontier: VecDeque<Hash>,
     // fields for constructing new batch of txns
     blk_counter: u64,
     curr_batch: Vec<Hash>,
@@ -61,6 +62,7 @@ impl AvalancheBlockManagement {
             txn_pool: HashMap::new(),
             txn_dag: HashMap::new(),
             dag_frontier: VecDeque::new(),
+            peer_queried_frontier: VecDeque::new(),
             blk_counter: 0,
             curr_batch: vec![],
             next_propose_time: Instant::now() + proposal_timeout,
@@ -215,9 +217,12 @@ impl BlockManagement for AvalancheBlockManagement {
                 break true;
             }
 
-            let next_txn = match self.dag_frontier.pop_front() {
+            let next_txn = match self.peer_queried_frontier.pop_front() {
                 Some(txn) => txn,
-                None => break false,
+                None => match self.dag_frontier.pop_front() {
+                    Some(txn) => txn,
+                    None => break false,
+                },
             };
 
             let node = match self.txn_dag.remove(&next_txn) {
@@ -323,7 +328,7 @@ impl BlockManagement for AvalancheBlockManagement {
                 blk_txn_ctx.push(txn_ctx.clone());
                 if let Some(dag_node) = self.txn_dag.get(&txn_hash) {
                     if dag_node.num_parents == 0 {
-                        self.dag_frontier.push_front(txn_hash);
+                        self.peer_queried_frontier.push_back(txn_hash);
                     }
                 }
                 continue;
@@ -419,9 +424,7 @@ impl BlockManagement for AvalancheBlockManagement {
         // missing some dependencies, so handle this request when receiving dependencies from peers
         if blk_missing_deps.len() > 0 {
             pf_debug!(self.id; "querying proposer {} for missing txns at block {} depth {}: {:?}", proposer, blk_id, depth + 1, blk_missing_deps);
-            while let Some(txn) = pending_frontier.pop() {
-                self.dag_frontier.push_front(txn);
-            }
+            self.peer_queried_frontier.extend(pending_frontier);
             let peer_req = PeerReq {
                 proposer,
                 blk_id,
@@ -518,9 +521,7 @@ impl BlockManagement for AvalancheBlockManagement {
         }
 
         // so that txns from peers will be voted early
-        while let Some(txn) = pending_frontier.pop() {
-            self.dag_frontier.push_front(txn);
-        }
+        self.peer_queried_frontier.extend(pending_frontier);
 
         let blk = Arc::new(Block {
             header: BlockHeader::Avalanche {
