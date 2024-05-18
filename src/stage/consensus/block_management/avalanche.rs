@@ -218,7 +218,17 @@ impl BlockManagement for AvalancheBlockManagement {
             }
 
             let next_txn = match self.peer_queried_frontier.pop_front() {
-                Some(txn) => txn,
+                Some(txn) => {
+                    if let Some(dag_node) = self.txn_dag.get(&txn) {
+                        if dag_node.num_parents == 0 {
+                            txn
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                }
                 None => match self.dag_frontier.pop_front() {
                     Some(txn) => txn,
                     None => break false,
@@ -326,10 +336,9 @@ impl BlockManagement for AvalancheBlockManagement {
                 // txn has been validated before
                 filtered_txns.push(txn.clone());
                 blk_txn_ctx.push(txn_ctx.clone());
-                if let Some(dag_node) = self.txn_dag.get(&txn_hash) {
-                    if dag_node.num_parents == 0 {
-                        self.peer_queried_frontier.push_back(txn_hash);
-                    }
+                if self.txn_dag.contains_key(&txn_hash) {
+                    // the txn has not been proposed yet
+                    pending_frontier.push(txn_hash);
                 }
                 continue;
             }
@@ -390,16 +399,14 @@ impl BlockManagement for AvalancheBlockManagement {
                                 children: HashSet::new(),
                             },
                         );
-                        let mut in_frontier = true;
+
                         for parent in in_utxo.iter() {
                             if let Some(siblings) = self.txn_dag.get_mut(parent) {
                                 siblings.children.insert(txn_hash);
-                                in_frontier = false;
                             }
                         }
-                        if in_frontier {
-                            pending_frontier.push(txn_hash);
-                        }
+                        pending_frontier.push(txn_hash);
+
                         (txn.clone(), txn_ctx.clone())
                     } else {
                         if pending {
@@ -499,16 +506,12 @@ impl BlockManagement for AvalancheBlockManagement {
                                 children: HashSet::new(),
                             },
                         );
-                        let mut in_frontier = true;
                         for parent in in_utxo.iter() {
                             if let Some(siblings) = self.txn_dag.get_mut(parent) {
                                 siblings.children.insert(txn_hash);
-                                in_frontier = false;
                             }
                         }
-                        if in_frontier {
-                            pending_frontier.push(txn_hash);
-                        }
+                        pending_frontier.push(txn_hash);
                     }
                 }
             }
