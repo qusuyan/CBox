@@ -367,6 +367,7 @@ impl BlockManagement for AvalancheBlockManagement {
                             children: HashSet::new(),
                         },
                     );
+                    pending_frontier.push(txn_hash);
                     (txn.clone(), txn_ctx.clone())
                 }
                 AvalancheTxn::Send { in_utxo, .. } => {
