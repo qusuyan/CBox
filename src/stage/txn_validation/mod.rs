@@ -58,7 +58,7 @@ pub async fn txn_validation_thread(
     let txn_validation_stage = Arc::new(get_txn_validation(crypto_scheme));
 
     let max_concurrency = 2;
-    let sem = Arc::new(Semaphore::new(max_concurrency));
+    let sem = Semaphore::new(max_concurrency);
 
     let mut report_time = Instant::now() + Duration::from_secs(60);
     let mut self_txns_validated = 0;
@@ -78,18 +78,18 @@ pub async fn txn_validation_thread(
                 pf_trace!(id; "got from self new txn {:?}", txn);
                 self_txns_validated += 1;
 
-                let semaphore = sem.clone();
                 let txn_validator = txn_validation_stage.clone();
                 let validated_txn_sender = validated_txn_send.clone();
+                let permit = match sem.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire concurrency: {:?}", e);
+                        return;
+                    }
+                };
                 tokio::task::spawn(async move {
                     let txn_ctx = {
-                        let _ = match semaphore.acquire().await {
-                            Ok(permit) => permit,
-                            Err(e) => {
-                                pf_error!(id; "failed to acquire concurrency: {:?}", e);
-                                return;
-                            }
-                        };
+                        let _ = permit;
                         match txn_validator.validate(txn.clone()).await {
                             Ok(txn_ctx) => {
                                 if let Some(ctx) = txn_ctx {
@@ -130,18 +130,18 @@ pub async fn txn_validation_thread(
                 pf_trace!(id; "got from peer {} new txn {:?}", src, txn);
                 peer_txns_validated += 1;
 
-                let semaphore = sem.clone();
                 let txn_validator = txn_validation_stage.clone();
                 let validated_txn_sender = validated_txn_send.clone();
+                let permit = match sem.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire concurrency: {:?}", e);
+                        return;
+                    }
+                };
                 tokio::task::spawn(async move {
                     let txn_ctx = {
-                        let _ = match semaphore.acquire().await {
-                            Ok(permit) => permit,
-                            Err(e) => {
-                                pf_error!(id; "failed to acquire concurrency: {:?}", e);
-                                return;
-                            }
-                        };
+                        let _ = permit;
                         match txn_validator.validate(txn.clone()).await {
                             Ok(txn_ctx) => {
                                 if let Some(ctx) = txn_ctx {
