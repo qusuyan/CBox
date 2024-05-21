@@ -14,12 +14,12 @@ cluster-threads = 32
 # ]
 config = ["blk_len=40+max_inflight_blk=40", "blk_len=20+max_inflight_blk=80"]
 conn_multiply = 20
-crypto = "dummy-ecdsa"
+crypto = ["dummy", "dummy-ecdsa"]
 dissem = "sample"
-exp-time = 620
+exp-time = 320
 max-inflight-txns = 4000
 num-accounts = 160
-num-clients = 10
+num-clients = 20
 num-machines = 20
-num-nodes = 120
+num-nodes = [40, 80, 120, 160]
 txn-span = 1
