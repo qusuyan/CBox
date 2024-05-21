@@ -138,6 +138,7 @@ impl FlowGen for AvalancheFlowGen {
     }
 
     async fn next_txn_batch(&mut self) -> Result<Vec<(ClientId, Arc<Txn>)>, CopycatError> {
+        let start_time = Instant::now();
         let mut batch = vec![];
         let batch_size = if self.max_inflight == UNSET {
             self.batch_size
@@ -195,7 +196,7 @@ impl FlowGen for AvalancheFlowGen {
                 let u: f64 = rng.gen();
                 -(1f64 - u).ln() / self.batch_frequency as f64
             };
-            self.next_batch_time = Instant::now() + Duration::from_secs_f64(interarrival_time);
+            self.next_batch_time = start_time + Duration::from_secs_f64(interarrival_time);
         }
         Ok(batch)
     }
