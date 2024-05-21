@@ -4,27 +4,27 @@ use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
 
-use dashmap::DashSet;
+use std::collections::HashSet;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use crate::config::Config;
 
 pub struct TxnValidation {
-    txn_seen: DashSet<Hash>,
+    txn_seen: HashSet<Hash>,
     crypto_scheme: CryptoScheme,
 }
 
 impl TxnValidation {
     pub fn new(crypto_scheme: CryptoScheme) -> Self {
         Self {
-            txn_seen: DashSet::new(),
+            txn_seen: HashSet::new(),
             crypto_scheme,
         }
     }
 
-    pub async fn validate(&self, txn: Arc<Txn>) -> Result<Option<Arc<TxnCtx>>, CopycatError> {
+    pub async fn validate(&mut self, txn: Arc<Txn>) -> Result<Option<Arc<TxnCtx>>, CopycatError> {
         let txn_ctx = Arc::new(TxnCtx::from_txn(&txn)?);
         let hash = &txn_ctx.id;
 
@@ -55,10 +55,7 @@ pub async fn txn_validation_thread(
 ) {
     pf_info!(id; "txn validation stage starting...");
 
-    let txn_validation_stage = Arc::new(get_txn_validation(crypto_scheme));
-
-    let max_concurrency = 2;
-    let sem = Semaphore::new(max_concurrency);
+    let mut txn_validation_stage = get_txn_validation(crypto_scheme);
 
     let mut report_time = Instant::now() + Duration::from_secs(60);
     let mut self_txns_validated = 0;
@@ -78,39 +75,20 @@ pub async fn txn_validation_thread(
                 pf_trace!(id; "got from self new txn {:?}", txn);
                 self_txns_validated += 1;
 
-                let txn_validator = txn_validation_stage.clone();
-                let validated_txn_sender = validated_txn_send.clone();
-                let permit = match sem.acquire().await {
-                    Ok(permit) => permit,
-                    Err(e) => {
-                        pf_error!(id; "failed to acquire concurrency: {:?}", e);
-                        return;
-                    }
-                };
-                tokio::task::spawn(async move {
-                    let txn_ctx = {
-                        let _ = permit;
-                        match txn_validator.validate(txn.clone()).await {
-                            Ok(txn_ctx) => {
-                                if let Some(ctx) = txn_ctx {
-                                    ctx
-                                } else {
-                                    pf_trace!(id; "got invalid or duplicate txn {:?}, ignoring...", txn);
-                                    return;
-                                }
+                match txn_validation_stage.validate(txn.clone()).await {
+                    Ok(txn_ctx) => {
+                        if let Some(ctx) = txn_ctx {
+                            if let Err(e) = validated_txn_send.send((id, (txn, ctx))).await {
+                                pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
                             }
-                            Err(e) => {
-                                pf_error!(id; "error validating txn: {:?}", e);
-                                return;
-                            }
+                        } else {
+                            pf_trace!(id; "got invalid or duplicate txn {:?}, ignoring...", txn);
                         }
-                    };
-
-                    if let Err(e) = validated_txn_sender.send((id, (txn, txn_ctx))).await {
-                        pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
                     }
-                });
-
+                    Err(e) => {
+                        pf_error!(id; "error validating txn: {:?}", e);
+                    }
+                }
             },
             new_peer_txn = peer_txn_recv.recv() => {
                 let (src, txn) = match new_peer_txn {
@@ -130,38 +108,20 @@ pub async fn txn_validation_thread(
                 pf_trace!(id; "got from peer {} new txn {:?}", src, txn);
                 peer_txns_validated += 1;
 
-                let txn_validator = txn_validation_stage.clone();
-                let validated_txn_sender = validated_txn_send.clone();
-                let permit = match sem.acquire().await {
-                    Ok(permit) => permit,
-                    Err(e) => {
-                        pf_error!(id; "failed to acquire concurrency: {:?}", e);
-                        return;
-                    }
-                };
-                tokio::task::spawn(async move {
-                    let txn_ctx = {
-                        let _ = permit;
-                        match txn_validator.validate(txn.clone()).await {
-                            Ok(txn_ctx) => {
-                                if let Some(ctx) = txn_ctx {
-                                    ctx
-                                } else {
-                                    pf_trace!(id; "got invalid or duplicate txn {:?}, ignoring...", txn);
-                                    return;
-                                }
+                match txn_validation_stage.validate(txn.clone()).await {
+                    Ok(txn_ctx) => {
+                        if let Some(ctx) = txn_ctx {
+                            if let Err(e) = validated_txn_send.send((src, (txn, ctx))).await {
+                                pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
                             }
-                            Err(e) => {
-                                pf_error!(id; "error validating txn: {:?}", e);
-                                return;
-                            }
+                        } else {
+                            pf_trace!(id; "got invalid or duplicate txn {:?}, ignoring...", txn);
                         }
-                    };
-
-                    if let Err(e) = validated_txn_sender.send((id, (txn, txn_ctx))).await {
-                        pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
                     }
-                });
+                    Err(e) => {
+                        pf_error!(id; "error validating txn: {:?}", e);
+                    }
+                }
             }
             _ = tokio::time::sleep_until(report_time) => {
                 pf_info!(id; "In the last minute: self_txns_validated: {}, peer_txns_validated: {}", self_txns_validated, peer_txns_validated);
