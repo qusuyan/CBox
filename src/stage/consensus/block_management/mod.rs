@@ -13,8 +13,10 @@ use crate::utils::{CopycatError, NodeId};
 use async_trait::async_trait;
 
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{Duration, Instant};
+
+use dashmap::DashSet;
 
 use crate::config::Config;
 use crate::peers::PeerMessenger;
@@ -51,23 +53,16 @@ pub trait BlockManagement: Sync + Send {
 fn get_blk_creation(
     id: NodeId,
     config: Config,
-    crypto_scheme: CryptoScheme,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
     match config {
         Config::Dummy => Box::new(DummyBlockManagement::new()),
-        Config::Bitcoin { config } => Box::new(BitcoinBlockManagement::new(
-            id,
-            crypto_scheme,
-            config,
-            peer_messenger,
-        )),
-        Config::Avalanche { config } => Box::new(AvalancheBlockManagement::new(
-            id,
-            crypto_scheme,
-            config,
-            peer_messenger,
-        )),
+        Config::Bitcoin { config } => {
+            Box::new(BitcoinBlockManagement::new(id, config, peer_messenger))
+        }
+        Config::Avalanche { config } => {
+            Box::new(AvalancheBlockManagement::new(id, config, peer_messenger))
+        }
     }
 }
 
@@ -85,9 +80,9 @@ pub async fn block_management_thread(
 ) {
     pf_info!(id; "block management stage starting...");
 
-    let mut block_management_stage = get_blk_creation(id, config, crypto_scheme, peer_messenger);
+    let mut block_management_stage = get_blk_creation(id, config, peer_messenger);
 
-    let batch_prepare_timeout = Duration::from_millis(10);
+    let batch_prepare_timeout = Duration::from_millis(1);
     let mut batch_prepare_time = Instant::now() + batch_prepare_timeout;
     let mut is_blk_full = false;
 
@@ -100,7 +95,11 @@ pub async fn block_management_thread(
     let mut peer_blks_recv = 0;
     let mut peer_txns_recv = 0;
 
+    let maximum_concurrency = 2;
+    let sem = Arc::new(Semaphore::new(maximum_concurrency));
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
+
+    let txns_validated = Arc::new(DashSet::new());
 
     loop {
         tokio::select! {
@@ -109,6 +108,7 @@ pub async fn block_management_thread(
                     Some((txn, ctx)) => {
                         pf_trace!(id; "got new txn {:?} {:?}", ctx, txn);
                         txns_recv += 1;
+                        txns_validated.insert(ctx.id);
                         if let Err(e) = block_management_stage.record_new_txn(txn, ctx).await {
                             pf_error!(id; "failed to record new txn: {:?}", e);
                             continue;
@@ -171,7 +171,16 @@ pub async fn block_management_thread(
                 pf_debug!(id; "got from {} new block {:?}, computing its context...", src, new_block);
 
                 let blk_sender = pending_blk_sender.clone();
+                let txns_validated = txns_validated.clone();
+                let semaphore = sem.clone();
                 tokio::task::spawn(async move {
+                    let permit = match semaphore.acquire().await {
+                        Ok(permit) => permit,
+                        Err(e) => {
+                            pf_error!(id; "failed to acquire concurrency: {:?}", e);
+                            return;
+                        }
+                    };
                     let blk_ctx = match BlkCtx::from_blk(&new_block) {
                         Ok(ctx) => ctx,
                         Err(e) => {
@@ -179,6 +188,24 @@ pub async fn block_management_thread(
                             return;
                         }
                     };
+
+                    for idx in 0..new_block.txns.len() {
+                        let txn = &new_block.txns[idx];
+                        let txn_ctx = &blk_ctx.txn_ctx[idx];
+
+                        if txns_validated.contains(&txn_ctx.id) {
+                            continue;
+                        }
+
+                        if txn.validate(crypto_scheme).await.unwrap_or(false) {
+                            txns_validated.insert(txn_ctx.id);
+                        } else {
+                            // invalid block
+                            return;
+                        }
+                    }
+
+                    drop(permit);
                     if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
                         pf_error!(id; "failed to send blk_context: {:?}", e);
                     }

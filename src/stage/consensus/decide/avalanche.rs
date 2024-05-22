@@ -31,10 +31,10 @@ struct VoteMsg {
     pub signature: Signature,
 }
 
-// struct DagNode {
-//     pub parents: Vec<Hash>,
-//     pub children: Vec<Hash>,
-// }
+struct DagNode {
+    pub parents: Vec<Hash>,
+    pub children: Vec<Hash>,
+}
 
 pub struct AvalancheDecision {
     id: NodeId,
@@ -44,8 +44,8 @@ pub struct AvalancheDecision {
     beta1: u64,
     beta2: u64,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
-    // txn_dag: HashMap<Hash, DagNode>,
-    txn_dag: HashMap<Hash, Vec<Hash>>,
+    txn_dag: HashMap<Hash, DagNode>,
+    // txn_dag: HashMap<Hash, Vec<Hash>>,
     conflict_sets: HashMap<(Hash, PubKey), ConflictSet>, // the cnt of grant txns is always its confidence
     confidence: HashMap<Hash, (bool, u64)>,              // (has_chit, confidence)
     // for voting
@@ -133,68 +133,50 @@ impl AvalancheDecision {
         }
     }
 
-    // fn is_strongly_preferred(&mut self, txn_hash: &Hash) -> bool {
-    //     // first check if the txn is already accpeted
-    //     let parents = match self.txn_dag.get(txn_hash) {
-    //         Some(node) => node.parents.clone(),
-    //         None => return true, // since the txn is already accepted
-    //     };
-
-    //     match self.preference_cache.get(&txn_hash) {
-    //         Some(res) => *res,
-    //         None => {
-    //             // check if the txn is preferred
-    //             if !self.is_preferred(txn_hash) {
-    //                 self.preference_cache.insert(txn_hash.clone(), false);
-    //                 return false;
-    //             }
-
-    //             // recursively check if all its parents are strongly preferred
-    //             for parent in parents {
-    //                 if !self.is_strongly_preferred(&parent) {
-    //                     self.preference_cache.insert(txn_hash.clone(), false);
-    //                     return false;
-    //                 }
-    //             }
-
-    //             self.preference_cache.insert(txn_hash.clone(), true);
-    //             true
-    //         }
-    //     }
-    // }
-
     fn is_strongly_preferred(&mut self, txn_hash: &Hash) -> bool {
         self.is_strongly_preferred_calls += 1;
 
         let mut frontier = VecDeque::new();
         frontier.push_back(txn_hash);
+        let mut checked = vec![];
 
-        while let Some(hash) = frontier.pop_front() {
+        let result = loop {
+            let hash = match frontier.pop_front() {
+                Some(hash) => hash,
+                None => break true,
+            };
+
             self.is_preferred_checks += 1;
             // first check if the txn is already accpeted
-            let parents = match self.txn_dag.get(hash) {
-                Some(parents) => parents,
-                None => return true, // since the txn is already accepted
+            let dag_node = match self.txn_dag.get(hash) {
+                Some(node) => node,
+                None => continue, // since the txn is already accepted
             };
 
-            let (is_preferred, cache_hit) = match self.preference_cache.get(hash) {
-                Some(val) => (*val, true),
-                None => (self.is_preferred(hash), false),
-            };
-
-            if !cache_hit {
-                self.preference_cache.insert(hash.clone(), is_preferred);
+            if let Some(strongly_preferred) = self.preference_cache.get(hash) {
+                if *strongly_preferred {
+                    continue;
+                } else {
+                    break false;
+                }
             }
 
-            // check if the txn is preferred
-            if !is_preferred {
-                return false;
+            // not in cache - recursively perform the check
+            checked.push(hash);
+
+            if !self.is_preferred(hash) {
+                break false;
             }
 
+            let parents: Vec<&Hash> = dag_node.parents.iter().collect();
             frontier.extend(parents);
+        };
+
+        for txn in checked {
+            self.preference_cache.insert(*txn, result);
         }
 
-        true
+        result
     }
 
     async fn handle_votes(
@@ -247,11 +229,12 @@ impl AvalancheDecision {
                     dag_frontier.push_back(txn_hash);
                     while let Some(next_txn) = dag_frontier.pop_front() {
                         dedup.insert(next_txn);
-                        let parents = match self.txn_dag.get(&next_txn) {
-                            Some(parents) => parents,
+                        let dag_node = match self.txn_dag.get(&next_txn) {
+                            Some(node) => node,
                             None => continue, // the txn is already committed
                         };
-                        dag_frontier.extend(parents.iter().filter(|hash| !dedup.contains(hash)));
+                        dag_frontier
+                            .extend(dag_node.parents.iter().filter(|hash| !dedup.contains(hash)));
                         // update confidence
                         let (chit, confidence) = self.confidence.get_mut(&next_txn).unwrap();
                         *confidence += 1;
@@ -288,18 +271,18 @@ impl AvalancheDecision {
                                         };
                                         if pref_confidence_score < confidence_score {
                                             // invalidate preference cache for ct.pref, next_txn and their offsprings
-                                            // let mut frontier = VecDeque::new();
-                                            // frontier.extend(vec![&ct.pref, &next_txn]);
-                                            // while let Some(txn) = frontier.pop_front() {
-                                            //     self.preference_cache.remove(txn);
-                                            //     let children = match self.txn_dag.get(txn) {
-                                            //         Some(node) => &node.children,
-                                            //         None => continue,
-                                            //     };
-                                            //     frontier.extend(children);
-                                            // }
-                                            self.preference_cache.remove(&next_txn);
-                                            self.preference_cache.remove(&ct.pref);
+                                            let mut frontier = VecDeque::new();
+                                            frontier.extend(vec![&ct.pref, &next_txn]);
+                                            while let Some(txn) = frontier.pop_front() {
+                                                self.preference_cache.remove(txn);
+                                                let children = match self.txn_dag.get(txn) {
+                                                    Some(node) => &node.children,
+                                                    None => continue,
+                                                };
+                                                frontier.extend(children);
+                                            }
+                                            // self.preference_cache.remove(&next_txn);
+                                            // self.preference_cache.remove(&ct.pref);
                                             // update conflict set
                                             ct.pref = next_txn;
                                             ct.count = 1;
@@ -321,7 +304,7 @@ impl AvalancheDecision {
 
                         // add accepted txns to commit queue
                         let mut parents_accepted = true;
-                        for parent in parents {
+                        for parent in dag_node.parents.iter() {
                             if self.txn_dag.contains_key(parent) {
                                 parents_accepted = false;
                                 break;
@@ -353,11 +336,11 @@ impl AvalancheDecision {
                     let mut dag_frontier = VecDeque::new();
                     dag_frontier.push_back(txn_hash);
                     while let Some(next_txn_hash) = dag_frontier.pop_front() {
-                        let parents = match self.txn_dag.get(&next_txn_hash) {
-                            Some(parents) => parents,
+                        let dag_node = match self.txn_dag.get(&next_txn_hash) {
+                            Some(node) => node,
                             None => continue, // the txn is already committed
                         };
-                        dag_frontier.extend(parents);
+                        dag_frontier.extend(dag_node.parents.iter());
 
                         let (txn, _) = self.txn_pool.get(&next_txn_hash).unwrap();
                         let avax_txn = match txn.as_ref() {
@@ -446,14 +429,14 @@ impl Decision for AvalancheDecision {
                     if !self.txn_pool.contains_key(&txn_hash) {
                         self.txn_pool
                             .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
-                        self.txn_dag.insert(txn_hash, vec![]);
-                        // self.txn_dag.insert(
-                        //     txn_hash,
-                        //     DagNode {
-                        //         parents: vec![],
-                        //         children: vec![],
-                        //     },
-                        // );
+                        // self.txn_dag.insert(txn_hash, vec![]);
+                        self.txn_dag.insert(
+                            txn_hash,
+                            DagNode {
+                                parents: vec![],
+                                children: vec![],
+                            },
+                        );
                         self.confidence.insert(txn_hash, (false, 0));
                     }
                     // vote true on grant msgs since they cannot conflict with others
@@ -469,19 +452,19 @@ impl Decision for AvalancheDecision {
                     if !self.txn_pool.contains_key(&txn_hash) {
                         self.txn_pool
                             .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
-                        self.txn_dag.insert(txn_hash, in_utxo.clone());
-                        // self.txn_dag.insert(
-                        //     txn_hash.clone(),
-                        //     DagNode {
-                        //         parents: in_utxo.clone(),
-                        //         children: vec![],
-                        //     },
-                        // );
-                        // for input_txn in in_utxo {
-                        //     if let Some(node) = self.txn_dag.get_mut(input_txn) {
-                        //         node.children.push(txn_hash.clone());
-                        //     }
-                        // }
+                        // self.txn_dag.insert(txn_hash, in_utxo.clone());
+                        self.txn_dag.insert(
+                            txn_hash.clone(),
+                            DagNode {
+                                parents: in_utxo.clone(),
+                                children: vec![],
+                            },
+                        );
+                        for input_txn in in_utxo {
+                            if let Some(node) = self.txn_dag.get_mut(input_txn) {
+                                node.children.push(txn_hash.clone());
+                            }
+                        }
                         self.confidence.insert(txn_hash, (false, 0));
                         // update conflict set as appropriate
                         for unspent_txn in in_utxo {
@@ -509,19 +492,19 @@ impl Decision for AvalancheDecision {
                     if !self.txn_pool.contains_key(&txn_hash) {
                         self.txn_pool
                             .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
-                        self.txn_dag.insert(txn_hash, parents.clone());
-                        // self.txn_dag.insert(
-                        //     txn_hash,
-                        //     DagNode {
-                        //         parents: parents.clone(),
-                        //         children: vec![],
-                        //     },
-                        // );
-                        // for input_txn in parents {
-                        //     if let Some(node) = self.txn_dag.get_mut(input_txn) {
-                        //         node.children.push(txn_hash.clone());
-                        //     }
-                        // }
+                        // self.txn_dag.insert(txn_hash, parents.clone());
+                        self.txn_dag.insert(
+                            txn_hash,
+                            DagNode {
+                                parents: parents.clone(),
+                                children: vec![],
+                            },
+                        );
+                        for input_txn in parents {
+                            if let Some(node) = self.txn_dag.get_mut(input_txn) {
+                                node.children.push(txn_hash.clone());
+                            }
+                        }
                         self.confidence.insert(txn_hash, (false, 0));
                     }
                     votes.push(self.is_strongly_preferred(&txn_hash));
@@ -599,12 +582,16 @@ impl Decision for AvalancheDecision {
     }
 
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError> {
+        let msg: VoteMsg = bincode::deserialize(content.as_ref())?;
+        if self.finished_query.contains(&msg.round) {
+            return Ok(());
+        }
+
         let peer_pk = self.neighbor_pks.entry(src).or_insert_with(|| {
             let (pk, _) = self.crypto_scheme.gen_key_pair(src.into());
             pk
         });
 
-        let msg: VoteMsg = bincode::deserialize(content.as_ref())?;
         let content = (msg.round, msg.votes);
         let serialized_content = bincode::serialize(&content)?;
         let (blk_id, votes) = content;
@@ -621,6 +608,7 @@ impl Decision for AvalancheDecision {
 
     fn report(&mut self) {
         pf_info!(self.id; "In the last minute: is_strongly_preferred_calls: {}, is_preferred_checks: {}", self.is_strongly_preferred_calls, self.is_preferred_checks);
+        pf_info!(self.id; "working set size: txn_dag: {}, perference_cache: {}", self.txn_dag.len(), self.preference_cache.len());
         self.is_strongly_preferred_calls = 0;
         self.is_preferred_checks = 0;
     }

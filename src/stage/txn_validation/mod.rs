@@ -1,41 +1,53 @@
-mod dummy;
-use dummy::DummyTxnValidation;
-
-mod bitcoin;
-use bitcoin::BitcoinTxnValidation;
-
-mod avalanche;
-use avalanche::AvalancheTxnValidation;
-
 use crate::context::TxnCtx;
+use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
 
-use async_trait::async_trait;
-
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use crate::config::Config;
 
-#[async_trait]
-pub trait TxnValidation: Send + Sync {
-    async fn validate(&mut self, txn: Arc<Txn>) -> Result<Option<Arc<TxnCtx>>, CopycatError>;
+pub struct TxnValidation {
+    txn_seen: HashSet<Hash>,
+    crypto_scheme: CryptoScheme,
 }
 
-fn get_txn_validation(config: Config, crypto_scheme: CryptoScheme) -> Box<dyn TxnValidation> {
-    match config {
-        Config::Dummy => Box::new(DummyTxnValidation::new()),
-        Config::Bitcoin { .. } => Box::new(BitcoinTxnValidation::new(crypto_scheme)),
-        Config::Avalanche { .. } => Box::new(AvalancheTxnValidation::new(crypto_scheme)),
+impl TxnValidation {
+    pub fn new(crypto_scheme: CryptoScheme) -> Self {
+        Self {
+            txn_seen: HashSet::new(),
+            crypto_scheme,
+        }
     }
+
+    pub async fn validate(&mut self, txn: Arc<Txn>) -> Result<Option<Arc<TxnCtx>>, CopycatError> {
+        let txn_ctx = Arc::new(TxnCtx::from_txn(&txn)?);
+        let hash = &txn_ctx.id;
+
+        if self.txn_seen.contains(hash) {
+            return Ok(Some(txn_ctx));
+        }
+
+        if !txn.validate(self.crypto_scheme).await? {
+            return Ok(None);
+        }
+
+        self.txn_seen.insert(*hash);
+        Ok(Some(txn_ctx))
+    }
+}
+
+fn get_txn_validation(crypto_scheme: CryptoScheme) -> TxnValidation {
+    TxnValidation::new(crypto_scheme)
 }
 
 pub async fn txn_validation_thread(
     id: NodeId,
-    config: Config,
+    _config: Config,
     crypto_scheme: CryptoScheme,
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
@@ -43,7 +55,7 @@ pub async fn txn_validation_thread(
 ) {
     pf_info!(id; "txn validation stage starting...");
 
-    let mut txn_validation_stage = get_txn_validation(config, crypto_scheme);
+    let mut txn_validation_stage = get_txn_validation(crypto_scheme);
 
     let mut report_time = Instant::now() + Duration::from_secs(60);
     let mut self_txns_validated = 0;

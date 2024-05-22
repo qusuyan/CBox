@@ -11,18 +11,22 @@ use copycat::{transaction::Txn, ChainType, CopycatError, CryptoScheme, NodeId};
 
 use std::sync::Arc;
 
+pub type FlowGenId = u64;
+pub type ClientId = u64;
+
 pub struct Stats {
     pub latency: f64,
     pub num_committed: u64,
     pub chain_length: u64,
     pub commit_confidence: f64,
+    pub inflight_txns: usize,
 }
 
 #[async_trait]
 pub trait FlowGen {
-    async fn setup_txns(&mut self) -> Result<Vec<(NodeId, Arc<Txn>)>, CopycatError>;
+    async fn setup_txns(&mut self) -> Result<Vec<(ClientId, Arc<Txn>)>, CopycatError>;
     async fn wait_next(&self) -> Result<(), CopycatError>;
-    async fn next_txn_batch(&mut self) -> Result<Vec<(NodeId, Arc<Txn>)>, CopycatError>;
+    async fn next_txn_batch(&mut self) -> Result<Vec<(ClientId, Arc<Txn>)>, CopycatError>;
     async fn txn_committed(
         &mut self,
         node: NodeId,
@@ -33,7 +37,8 @@ pub trait FlowGen {
 }
 
 pub fn get_flow_gen(
-    node_list: Vec<NodeId>,
+    id: FlowGenId,
+    client_list: Vec<ClientId>,
     num_accounts: usize,
     max_inflight: usize,
     frequency: usize,
@@ -42,14 +47,16 @@ pub fn get_flow_gen(
 ) -> Box<dyn FlowGen> {
     match chain {
         ChainType::Bitcoin => Box::new(BitcoinFlowGen::new(
-            node_list,
+            id,
+            client_list,
             num_accounts,
             max_inflight,
             frequency,
             crypto,
         )),
         ChainType::Avalanche => Box::new(AvalancheFlowGen::new(
-            node_list,
+            id,
+            client_list,
             num_accounts,
             max_inflight,
             frequency,

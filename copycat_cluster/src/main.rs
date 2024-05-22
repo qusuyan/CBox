@@ -35,6 +35,10 @@ struct CliArgs {
     #[clap(long, short = 't', default_value_t = 8)]
     num_threads: u64,
 
+    /// Number of concurrent TCP streams between each pair of peers
+    #[clap(long, short = 'o', default_value_t = 1)]
+    num_conn_per_peer: usize,
+
     /// The type of blockchain
     #[arg(long, short = 'c', value_enum, default_value = "dummy")]
     chain: ChainType,
@@ -46,6 +50,10 @@ struct CliArgs {
     /// Cryptography scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
     crypto: CryptoScheme,
+
+    /// Number of clients
+    #[arg(long, short = 'l')]
+    num_clients: Option<usize>,
 
     /// Number of user accounts for flow generation
     #[arg(long, short = 'a', default_value = "10000")]
@@ -130,6 +138,9 @@ fn main() {
 
     log::info!("{:?}", args);
 
+    let txn_crypto = args.crypto;
+    let p2p_crypto = args.crypto;
+
     // get mailbox parameters
     let machine_config_path = args.machine_config;
     let machine_list = match mailbox::config::read_machine_config(&machine_config_path) {
@@ -192,8 +203,12 @@ fn main() {
 
     // get flow generation metrics
     let txn_span = args.txn_span;
+    let client_list: Vec<u64> = match args.num_clients {
+        Some(clients) => (0..clients as u64).collect(),
+        None => (0..local_nodes.len() as u64).collect(),
+    };
     let mut req_dsts = HashMap::new();
-    for idx in 0..local_nodes.len() {
+    for idx in 0..client_list.len() {
         let dsts = if txn_span == 0 {
             local_nodes.clone()
         } else {
@@ -203,7 +218,7 @@ fn main() {
             }
             dsts
         };
-        req_dsts.insert(local_nodes[idx], dsts);
+        req_dsts.insert(client_list[idx], dsts);
     }
 
     let max_inflight = args.max_inflight;
@@ -227,7 +242,7 @@ fn main() {
 
     runtime.block_on(async {
         // start mailbox
-        let _mailbox = match Mailbox::init(id, machine_list, pipe_info).await {
+        let _mailbox = match Mailbox::init(id, machine_list, pipe_info, args.num_conn_per_peer).await {
             Ok(mailbox) => mailbox,
             Err(e) => {
                 log::error!("Mailbox initialization failed with error {:?}", e);
@@ -244,7 +259,8 @@ fn main() {
                 node_id,
                 args.chain,
                 args.dissem_pattern,
-                args.crypto,
+                txn_crypto,
+                p2p_crypto,
                 node_config.clone(),
                 !args.disable_txn_dissem,
                 topology.remove(&node_id).unwrap_or(HashSet::new()),
@@ -280,7 +296,8 @@ fn main() {
 
         // run flowgen
         let mut flow_gen = get_flow_gen(
-            local_nodes,
+            id, 
+            client_list,
             num_accounts,
             max_inflight,
             frequency,
@@ -289,8 +306,8 @@ fn main() {
         );
         let init_txns = flow_gen.setup_txns().await.unwrap();
 
-        for (dst_node, txn) in init_txns {
-            let receiving_node_ids = req_dsts.get(&dst_node).unwrap();
+        for (client_id, txn) in init_txns {
+            let receiving_node_ids = req_dsts.get(&client_id).unwrap();
             let receiving_nodes = receiving_node_ids.iter().map(|node_id| (node_id, node_map.get(node_id).unwrap()));
             for (id, node) in receiving_nodes {
                 if let Err(e) = node.send_req(txn.clone()).await {
@@ -302,11 +319,13 @@ fn main() {
 
         log::info!("setup txns sent");
         let start_time = Instant::now();
-        let mut report_time = start_time + Duration::from_secs(60);
+        let report_interval = 60f64;
+        let mut report_time = start_time + Duration::from_secs_f64(report_interval);
         // wait when setup txns are propogated over the network
         tokio::time::sleep(Duration::from_secs(10)).await;
         log::info!("flow generation starts");
         let mut txns_sent = 0;
+        let mut prev_committed = 0;
 
         loop {
             tokio::select! {
@@ -326,8 +345,8 @@ fn main() {
 
                     txns_sent += next_req_batch.len();
 
-                    for (dst_node, next_req) in next_req_batch.into_iter() {
-                        let receiving_node_ids = req_dsts.get(&dst_node).unwrap();
+                    for (client_id, next_req) in next_req_batch.into_iter() {
+                        let receiving_node_ids = req_dsts.get(&client_id).unwrap();
                         let receiving_nodes = receiving_node_ids.iter().map(|node_id| (node_id, node_map.get(node_id).unwrap()));
                         for (id, node) in receiving_nodes {
                             if let Err(e) = node.send_req(next_req.clone()).await {
@@ -356,7 +375,8 @@ fn main() {
                 _ = tokio::time::sleep_until(report_time) => {
                     let stats = flow_gen.get_stats();
                     let run_time =  (report_time - start_time).as_secs_f64();
-                    let tput = stats.num_committed as f64 / run_time;
+                    let newly_committed = stats.num_committed - prev_committed;
+                    let tput = newly_committed as f64 / report_interval;
                     log::info!(
                         "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit confidence: {}",
                         run_time,
@@ -368,9 +388,10 @@ fn main() {
                     stats_file
                         .write_fmt(format_args!("{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence))
                         .expect("write stats failed");
-                    log::info!("In the last minute: txns_sent: {}", txns_sent);
+                    log::info!("In the last minute: txns_sent: {}, inflight_txns: {}", txns_sent, stats.inflight_txns);
                     txns_sent = 0;
-                    report_time += Duration::from_secs(60);
+                    prev_committed = stats.num_committed;
+                    report_time += Duration::from_secs_f64(report_interval);
                 }
             }
         }

@@ -6,7 +6,6 @@ use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::{AvalancheTxn, Txn};
-use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -33,7 +32,6 @@ struct PeerReq {
 
 pub struct AvalancheBlockManagement {
     id: NodeId,
-    crypto_scheme: CryptoScheme,
     blk_len: usize,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     txn_dag: HashMap<Hash, DagNode>,
@@ -51,19 +49,14 @@ pub struct AvalancheBlockManagement {
     blk_quota: usize,
     // for reporting data and debugging
     blk_quota_recved: usize,
+    signatures_validated: usize,
 }
 
 impl AvalancheBlockManagement {
-    pub fn new(
-        id: NodeId,
-        crypto_scheme: CryptoScheme,
-        config: AvalancheConfig,
-        peer_messenger: Arc<PeerMessenger>,
-    ) -> Self {
+    pub fn new(id: NodeId, config: AvalancheConfig, peer_messenger: Arc<PeerMessenger>) -> Self {
         let proposal_timeout = Duration::from_secs_f64(config.proposal_timeout_secs);
         Self {
             id,
-            crypto_scheme,
             blk_len: config.blk_len,
             txn_pool: HashMap::new(),
             txn_dag: HashMap::new(),
@@ -77,6 +70,7 @@ impl AvalancheBlockManagement {
             pending_blks: HashMap::new(),
             blk_quota: 0,
             blk_quota_recved: 0,
+            signatures_validated: 0,
         }
     }
 }
@@ -202,8 +196,8 @@ impl BlockManagement for AvalancheBlockManagement {
 
         let mut in_frontier = true;
         for parent in parents.iter() {
-            if let Some(siblings) = self.txn_dag.get_mut(parent) {
-                siblings.children.insert(txn_hash);
+            if let Some(parent_node) = self.txn_dag.get_mut(parent) {
+                parent_node.children.insert(txn_hash);
                 in_frontier = false;
             }
         }
@@ -226,7 +220,11 @@ impl BlockManagement for AvalancheBlockManagement {
                 None => break false,
             };
 
-            let node = self.txn_dag.remove(&next_txn).unwrap();
+            let node = match self.txn_dag.remove(&next_txn) {
+                Some(node) => node,
+                None => continue,
+            };
+
             for child in node.children {
                 let child_node = match self.txn_dag.get_mut(&child) {
                     Some(node) => node,
@@ -323,15 +321,20 @@ impl BlockManagement for AvalancheBlockManagement {
                 // txn has been validated before
                 filtered_txns.push(txn.clone());
                 blk_txn_ctx.push(txn_ctx.clone());
+                if let Some(dag_node) = self.txn_dag.get(&txn_hash) {
+                    if dag_node.num_parents == 0 {
+                        self.dag_frontier.push_front(txn_hash);
+                    }
+                }
                 continue;
             }
 
-            // I have not seen this txn before, adding to txn_pool and txn_dag so that it will get proposed later
             let avax_txn = match txn.as_ref() {
                 Txn::Avalanche { txn } => txn,
                 _ => unreachable!(),
             };
 
+            // I have not seen this txn before, adding to txn_pool and txn_dag so that it will get proposed later
             let (txn, txn_ctx) = match avax_txn {
                 AvalancheTxn::Noop { .. } | AvalancheTxn::PlaceHolder => {
                     // if noop txn, bypass all tests since it is just used to drive consensus
@@ -350,24 +353,13 @@ impl BlockManagement for AvalancheBlockManagement {
                             children: HashSet::new(),
                         },
                     );
+                    pending_frontier.push(txn_hash);
                     (txn.clone(), txn_ctx.clone())
                 }
-                AvalancheTxn::Send {
-                    sender,
-                    in_utxo,
-                    sender_signature,
-                    ..
-                } => {
-                    // verify signature
-                    let serialized_in_txo = bincode::serialize(in_utxo)?;
-                    let mut valid = self
-                        .crypto_scheme
-                        .verify(sender, &serialized_in_txo, sender_signature)
-                        .await?;
-                    let mut pending = false;
-
+                AvalancheTxn::Send { in_utxo, .. } => {
                     // verify validity
-                    if valid {
+                    let mut pending = false;
+                    let valid = {
                         let (is_valid, txn_missing_deps) = self.validate_txn(avax_txn)?;
                         pf_trace!(self.id; "Validating txn returned is_valid: {}, missing_deps: {:?}", is_valid, txn_missing_deps);
                         if txn_missing_deps.len() > 0 {
@@ -377,11 +369,11 @@ impl BlockManagement for AvalancheBlockManagement {
                                 pending_txns.push(idx);
                                 pending = true;
                             }
-                            valid = false;
+                            false
                         } else {
-                            valid = is_valid;
+                            is_valid
                         }
-                    }
+                    };
 
                     if valid {
                         // add to txn pool if valid
@@ -595,5 +587,7 @@ impl BlockManagement for AvalancheBlockManagement {
 
     fn report(&mut self) {
         pf_info!(self.id; "blk_quota_recved: {}, blk_quota: {}", self.blk_quota_recved, self.blk_quota);
+        pf_info!(self.id; "In the last minute: signature_validated: {}", self.signatures_validated);
+        self.signatures_validated = 0;
     }
 }

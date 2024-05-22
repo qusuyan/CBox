@@ -1,7 +1,10 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::crypto::{Hash, PubKey, Signature};
+use crate::{
+    protocol::crypto::{Hash, PubKey, Signature},
+    CopycatError, CryptoScheme,
+};
 
 use tokio::time::Duration;
 
@@ -27,6 +30,25 @@ pub enum BitcoinTxn {
         out_utxo: u64,
         receiver: PubKey,
     },
+}
+
+impl BitcoinTxn {
+    pub async fn validate(&self, crypto: CryptoScheme) -> Result<bool, CopycatError> {
+        match self {
+            BitcoinTxn::Send {
+                sender,
+                in_utxo,
+                sender_signature,
+                ..
+            } => {
+                let serialized_in_txo = bincode::serialize(in_utxo)?;
+                crypto
+                    .verify(sender, &serialized_in_txo, sender_signature)
+                    .await
+            }
+            BitcoinTxn::Grant { .. } | BitcoinTxn::Incentive { .. } => Ok(true),
+        }
+    }
 }
 
 impl GetSize for BitcoinTxn {}

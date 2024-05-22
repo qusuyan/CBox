@@ -1,17 +1,19 @@
 use super::{FlowGen, Stats};
+use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{AvalancheTxn, Txn};
 use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
 
 use async_trait::async_trait;
 use rand::Rng;
+use tokio::sync::Notify;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
 
 const UNSET: usize = 0;
-const MAX_BATCH_FREQ: usize = 1;
+const MAX_BATCH_FREQ: usize = 100; // 100 batches per sec max, or 1 batch every 10 ms
 
 struct DagInfo {
     num_blks: u64,
@@ -23,39 +25,44 @@ pub struct AvalancheFlowGen {
     max_inflight: usize,
     batch_frequency: usize,
     batch_size: usize,
+    next_batch_time: Instant,
     crypto: CryptoScheme,
-    node_list: Vec<NodeId>,
-    utxos: HashMap<NodeId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
-    accounts: HashMap<NodeId, Vec<(PubKey, PrivKey)>>,
+    client_list: Vec<ClientId>,
+    utxos: HashMap<ClientId, Vec<(usize, Hash, u64)>>,
+    accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
     in_flight: HashMap<Hash, Instant>,
     num_completed_txns: u64,
     dag_info: HashMap<NodeId, DagInfo>,
     total_time_sec: f64,
+    _notify: Notify,
 }
 
 impl AvalancheFlowGen {
     pub fn new(
-        node_list: Vec<NodeId>,
+        id: FlowGenId,
+        client_list: Vec<ClientId>,
         num_accounts: usize,
         max_inflight: usize,
         frequency: usize,
         crypto: CryptoScheme,
     ) -> Self {
-        let accounts_per_node = num_accounts / node_list.len();
-        assert!(accounts_per_node > 1);
+        let accounts_per_node = if client_list.len() == 0 {
+            0
+        } else {
+            num_accounts / client_list.len()
+        };
 
+        let mut i = 0u64;
         let mut accounts = HashMap::new();
         let mut utxos = HashMap::new();
-        for node in node_list.iter() {
-            for i in 0..accounts_per_node as u64 {
-                let seed = ((*node as u128) << 64) | i as u128;
+        for client in client_list.iter() {
+            for _ in 0..accounts_per_node as u64 {
+                let seed = (id << 32) | i;
+                i += 1;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
-                utxos
-                    .entry(*node)
-                    .or_insert(HashMap::new())
-                    .insert(pubkey.clone(), VecDeque::new());
+                utxos.entry(*client).or_insert(vec![]);
                 accounts
-                    .entry(*node)
+                    .entry(*client)
                     .or_insert(vec![])
                     .push((pubkey, privkey));
             }
@@ -63,6 +70,8 @@ impl AvalancheFlowGen {
 
         let (batch_size, batch_frequency) = if frequency == UNSET {
             (max_inflight, UNSET)
+        } else if frequency < MAX_BATCH_FREQ {
+            (1, frequency)
         } else {
             (frequency / MAX_BATCH_FREQ, MAX_BATCH_FREQ)
         };
@@ -71,32 +80,39 @@ impl AvalancheFlowGen {
             max_inflight,
             batch_frequency,
             batch_size,
+            next_batch_time: Instant::now(),
             crypto,
-            node_list,
+            client_list,
             utxos,
             accounts,
             in_flight: HashMap::new(),
             num_completed_txns: 0,
             total_time_sec: 0.0,
             dag_info: HashMap::new(),
+            _notify: Notify::new(),
         }
     }
 }
 
 #[async_trait]
 impl FlowGen for AvalancheFlowGen {
-    async fn setup_txns(&mut self) -> Result<Vec<(NodeId, Arc<Txn>)>, CopycatError> {
+    async fn setup_txns(&mut self) -> Result<Vec<(ClientId, Arc<Txn>)>, CopycatError> {
         let mut txns = Vec::new();
-        for (node, utxo_map) in self.utxos.iter_mut() {
-            for (account, utxos) in utxo_map.iter_mut() {
+        for (node, accounts) in self.accounts.iter() {
+            for idx in 0..accounts.len() {
+                let (pk, _) = accounts[idx];
                 let txn = Txn::Avalanche {
                     txn: AvalancheTxn::Grant {
-                        out_utxo: 100,
-                        receiver: *account,
+                        out_utxo: 10,
+                        receiver: pk,
                     },
                 };
                 let txn_ctx = TxnCtx::from_txn(&txn)?;
-                utxos.push_back((txn_ctx.id, 100));
+                // utxos.push_back((txn_ctx.id, 10));
+                self.utxos
+                    .get_mut(node)
+                    .unwrap()
+                    .push((idx, txn_ctx.id, 10));
                 txns.push((*node, Arc::new(txn)));
             }
         }
@@ -105,16 +121,15 @@ impl FlowGen for AvalancheFlowGen {
     }
 
     async fn wait_next(&self) -> Result<(), CopycatError> {
+        // do nothing if no client
+        if self.client_list.len() == 0 {
+            self._notify.notified().await;
+        }
+
         loop {
             if self.max_inflight == UNSET || self.in_flight.len() < self.max_inflight {
-                if self.batch_frequency != UNSET {
-                    // poisson interarrival time
-                    let interarrival_time = {
-                        let mut rng = rand::thread_rng();
-                        let u: f64 = rng.gen();
-                        -(1f64 - u).ln() / self.batch_frequency as f64
-                    };
-                    tokio::time::sleep(Duration::from_secs_f64(interarrival_time)).await
+                if Instant::now() < self.next_batch_time {
+                    tokio::time::sleep_until(self.next_batch_time).await;
                 }
                 return Ok(());
             }
@@ -122,7 +137,8 @@ impl FlowGen for AvalancheFlowGen {
         }
     }
 
-    async fn next_txn_batch(&mut self) -> Result<Vec<(NodeId, Arc<Txn>)>, CopycatError> {
+    async fn next_txn_batch(&mut self) -> Result<Vec<(ClientId, Arc<Txn>)>, CopycatError> {
+        let start_time = Instant::now();
         let mut batch = vec![];
         let batch_size = if self.max_inflight == UNSET {
             self.batch_size
@@ -130,56 +146,57 @@ impl FlowGen for AvalancheFlowGen {
             std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len())
         };
         for _ in 0..batch_size {
-            let node = self.node_list[rand::random::<usize>() % self.node_list.len()];
+            let node = self.client_list[rand::random::<usize>() % self.client_list.len()];
             let accounts = self.accounts.get(&node).unwrap();
             let utxos = self.utxos.get_mut(&node).unwrap();
 
-            let (sender, remainder, recver, out_utxo, txn) = loop {
-                let sender = rand::random::<usize>() % accounts.len();
-                let mut receiver = rand::random::<usize>() % (accounts.len() - 1);
-                if receiver >= sender {
-                    receiver += 1; // avoid sending to self
-                }
+            let send_utxo_idx = rand::random::<usize>() % utxos.len();
+            let (sender_idx, in_utxo_raw, in_utxo_amount) = utxos.remove(send_utxo_idx);
+            let (sender_pk, sender_sk) = accounts[sender_idx];
 
-                let (sender_pk, sender_sk) = accounts.get(sender).unwrap();
-                let (recver_pk, _) = accounts.get(receiver).unwrap();
-                let sender_utxos = utxos.get_mut(sender_pk).unwrap();
-                if sender_utxos.is_empty() {
-                    continue; // retry
-                }
+            let mut recver_idx = rand::random::<usize>() % (accounts.len() - 1);
+            if recver_idx >= sender_idx {
+                recver_idx += 1; // avoid sending to self
+            }
+            let (recver_pk, _) = accounts[recver_idx];
 
-                let (in_utxo_raw, amount) = sender_utxos.pop_front().unwrap();
-                let in_utxo = vec![in_utxo_raw];
-                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-                let sender_signature = self.crypto.sign(sender_sk, &serialized_in_utxo).await?;
-                let out_utxo = std::cmp::min(amount, 10);
-                let remainder = amount - out_utxo;
-                let txn = Arc::new(Txn::Avalanche {
-                    txn: AvalancheTxn::Send {
-                        sender: *sender_pk,
-                        in_utxo,
-                        receiver: *recver_pk,
-                        out_utxo,
-                        remainder,
-                        sender_signature,
-                    },
-                });
-                break (sender_pk, remainder, recver_pk, out_utxo, txn);
-            };
+            let in_utxo = vec![in_utxo_raw];
+            let serialized_in_utxo = bincode::serialize(&in_utxo)?;
+            let sender_signature = self.crypto.sign(&sender_sk, &serialized_in_utxo).await?;
+            let out_utxo = std::cmp::min(in_utxo_amount, 10);
+            let remainder = in_utxo_amount - out_utxo;
+            let txn = Arc::new(Txn::Avalanche {
+                txn: AvalancheTxn::Send {
+                    sender: sender_pk,
+                    in_utxo,
+                    receiver: recver_pk,
+                    out_utxo,
+                    remainder,
+                    sender_signature,
+                },
+            });
 
             let txn_ctx = TxnCtx::from_txn(&txn)?;
             let txn_hash = txn_ctx.id;
             if remainder > 0 {
-                let sender_utxos = utxos.get_mut(sender).unwrap();
-                sender_utxos.push_back((txn_hash.clone(), remainder));
+                utxos.push((sender_idx, txn_hash.clone(), remainder));
             }
             if out_utxo > 0 {
-                let recver_utxos = utxos.get_mut(recver).unwrap();
-                recver_utxos.push_back((txn_hash.clone(), out_utxo));
+                utxos.push((recver_idx, txn_hash.clone(), out_utxo));
             }
 
             self.in_flight.insert(txn_hash, Instant::now());
             batch.push((node, txn));
+        }
+
+        if self.batch_frequency != UNSET {
+            // poisson interarrival time
+            let interarrival_time = {
+                let mut rng = rand::thread_rng();
+                let u: f64 = rng.gen();
+                -(1f64 - u).ln() / self.batch_frequency as f64
+            };
+            self.next_batch_time = start_time + Duration::from_secs_f64(interarrival_time);
         }
         Ok(batch)
     }
@@ -263,6 +280,7 @@ impl FlowGen for AvalancheFlowGen {
             num_committed,
             chain_length,
             commit_confidence,
+            inflight_txns: self.in_flight.len(),
         }
     }
 }

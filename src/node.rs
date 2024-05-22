@@ -37,7 +37,8 @@ impl Node {
         id: NodeId,
         chain_type: ChainType,
         dissem_pattern: DissemPattern,
-        crypto_scheme: CryptoScheme,
+        txn_crpyto: CryptoScheme,
+        p2p_crypto: CryptoScheme,
         config: Config,
         dissem_txns: bool,
         neighbors: HashSet<NodeId>,
@@ -71,7 +72,7 @@ impl Node {
         let _txn_validation_handle = tokio::spawn(txn_validation_thread(
             id,
             config.clone(),
-            crypto_scheme,
+            txn_crpyto,
             req_recv,
             peer_txn_recv,
             validated_txn_send,
@@ -99,7 +100,7 @@ impl Node {
         let _block_management_handle = tokio::spawn(block_management_thread(
             id,
             config.clone(),
-            crypto_scheme,
+            txn_crpyto,
             peer_blk_recv,
             peer_blk_req_recv,
             // peer_blk_resp_recv,
@@ -120,7 +121,7 @@ impl Node {
 
         let _decision_handle = tokio::spawn(decision_thread(
             id,
-            crypto_scheme,
+            p2p_crypto,
             config.clone(),
             peer_messenger.clone(),
             peer_consensus_recv,

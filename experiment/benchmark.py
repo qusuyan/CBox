@@ -95,14 +95,17 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         cluster.copy_to(addr, "bench_topo.json", f'{cluster.workdir}/bench_topo.json')
 
     # compute 
-    num_flow_gen = 1 if params["disable-txn-dissem"] else params["num-machines"] if params["single-process-cluster"] else params["num-nodes"]
+    num_flow_gen = 1 if params["disable-txn-dissem"] else params["num-clients"]
     num_accounts = int(params["num-accounts"] / num_flow_gen)
     max_inflight = int(params["max-inflight-txns"] / num_flow_gen)
     frequency = int(params["frequency"] / num_flow_gen)
 
+    clients_per_machine = int(params["num-clients"] / params["num-machines"])
+    clients_remainder = params["num-clients"] % params["num-machines"]
+
     if params["single-process-cluster"]:
-        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["chain-type"], params["dissem"], 
-                    num_accounts, max_inflight, frequency, params["txn-span"], params["disable-txn-dissem"], params["config"]]
+        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["chain-type"], params["dissem"], params["crypto"], params["conn_multiply"], 
+                    clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["txn-span"], params["disable-txn-dissem"], params["config"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -142,11 +145,14 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
                 files.append((addr, stats_file))
     print(files)
 
-    stats = { "tput": 0 }
+    stats = { "peak_tput": 0 }
+    cumulative_tput = 0
     for (addr, stats_file) in files:
         cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
         df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
-        stats["tput"] = max(stats["tput"], df.iloc[-1]['Throughput (txn/s)'])
+        stats["peak_tput"] = max(stats["peak_tput"], df.loc[:, 'Throughput (txn/s)'].max())
+        cumulative_tput += df.loc[:, 'Throughput (txn/s)'].mean()
+    stats["avg_tput"] = cumulative_tput / len(files)
 
     with open(f"./results/{exp_name}/stats.json", "w") as f:
         json.dump(stats, f, indent=2)
@@ -158,23 +164,26 @@ if __name__ == "__main__":
         "build-type": "release",
         "num-nodes": 4,
         "num-machines": 1,
+        "num-clients": 10,
         "node-threads": 8,
         "mailbox-threads": 8,
         "cluster-threads": 40,
-        "network-delay": 150, # in millis
-        "network-bw": 25000000, # in B/s
+        "network-delay": 30, # in millis
+        "network-bw": 100000000, # in B/s
         "chain-type": "bitcoin",
         "exp-time": 300, # in s
         "num-accounts": 10000,
         "max-inflight-txns": 100000,
         "frequency": 0,
-        "txn-span": 0,
+        "txn-span": 1,
         "config": "",
         "topo-degree": 3,
         "topo-skewness": 0.0, # uniform
         "dissem": "broadcast", # broadcast or gossip
         "disable-txn-dissem": False,
+        "crypto": "dummy",
         "single-process-cluster": True,
+        "conn_multiply": 1,
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

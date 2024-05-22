@@ -1,5 +1,6 @@
 mod dummy;
 mod dummy_ecdsa;
+mod ecdsa;
 
 use tokio::time::Duration;
 
@@ -19,14 +20,16 @@ pub type Signature = Vec<u8>;
 pub enum CryptoScheme {
     Dummy,
     DummyECDSA,
+    ECDSA,
     // TODO: add ECDSA for bitcoin
 }
 
 impl CryptoScheme {
-    pub fn gen_key_pair(&self, seed: u128) -> (PubKey, PrivKey) {
+    pub fn gen_key_pair(&self, seed: u64) -> (PubKey, PrivKey) {
         match self {
             CryptoScheme::Dummy => dummy::gen_key_pair(seed),
             CryptoScheme::DummyECDSA => dummy_ecdsa::gen_key_pair(seed),
+            CryptoScheme::ECDSA => ecdsa::gen_key_pair(seed),
         }
     }
 
@@ -34,6 +37,7 @@ impl CryptoScheme {
         match self {
             CryptoScheme::Dummy => dummy::sign(privkey, input),
             CryptoScheme::DummyECDSA => dummy_ecdsa::sign(privkey, input).await,
+            CryptoScheme::ECDSA => ecdsa::sign(privkey, input),
         }
     }
 
@@ -46,6 +50,7 @@ impl CryptoScheme {
         match self {
             CryptoScheme::Dummy => dummy::verify(pubkey, input, signature),
             CryptoScheme::DummyECDSA => dummy_ecdsa::verify(pubkey, input, signature).await,
+            CryptoScheme::ECDSA => ecdsa::verify(pubkey, input, signature),
         }
     }
 }

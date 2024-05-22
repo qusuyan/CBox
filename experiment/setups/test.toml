@@ -4,10 +4,22 @@ num_iterations = 1
 [parameters]
 chain-type = "avalanche"
 cluster-threads = 32
+# config = [
+#   "blk_len=40+max_inflight_blk=30",
+#   "blk_len=40+max_inflight_blk=50",
+#   "blk_len=20+max_inflight_blk=60",
+#   "blk_len=20+max_inflight_blk=70",
+#   "blk_len=20+max_inflight_blk=80",
+#   "blk_len=20+max_inflight_blk=90",
+# ]
+config = "blk_len=40+max_inflight_blk=40"
+conn_multiply = 20
+crypto = "dummy-ecdsa"
 dissem = "sample"
-exp-time = 200
-frequency = 0
-max-inflight-txns = 100000
-num-accounts = 100
-num-machines = 10
-num-nodes = 10
+exp-time = 320
+max-inflight-txns = 4000
+num-accounts = 160
+num-clients = 20
+num-machines = 20
+num-nodes = 120
+txn-span = 1
