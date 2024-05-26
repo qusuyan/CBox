@@ -107,7 +107,7 @@ impl FlowGen for BitcoinFlowGen {
                 let txn = Txn::Bitcoin {
                     txn: BitcoinTxn::Grant {
                         out_utxo: 100,
-                        receiver: *account,
+                        receiver: account.clone(),
                     },
                 };
                 let txn_ctx = TxnCtx::from_txn(&txn)?;
@@ -171,9 +171,9 @@ impl FlowGen for BitcoinFlowGen {
                 let remainder = amount - out_utxo;
                 let txn = Arc::new(Txn::Bitcoin {
                     txn: BitcoinTxn::Send {
-                        sender: *sender_pk,
+                        sender: sender_pk.clone(),
                         in_utxo,
-                        receiver: *recver_pk,
+                        receiver: recver_pk.clone(),
                         out_utxo,
                         remainder,
                         sender_signature,

@@ -100,11 +100,11 @@ impl FlowGen for AvalancheFlowGen {
         let mut txns = Vec::new();
         for (node, accounts) in self.accounts.iter() {
             for idx in 0..accounts.len() {
-                let (pk, _) = accounts[idx];
+                let (pk, _) = &accounts[idx];
                 let txn = Txn::Avalanche {
                     txn: AvalancheTxn::Grant {
                         out_utxo: 10,
-                        receiver: pk,
+                        receiver: pk.clone(),
                     },
                 };
                 let txn_ctx = TxnCtx::from_txn(&txn)?;
@@ -152,13 +152,13 @@ impl FlowGen for AvalancheFlowGen {
 
             let send_utxo_idx = rand::random::<usize>() % utxos.len();
             let (sender_idx, in_utxo_raw, in_utxo_amount) = utxos.remove(send_utxo_idx);
-            let (sender_pk, sender_sk) = accounts[sender_idx];
+            let (sender_pk, sender_sk) = &accounts[sender_idx];
 
             let mut recver_idx = rand::random::<usize>() % (accounts.len() - 1);
             if recver_idx >= sender_idx {
                 recver_idx += 1; // avoid sending to self
             }
-            let (recver_pk, _) = accounts[recver_idx];
+            let (recver_pk, _) = &accounts[recver_idx];
 
             let in_utxo = vec![in_utxo_raw];
             let serialized_in_utxo = bincode::serialize(&in_utxo)?;
@@ -167,9 +167,9 @@ impl FlowGen for AvalancheFlowGen {
             let remainder = in_utxo_amount - out_utxo;
             let txn = Arc::new(Txn::Avalanche {
                 txn: AvalancheTxn::Send {
-                    sender: sender_pk,
+                    sender: sender_pk.clone(),
                     in_utxo,
-                    receiver: recver_pk,
+                    receiver: recver_pk.clone(),
                     out_utxo,
                     remainder,
                     sender_signature,
