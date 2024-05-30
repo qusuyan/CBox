@@ -33,7 +33,7 @@ pub enum BitcoinTxn {
 }
 
 impl BitcoinTxn {
-    pub async fn validate(&self, crypto: CryptoScheme) -> Result<bool, CopycatError> {
+    pub fn validate(&self, crypto: CryptoScheme) -> Result<(bool, f64), CopycatError> {
         match self {
             BitcoinTxn::Send {
                 sender,
@@ -42,11 +42,9 @@ impl BitcoinTxn {
                 ..
             } => {
                 let serialized_in_txo = bincode::serialize(in_utxo)?;
-                crypto
-                    .verify(sender, &serialized_in_txo, sender_signature)
-                    .await
+                crypto.verify(sender, &serialized_in_txo, sender_signature)
             }
-            BitcoinTxn::Grant { .. } | BitcoinTxn::Incentive { .. } => Ok(true),
+            BitcoinTxn::Grant { .. } | BitcoinTxn::Incentive { .. } => Ok((true, 0f64)),
         }
     }
 }

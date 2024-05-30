@@ -136,5 +136,7 @@ impl Decision for BitcoinDecision {
         unreachable!("Bitcoin consensus can be done locally")
     }
 
+    async fn batch_wait(&mut self) {}
+
     fn report(&mut self) {}
 }

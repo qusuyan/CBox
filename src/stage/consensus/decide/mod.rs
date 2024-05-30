@@ -28,6 +28,7 @@ pub trait Decision: Sync + Send {
     async fn commit_ready(&self) -> Result<(), CopycatError>;
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError>;
+    async fn batch_wait(&mut self);
     fn report(&mut self);
 }
 
@@ -148,5 +149,6 @@ pub async fn decision_thread(
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
         }
+        decision_stage.batch_wait().await;
     }
 }

@@ -189,6 +189,7 @@ pub async fn block_management_thread(
                         }
                     };
 
+                    let mut verification_time = 0f64;
                     for idx in 0..new_block.txns.len() {
                         let txn = &new_block.txns[idx];
                         let txn_ctx = &blk_ctx.txn_ctx[idx];
@@ -197,15 +198,26 @@ pub async fn block_management_thread(
                             continue;
                         }
 
-                        if txn.validate(crypto_scheme).await.unwrap_or(false) {
+                        let (valid, vtime) = match txn.validate(crypto_scheme) {
+                            Ok(validity) => validity,
+                            Err(e) => {
+                                pf_error!(id; "txn validation failed: {:?}", e);
+                                continue;
+                            }
+                        };
+                        verification_time += vtime;
+                        if valid {
                             txns_validated.insert(txn_ctx.id);
                         } else {
                             // invalid block
+                            tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
                             return;
                         }
                     }
 
+                    tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
                     drop(permit);
+
                     if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
                         pf_error!(id; "failed to send blk_context: {:?}", e);
                     }

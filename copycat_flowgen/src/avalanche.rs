@@ -162,7 +162,7 @@ impl FlowGen for AvalancheFlowGen {
 
             let in_utxo = vec![in_utxo_raw];
             let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-            let sender_signature = self.crypto.sign(&sender_sk, &serialized_in_utxo).await?;
+            let (sender_signature, _) = self.crypto.sign(&sender_sk, &serialized_in_utxo)?;
             let out_utxo = std::cmp::min(in_utxo_amount, 10);
             let remainder = in_utxo_amount - out_utxo;
             let txn = Arc::new(Txn::Avalanche {

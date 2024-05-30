@@ -7,14 +7,14 @@ pub fn gen_key_pair(seed: u64) -> (PubKey, PrivKey) {
     (pubkey, privkey)
 }
 
-pub fn sign(_privkey: &PrivKey, _input: &[u8]) -> Result<Signature, CopycatError> {
-    Ok(vec![0; 64])
+pub fn sign(_privkey: &PrivKey, _input: &[u8]) -> Result<(Signature, f64), CopycatError> {
+    Ok((vec![0; 64], 0f64))
 }
 
 pub fn verify(
     _pubkey: &PubKey,
     _input: &[u8],
     _signature: &Signature,
-) -> Result<bool, CopycatError> {
-    Ok(true)
+) -> Result<(bool, f64), CopycatError> {
+    Ok((true, 0f64))
 }

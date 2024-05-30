@@ -28,7 +28,7 @@ pub enum AvalancheTxn {
 }
 
 impl AvalancheTxn {
-    pub async fn validate(&self, crypto: CryptoScheme) -> Result<bool, CopycatError> {
+    pub fn validate(&self, crypto: CryptoScheme) -> Result<(bool, f64), CopycatError> {
         match self {
             AvalancheTxn::Send {
                 sender,
@@ -37,11 +37,9 @@ impl AvalancheTxn {
                 ..
             } => {
                 let serialized_in_txo = bincode::serialize(in_utxo)?;
-                crypto
-                    .verify(sender, &serialized_in_txo, sender_signature)
-                    .await
+                crypto.verify(sender, &serialized_in_txo, sender_signature)
             }
-            AvalancheTxn::Grant { .. } => Ok(true),
+            AvalancheTxn::Grant { .. } => Ok((true, 0f64)),
             AvalancheTxn::Noop { .. } | AvalancheTxn::PlaceHolder => {
                 unreachable!("Validating Noop / PlaceHolder txns")
             }
