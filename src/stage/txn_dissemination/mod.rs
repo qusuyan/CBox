@@ -2,7 +2,6 @@ mod broadcast;
 use broadcast::BroadcastTxnDissemination;
 
 mod gossip;
-use get_size::GetSize;
 use gossip::GossipTxnDissemination;
 
 use crate::context::TxnCtx;
@@ -12,6 +11,7 @@ use crate::utils::{CopycatError, NodeId};
 use crate::{config::Config, peers::PeerMessenger};
 
 use async_trait::async_trait;
+use get_size::GetSize;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -41,7 +41,7 @@ pub async fn txn_dissemination_thread(
     config: Config,
     enabled: bool,
     peer_messenger: Arc<PeerMessenger>,
-    mut validated_txn_recv: mpsc::Receiver<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>,
+    mut validated_txn_recv: mpsc::Receiver<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
     txn_ready_send: mpsc::Sender<(Arc<Txn>, Arc<TxnCtx>)>,
 ) {
     pf_info!(id; "txn dissemination stage starting...");
@@ -63,7 +63,7 @@ pub async fn txn_dissemination_thread(
     loop {
         tokio::select! {
             new_txn = validated_txn_recv.recv() => {
-                let (src, (txn, ctx)) = match new_txn {
+                let mut txn_batch = match new_txn {
                     Some(txn) => txn,
                     None => {
                         pf_error!(id; "validated_txn pipe closed unexpectedly");
@@ -71,9 +71,8 @@ pub async fn txn_dissemination_thread(
                     }
                 };
 
-                pf_trace!(id; "got from {} new txn {:?}", src, txn);
-
-                batch.push((src, (txn, ctx)))
+                pf_trace!(id; "got new txn batch {:?}", txn_batch);
+                batch.append(&mut txn_batch);
             }
 
             _ = wait_send_batch(&batch, txn_dissem_time) => {

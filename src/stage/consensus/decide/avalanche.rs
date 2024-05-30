@@ -544,7 +544,8 @@ impl Decision for AvalancheDecision {
             // otherwise, send votes to peer that queries the block
             let msg_content = ((proposer, blk_id), votes);
             let serialized_msg = &bincode::serialize(&msg_content)?;
-            let signature = self.crypto_scheme.sign(&self.sk, serialized_msg).await?;
+            // TODO: add signing
+            let (signature, stime) = self.crypto_scheme.sign(&self.sk, serialized_msg)?;
             let vote_msg = VoteMsg {
                 round: msg_content.0,
                 votes: msg_content.1,
@@ -595,11 +596,11 @@ impl Decision for AvalancheDecision {
         let content = (msg.round, msg.votes);
         let serialized_content = bincode::serialize(&content)?;
         let (blk_id, votes) = content;
-        if self
-            .crypto_scheme
-            .verify(&peer_pk, &serialized_content, &msg.signature)
-            .await?
-        {
+        let (valid, vtime) =
+            self.crypto_scheme
+                .verify(&peer_pk, &serialized_content, &msg.signature)?;
+        // TODO: add verification delay
+        if valid {
             self.handle_votes(blk_id, src, votes).await?;
         }
 

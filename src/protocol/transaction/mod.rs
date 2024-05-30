@@ -22,11 +22,11 @@ pub enum Txn {
 }
 
 impl Txn {
-    pub async fn validate(&self, crypto: CryptoScheme) -> Result<bool, CopycatError> {
+    pub fn validate(&self, crypto: CryptoScheme) -> Result<(bool, f64), CopycatError> {
         match self {
-            Txn::Dummy { .. } => Ok(true),
-            Txn::Bitcoin { txn } => txn.validate(crypto).await,
-            Txn::Avalanche { txn } => txn.validate(crypto).await,
+            Txn::Dummy { .. } => Ok((true, 0f64)),
+            Txn::Bitcoin { txn } => txn.validate(crypto),
+            Txn::Avalanche { txn } => txn.validate(crypto),
         }
     }
 }

@@ -33,23 +33,23 @@ impl CryptoScheme {
         }
     }
 
-    pub async fn sign(&self, privkey: &PrivKey, input: &[u8]) -> Result<Signature, CopycatError> {
+    pub fn sign(&self, privkey: &PrivKey, input: &[u8]) -> Result<(Signature, f64), CopycatError> {
         match self {
             CryptoScheme::Dummy => dummy::sign(privkey, input),
-            CryptoScheme::DummyECDSA => dummy_ecdsa::sign(privkey, input).await,
+            CryptoScheme::DummyECDSA => dummy_ecdsa::sign(privkey, input),
             CryptoScheme::ECDSA => ecdsa::sign(privkey, input),
         }
     }
 
-    pub async fn verify(
+    pub fn verify(
         &self,
         pubkey: &PubKey,
         input: &[u8],
         signature: &Signature,
-    ) -> Result<bool, CopycatError> {
+    ) -> Result<(bool, f64), CopycatError> {
         match self {
             CryptoScheme::Dummy => dummy::verify(pubkey, input, signature),
-            CryptoScheme::DummyECDSA => dummy_ecdsa::verify(pubkey, input, signature).await,
+            CryptoScheme::DummyECDSA => dummy_ecdsa::verify(pubkey, input, signature),
             CryptoScheme::ECDSA => ecdsa::verify(pubkey, input, signature),
         }
     }

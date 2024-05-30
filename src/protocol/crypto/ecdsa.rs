@@ -19,15 +19,19 @@ pub fn gen_key_pair(seed: u64) -> (PubKey, PrivKey) {
     (vk_bytes, sk_bytes)
 }
 
-pub fn sign(privkey: &PrivKey, input: &[u8]) -> Result<Signature, CopycatError> {
+pub fn sign(privkey: &PrivKey, input: &[u8]) -> Result<(Signature, f64), CopycatError> {
     let signing_key = SigningKey::from_bytes(privkey.as_ref().into())?;
     let signature: k256::ecdsa::Signature = signing_key.sign(input);
-    Ok(signature.to_vec())
+    Ok((signature.to_vec(), 0f64))
 }
 
-pub fn verify(pubkey: &PubKey, input: &[u8], signature: &Signature) -> Result<bool, CopycatError> {
+pub fn verify(
+    pubkey: &PubKey,
+    input: &[u8],
+    signature: &Signature,
+) -> Result<(bool, f64), CopycatError> {
     let verifying_key = VerifyingKey::from_sec1_bytes(&pubkey)?;
     let signature: k256::ecdsa::Signature = k256::ecdsa::Signature::from_slice(signature)?;
     let valid = verifying_key.verify(input, &signature).is_ok();
-    Ok(valid)
+    Ok((valid, 0f64))
 }
