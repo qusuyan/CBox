@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use tokio::time::Duration;
 
 #[derive(Debug, Serialize, Deserialize)]
 enum SendRequest {
@@ -100,6 +101,19 @@ impl PeerMessenger {
     pub async fn send(&self, dest: NodeId, msg: MsgType) -> Result<(), CopycatError> {
         pf_trace!(self.id; "sending {:?} to {}", msg, dest);
         if let Err(e) = self.transport_hub.send(dest, msg).await {
+            return Err(CopycatError(format!("send to {dest} failed: {e:?}")));
+        }
+        Ok(())
+    }
+
+    pub async fn delayed_send(
+        &self,
+        dest: NodeId,
+        msg: MsgType,
+        delay: Duration,
+    ) -> Result<(), CopycatError> {
+        pf_trace!(self.id; "sending {:?} to {}", msg, dest);
+        if let Err(e) = self.transport_hub.delayed_send(dest, msg, delay).await {
             return Err(CopycatError(format!("send to {dest} failed: {e:?}")));
         }
         Ok(())

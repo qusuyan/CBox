@@ -17,6 +17,7 @@ use tokio::sync::Notify;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 
 struct ConflictSet {
     pub has_conflicts: bool,
@@ -65,6 +66,8 @@ pub struct AvalancheDecision {
     // statistics for debugging
     is_strongly_preferred_calls: usize,
     is_preferred_checks: usize,
+    // batch sleep time to reduce overhead
+    delay: f64,
 }
 
 impl AvalancheDecision {
@@ -103,6 +106,7 @@ impl AvalancheDecision {
             pmaker_feedback_send,
             is_strongly_preferred_calls: 0,
             is_preferred_checks: 0,
+            delay: 0f64,
         }
     }
 
@@ -544,19 +548,20 @@ impl Decision for AvalancheDecision {
             // otherwise, send votes to peer that queries the block
             let msg_content = ((proposer, blk_id), votes);
             let serialized_msg = &bincode::serialize(&msg_content)?;
-            // TODO: add signing
             let (signature, stime) = self.crypto_scheme.sign(&self.sk, serialized_msg)?;
+            self.delay += stime;
             let vote_msg = VoteMsg {
                 round: msg_content.0,
                 votes: msg_content.1,
                 signature,
             };
             self.peer_messenger
-                .send(
+                .delayed_send(
                     proposer,
                     MsgType::ConsensusMsg {
                         msg: bincode::serialize(&vote_msg)?,
                     },
+                    Duration::from_secs_f64(self.delay),
                 )
                 .await?;
         }
@@ -599,12 +604,19 @@ impl Decision for AvalancheDecision {
         let (valid, vtime) =
             self.crypto_scheme
                 .verify(&peer_pk, &serialized_content, &msg.signature)?;
-        // TODO: add verification delay
+        self.delay += vtime;
         if valid {
             self.handle_votes(blk_id, src, votes).await?;
         }
 
         Ok(())
+    }
+
+    async fn batch_wait(&mut self) {
+        if self.delay > 0.05 {
+            tokio::time::sleep(Duration::from_secs_f64(self.delay)).await;
+            self.delay = 0f64;
+        }
     }
 
     fn report(&mut self) {
