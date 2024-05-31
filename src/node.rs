@@ -6,6 +6,7 @@ use crate::protocol::{ChainType, CryptoScheme, DissemPattern};
 use crate::utils::{CopycatError, NodeId};
 
 use tokio::{sync::mpsc, task::JoinHandle};
+use tokio_metrics::{TaskMetrics, TaskMonitor};
 
 use crate::config::Config;
 use crate::peers::PeerMessenger;
@@ -19,8 +20,12 @@ use crate::stage::txn_validation::txn_validation_thread;
 // use crate::state::ChainState;
 
 pub struct Node {
+    id: NodeId,
     req_send: mpsc::Sender<Arc<Txn>>,
     // _state: Arc<ChainState>,
+    // task monitor:
+    _decision_stage_monitor: TaskMonitor,
+    decision_stage_intervals: Box<dyn Iterator<Item = TaskMetrics>>,
     // actor threads
     _peer_messenger: Arc<PeerMessenger>,
     _txn_validation_handle: JoinHandle<()>,
@@ -119,7 +124,8 @@ impl Node {
             block_ready_send,
         ));
 
-        let _decision_handle = tokio::spawn(decision_thread(
+        let _decision_stage_monitor = TaskMonitor::new();
+        let _decision_handle = tokio::spawn(_decision_stage_monitor.instrument(decision_thread(
             id,
             p2p_crypto,
             config.clone(),
@@ -128,7 +134,7 @@ impl Node {
             block_ready_recv,
             commit_send,
             pmaker_feedback_send,
-        ));
+        )));
 
         let _commit_handle = tokio::spawn(commit_thread(
             id,
@@ -139,9 +145,14 @@ impl Node {
 
         pf_info!(id; "stages started");
 
+        let decision_stage_intervals = Box::new(_decision_stage_monitor.intervals());
+
         Ok((
             Self {
+                id,
                 req_send,
+                _decision_stage_monitor,
+                decision_stage_intervals,
                 _peer_messenger: peer_messenger,
                 _txn_validation_handle,
                 _txn_dissemination_handle,
@@ -170,6 +181,15 @@ impl Node {
         if let Err(e) = self.req_send.send(txn).await {
             return Err(CopycatError(format!("{e:?}")));
         }
+        Ok(())
+    }
+
+    pub async fn report(&mut self) -> Result<(), CopycatError> {
+        let metrics = self
+            .decision_stage_intervals
+            .next()
+            .ok_or(CopycatError(format!("Failed to get next interval")))?;
+        pf_info!(self.id; "decision stage: poll duration: {} ms, poll count: {}", metrics.mean_poll_duration().as_secs_f64() * 1000f64, metrics.total_poll_count);
         Ok(())
     }
 }
