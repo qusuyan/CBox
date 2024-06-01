@@ -5,8 +5,6 @@ use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
 
-use get_size::GetSize;
-
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -51,7 +49,11 @@ impl TxnValidation {
             correct_txns.push((src, (txn, txn_ctx)));
         }
 
-        tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
+        // 1ms
+        if verification_time > 0.001 {
+            tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
+        }
+
         Ok(correct_txns)
     }
 }
@@ -79,7 +81,7 @@ pub async fn txn_validation_thread(
         let notify = tokio::sync::Notify::new();
         if batch.len() == 0 {
             notify.notified().await;
-        } else if batch.get_size() > 0x100000 {
+        } else if batch.len() > 100 {
             return;
         }
         tokio::time::sleep_until(timeout).await;
