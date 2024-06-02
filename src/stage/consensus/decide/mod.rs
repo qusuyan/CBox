@@ -146,7 +146,6 @@ pub async fn decision_thread(
                 // report basic statistics
                 pf_info!(id; "In the last minute: blks_recv: {}, txns_recv: {}, blks_sent: {}, txns_sent: {}", blks_recv, txns_recv, blks_sent, txns_sent);
                 decision_stage.report();
-                pf_info!(id; "In the last minute: poll duration: ");
                 blks_recv = 0;
                 txns_recv = 0;
                 blks_sent = 0;

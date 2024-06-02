@@ -96,9 +96,9 @@ pub async fn block_dissemination_thread(
                         continue;
                     }
                 };
-                let poll_duration = metrics.mean_poll_duration().as_secs_f64() * 1000f64;
-                let poll_count = metrics.total_poll_count;
-                pf_info!(id; "In the last minute: mean poll duration: {} ms, poll_count: {}", poll_duration, poll_count);
+                let sched_duration = metrics.mean_scheduled_duration().as_secs_f64() * 1000f64;
+                let sched_count = metrics.total_scheduled_count;
+                pf_info!(id; "In the last minute: mean scheduled duration: {} ms, scheduled count: {}", sched_duration, sched_count);
 
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);

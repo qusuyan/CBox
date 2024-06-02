@@ -12,7 +12,7 @@ cluster-threads = 32
 #   "blk_len=20+max_inflight_blk=80",
 #   "blk_len=20+max_inflight_blk=90",
 # ]
-config = ["blk_len=40+max_inflight_blk=40", "blk_len=20+max_inflight_blk=80"]
+config = "blk_len=40+max_inflight_blk=40"
 conn_multiply = 20
 crypto = ["dummy-ecdsa", "ecdsa"]
 dissem = "sample"
