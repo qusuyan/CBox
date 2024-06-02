@@ -1,10 +1,15 @@
 mod dummy;
 use dummy::DummyBlockManagement;
+
 mod bitcoin;
 use bitcoin::BitcoinBlockManagement;
-mod avalanche;
 
+mod avalanche;
+use avalanche::AvalancheBlockManagement;
+
+use crate::config::Config;
 use crate::context::{BlkCtx, TxnCtx};
+use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
@@ -15,13 +20,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{Duration, Instant};
+use tokio_metrics::TaskMonitor;
 
 use dashmap::DashSet;
-
-use crate::config::Config;
-use crate::peers::PeerMessenger;
-
-use self::avalanche::AvalancheBlockManagement;
 
 #[async_trait]
 pub trait BlockManagement: Sync + Send {
@@ -77,6 +78,7 @@ pub async fn block_management_thread(
     mut txn_ready_recv: mpsc::Receiver<(Arc<Txn>, Arc<TxnCtx>)>,
     mut pacemaker_recv: mpsc::Receiver<Vec<u8>>,
     new_block_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
+    task_monitor: TaskMonitor,
 ) {
     pf_info!(id; "block management stage starting...");
 
@@ -86,6 +88,12 @@ pub async fn block_management_thread(
     let mut batch_prepare_time = Instant::now() + batch_prepare_timeout;
     let mut is_blk_full = false;
 
+    let maximum_concurrency = 2;
+    let sem = Arc::new(Semaphore::new(maximum_concurrency));
+    let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
+
+    let txns_validated = Arc::new(DashSet::new());
+
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
     let mut self_txns_sent = 0;
     let mut self_blks_sent = 0;
@@ -94,12 +102,7 @@ pub async fn block_management_thread(
     let mut txns_recv = 0;
     let mut peer_blks_recv = 0;
     let mut peer_txns_recv = 0;
-
-    let maximum_concurrency = 2;
-    let sem = Arc::new(Semaphore::new(maximum_concurrency));
-    let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
-
-    let txns_validated = Arc::new(DashSet::new());
+    let mut metric_intervals = task_monitor.intervals();
 
     loop {
         tokio::select! {
@@ -290,6 +293,7 @@ pub async fn block_management_thread(
             }
 
             _ = tokio::time::sleep_until(report_timeout) => {
+                // report basic statistics
                 pf_info!(id; "In the last minute: txns_recv: {}, peer_blks_recv: {}, peer_txns_recv: {}", txns_recv, peer_blks_recv, peer_txns_recv);
                 pf_info!(id; "In the last minute: self_blks_sent: {}, self_txns_sent: {}, peer_blks_sent: {}, peer_txns_sent: {}", self_blks_sent, self_txns_sent, peer_blks_sent, peer_txns_sent);
                 block_management_stage.report();
@@ -300,23 +304,21 @@ pub async fn block_management_thread(
                 peer_txns_sent = 0;
                 peer_blks_recv = 0;
                 peer_txns_recv = 0;
+                // report task monitor statistics
+                let metrics = match metric_intervals.next() {
+                    Some(metrics) => metrics,
+                    None => {
+                        pf_error!(id; "failed to fetch metrics for the last minute");
+                        continue;
+                    }
+                };
+                let sched_duration = metrics.mean_scheduled_duration().as_secs_f64() * 1000f64;
+                let sched_count = metrics.total_scheduled_count;
+                pf_info!(id; "In the last minute: mean scheduled duration: {} ms, scheduled count: {}", sched_duration, sched_count);
+
+                // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
-
-            // resp = peer_blk_resp_recv.recv() => {
-            //     match resp {
-            //         Some((src, (id, block))) => {
-            //             if let Err(e) = block_management_stage.handle_peer_blk_resp(src, id, block).await {
-            //                 pf_error!(id; "error handling peer block response: {:?}", e);
-            //                 continue;
-            //             }
-            //         }
-            //         None => {
-            //             pf_error!(id; "peer_blk_resp pipe closed unexpectedly");
-            //             continue;
-            //         }
-            //     }
-            // }
         }
     }
 }

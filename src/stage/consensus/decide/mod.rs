@@ -4,6 +4,7 @@ mod bitcoin;
 use bitcoin::BitcoinDecision;
 mod avalanche;
 use avalanche::AvalancheDecision;
+use tokio_metrics::TaskMonitor;
 
 use crate::context::BlkCtx;
 use crate::protocol::block::Block;
@@ -61,6 +62,7 @@ pub async fn decision_thread(
     mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
+    task_monitor: TaskMonitor,
 ) {
     pf_info!(id; "decision stage starting...");
 
@@ -77,6 +79,7 @@ pub async fn decision_thread(
     let mut txns_sent = 0;
     let mut blks_recv = 0;
     let mut txns_recv = 0;
+    let mut metric_intervals = task_monitor.intervals();
 
     loop {
         tokio::select! {
@@ -140,12 +143,28 @@ pub async fn decision_thread(
                 }
             },
             _ = tokio::time::sleep_until(report_timeout) => {
+                // report basic statistics
                 pf_info!(id; "In the last minute: blks_recv: {}, txns_recv: {}, blks_sent: {}, txns_sent: {}", blks_recv, txns_recv, blks_sent, txns_sent);
                 decision_stage.report();
+                pf_info!(id; "In the last minute: poll duration: ");
                 blks_recv = 0;
                 txns_recv = 0;
                 blks_sent = 0;
                 txns_sent = 0;
+
+                // report task monitor statistics
+                let metrics = match metric_intervals.next() {
+                    Some(metrics) => metrics,
+                    None => {
+                        pf_error!(id; "failed to fetch metrics for the last minute");
+                        continue;
+                    }
+                };
+                let sched_duration = metrics.mean_scheduled_duration().as_secs_f64() * 1000f64;
+                let sched_count = metrics.total_scheduled_count;
+                pf_info!(id; "In the last minute: mean scheduled duration: {} ms, scheduled count: {}", sched_duration, sched_count);
+
+                // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
         }

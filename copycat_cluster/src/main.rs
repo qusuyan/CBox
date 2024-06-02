@@ -389,11 +389,6 @@ fn main() {
                         .write_fmt(format_args!("{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence))
                         .expect("write stats failed");
                     log::info!("In the last minute: txns_sent: {}, inflight_txns: {}", txns_sent, stats.inflight_txns);
-                    for (id, node) in node_map.iter_mut() {
-                        if let Err(e) = node.report().await {
-                            log::error!("node {id} failed to report statistics: {e:?}");
-                        }
-                    }
                     txns_sent = 0;
                     prev_committed = stats.num_committed;
                     report_time += Duration::from_secs_f64(report_interval);
