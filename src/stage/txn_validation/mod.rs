@@ -11,6 +11,9 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 use tokio_metrics::TaskMonitor;
 
+use atomic_float::AtomicF64;
+use std::sync::atomic::Ordering;
+
 pub struct TxnValidation {
     txn_seen: HashSet<Hash>,
     crypto_scheme: CryptoScheme,
@@ -73,6 +76,8 @@ pub async fn txn_validation_thread(
     task_monitor: TaskMonitor,
 ) {
     pf_info!(id; "txn validation stage starting...");
+
+    let delay = Arc::new(AtomicF64::new(0f64));
 
     let txn_batch_interval = Duration::from_millis(100);
     let mut txn_validation_stage = get_txn_validation(crypto_scheme);
@@ -164,5 +169,12 @@ pub async fn txn_validation_thread(
                 report_time = Instant::now() + Duration::from_secs(60);
             }
         };
+
+        // insert delay as appropriate
+        let sleep_time = delay.load(Ordering::Relaxed);
+        if sleep_time > 0.05 {
+            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+            delay.store(0f64, Ordering::Relaxed);
+        }
     }
 }

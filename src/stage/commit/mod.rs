@@ -1,6 +1,5 @@
 mod dummy;
 use dummy::DummyCommit;
-use tokio::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::protocol::transaction::Txn;
@@ -10,7 +9,11 @@ use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::time::{Duration, Instant};
 use tokio_metrics::TaskMonitor;
+
+use atomic_float::AtomicF64;
+use std::sync::atomic::Ordering;
 
 #[async_trait]
 pub trait Commit: Sync + Send {
@@ -33,6 +36,8 @@ pub async fn commit_thread(
     task_monitor: TaskMonitor,
 ) {
     pf_info!(id; "commit stage starting...");
+
+    let delay = Arc::new(AtomicF64::new(0f64));
 
     let commit_stage = get_commit(id, config);
 
@@ -78,6 +83,13 @@ pub async fn commit_thread(
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
+        }
+
+        // insert delay as appropriate
+        let sleep_time = delay.load(Ordering::Relaxed);
+        if sleep_time > 0.05 {
+            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+            delay.store(0f64, Ordering::Relaxed);
         }
     }
 }

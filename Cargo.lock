@@ -118,6 +118,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic_float"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c4b08ed8a30ff7320117c190eb4d73d47f0ac0c930ab853b8224cef7cd9a5e7"
+
+[[package]]
 name = "attribute-derive"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -346,6 +352,7 @@ version = "0.1.0"
 dependencies = [
  "async-scoped",
  "async-trait",
+ "atomic_float",
  "bincode",
  "clap",
  "dashmap",

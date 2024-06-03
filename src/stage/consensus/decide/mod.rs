@@ -19,6 +19,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
+use atomic_float::AtomicF64;
+use std::sync::atomic::Ordering;
+
 #[async_trait]
 pub trait Decision: Sync + Send {
     async fn new_tail(
@@ -29,7 +32,6 @@ pub trait Decision: Sync + Send {
     async fn commit_ready(&self) -> Result<(), CopycatError>;
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError>;
-    async fn batch_wait(&mut self);
     fn report(&mut self);
 }
 
@@ -39,6 +41,7 @@ fn get_decision(
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
+    delay: Arc<AtomicF64>,
 ) -> Box<dyn Decision> {
     match config {
         Config::Dummy => Box::new(DummyDecision::new()),
@@ -49,6 +52,7 @@ fn get_decision(
             config,
             peer_messenger,
             pmaker_feedback_send,
+            delay,
         )),
     }
 }
@@ -66,12 +70,15 @@ pub async fn decision_thread(
 ) {
     pf_info!(id; "decision stage starting...");
 
+    let delay = Arc::new(AtomicF64::new(0f64));
+
     let mut decision_stage = get_decision(
         id,
         crypto_scheme,
         config,
         peer_messenger,
         pmaker_feedback_send,
+        delay.clone(),
     );
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
@@ -167,6 +174,12 @@ pub async fn decision_thread(
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
         }
-        decision_stage.batch_wait().await;
+
+        // insert delay as appropriate
+        let sleep_time = delay.load(Ordering::Relaxed);
+        if sleep_time > 0.05 {
+            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+            delay.store(0f64, Ordering::Relaxed);
+        }
     }
 }

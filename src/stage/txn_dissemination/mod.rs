@@ -18,6 +18,9 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 use tokio_metrics::TaskMonitor;
 
+use atomic_float::AtomicF64;
+use std::sync::atomic::Ordering;
+
 #[async_trait]
 pub trait TxnDissemination: Send + Sync {
     async fn disseminate(&self, txn_batch: &Vec<(u64, Arc<Txn>)>) -> Result<(), CopycatError>;
@@ -47,6 +50,8 @@ pub async fn txn_dissemination_thread(
     task_monitor: TaskMonitor,
 ) {
     pf_info!(id; "txn dissemination stage starting...");
+
+    let delay = Arc::new(AtomicF64::new(0f64));
 
     let txn_dissemination_stage = get_txn_dissemination(id, dissem_pattern, config, peer_messenger);
     let mut batch = vec![];
@@ -115,6 +120,13 @@ pub async fn txn_dissemination_thread(
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
+        }
+
+        // insert delay as appropriate
+        let sleep_time = delay.load(Ordering::Relaxed);
+        if sleep_time > 0.05 {
+            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+            delay.store(0f64, Ordering::Relaxed);
         }
     }
 }

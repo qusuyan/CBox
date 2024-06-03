@@ -24,6 +24,9 @@ use tokio_metrics::TaskMonitor;
 
 use dashmap::DashSet;
 
+use atomic_float::AtomicF64;
+use std::sync::atomic::Ordering;
+
 #[async_trait]
 pub trait BlockManagement: Sync + Send {
     async fn record_new_txn(
@@ -81,6 +84,8 @@ pub async fn block_management_thread(
     task_monitor: TaskMonitor,
 ) {
     pf_info!(id; "block management stage starting...");
+
+    let delay = Arc::new(AtomicF64::new(0f64));
 
     let mut block_management_stage = get_blk_creation(id, config, peer_messenger);
 
@@ -319,6 +324,13 @@ pub async fn block_management_thread(
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
+        }
+
+        // insert delay as appropriate
+        let sleep_time = delay.load(Ordering::Relaxed);
+        if sleep_time > 0.05 {
+            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+            delay.store(0f64, Ordering::Relaxed);
         }
     }
 }
