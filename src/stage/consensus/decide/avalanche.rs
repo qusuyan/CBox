@@ -10,7 +10,6 @@ use crate::utils::CopycatError;
 use crate::{CryptoScheme, NodeId};
 
 use async_trait::async_trait;
-
 use serde::{Deserialize, Serialize};
 
 use std::collections::hash_map::Entry;

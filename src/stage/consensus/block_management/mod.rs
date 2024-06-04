@@ -78,7 +78,7 @@ pub async fn block_management_thread(
     mut peer_blk_req_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     // mut peer_blk_resp_recv: mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,
     peer_messenger: Arc<PeerMessenger>,
-    mut txn_ready_recv: mpsc::Receiver<(Arc<Txn>, Arc<TxnCtx>)>,
+    mut txn_ready_recv: mpsc::Receiver<Vec<(Arc<Txn>, Arc<TxnCtx>)>>,
     mut pacemaker_recv: mpsc::Receiver<Vec<u8>>,
     new_block_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     task_monitor: TaskMonitor,
@@ -113,13 +113,15 @@ pub async fn block_management_thread(
         tokio::select! {
             new_txn = txn_ready_recv.recv() => {
                 match new_txn {
-                    Some((txn, ctx)) => {
-                        pf_trace!(id; "got new txn {:?} {:?}", ctx, txn);
-                        txns_recv += 1;
-                        txns_validated.insert(ctx.id);
-                        if let Err(e) = block_management_stage.record_new_txn(txn, ctx).await {
-                            pf_error!(id; "failed to record new txn: {:?}", e);
-                            continue;
+                    Some(txn_batch) => {
+                        for (txn, ctx) in txn_batch {
+                            pf_trace!(id; "got new txn {:?} {:?}", ctx, txn);
+                            txns_recv += 1;
+                            txns_validated.insert(ctx.id);
+                            if let Err(e) = block_management_stage.record_new_txn(txn, ctx).await {
+                                pf_error!(id; "failed to record new txn: {:?}", e);
+                                continue;
+                            }
                         }
                     },
                     None => {

@@ -236,7 +236,7 @@ fn main() {
     let runtime = Builder::new_multi_thread()
         .enable_all()
         .worker_threads(args.num_threads as usize)
-        .thread_name("copycat-mailbox-thread")
+        .thread_name("copycat-cluster-thread")
         .build()
         .expect("Creating new runtime failed");
 
@@ -253,9 +253,16 @@ fn main() {
         // start nodes
         let (combine_tx, mut combine_rx) = mpsc::channel(0x1000000);
         let mut node_map = HashMap::new();
+        let mut node_rt = HashMap::new();
         let mut redirect_handles = HashMap::new();
         for node_id in local_nodes.clone() {
-            let (node, mut executed): (Node, _) = match Node::init(
+            let rt = Builder::new_multi_thread()
+                .enable_all()
+                .worker_threads(2)
+                .thread_name(format!("copycat-node-{node_id}-thread"))
+                .build()
+                .expect("Creating new runtime failed");
+            let result = rt.spawn(Node::init(
                 node_id,
                 args.chain,
                 args.dissem_pattern,
@@ -264,9 +271,8 @@ fn main() {
                 node_config.clone(),
                 !args.disable_txn_dissem,
                 topology.remove(&node_id).unwrap_or(HashSet::new()),
-            )
-            .await
-            {
+            )).await.unwrap();
+            let (node, mut executed): (Node, _) = match result {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("failed to start node: {e:?}");
@@ -274,6 +280,7 @@ fn main() {
                 }
             };
             node_map.insert(node_id, node);
+            node_rt.insert(node_id, rt);
 
             let tx = combine_tx.clone();
             let redirect_handle = tokio::spawn(async move {
