@@ -14,7 +14,7 @@ cluster-threads = 32
 # ]
 config = "blk_len=40+max_inflight_blk=40+k=4"
 conn_multiply = 1
-crypto = "ecdsa"
+crypto = "dummy"
 dissem = "sample"
 exp-time = 320
 max-inflight-txns = 4000

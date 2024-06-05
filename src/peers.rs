@@ -30,7 +30,7 @@ impl PeerMessenger {
     ) -> Result<
         (
             Self,
-            mpsc::Receiver<(NodeId, Arc<Txn>)>,
+            mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
             mpsc::Receiver<(NodeId, Arc<Block>)>,
             mpsc::Receiver<(NodeId, Vec<u8>)>,
             mpsc::Receiver<(NodeId, Vec<u8>)>,
@@ -160,7 +160,7 @@ impl PeerMessenger {
     async fn peer_receiver_thread(
         id: NodeId,
         mut transport_hub: ClientStubRecvHalf<MsgType>,
-        rx_txn_send: mpsc::Sender<(NodeId, Arc<Txn>)>,
+        rx_txn_send: mpsc::Sender<(NodeId, Vec<Arc<Txn>>)>,
         rx_blk_send: mpsc::Sender<(NodeId, Arc<Block>)>,
         rx_consensus_send: mpsc::Sender<(NodeId, Vec<u8>)>,
         rx_pmaker_send: mpsc::Sender<(NodeId, Vec<u8>)>,
@@ -175,10 +175,9 @@ impl PeerMessenger {
                     let (src, content) = msg;
                     match content {
                         MsgType::NewTxn { txn_batch } => {
-                            for txn in txn_batch {
-                                if let Err(e) = rx_txn_send.send((src, Arc::new(txn))).await {
-                                    pf_error!(id; "rx_txn_send failed: {:?}", e)
-                                }
+                            let txns = txn_batch.into_iter().map(|txn| Arc::new(txn)).collect();
+                            if let Err(e) = rx_txn_send.send((src, txns)).await {
+                                pf_error!(id; "rx_txn_send failed: {:?}", e)
                             }
                         }
                         MsgType::NewBlock { blk } => {

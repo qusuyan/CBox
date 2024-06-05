@@ -71,7 +71,7 @@ pub async fn txn_validation_thread(
     _config: Config,
     crypto_scheme: CryptoScheme,
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
-    mut peer_txn_recv: mpsc::Receiver<(NodeId, Arc<Txn>)>,
+    mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
     validated_txn_send: mpsc::Sender<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
     task_monitor: TaskMonitor,
 ) {
@@ -115,7 +115,7 @@ pub async fn txn_validation_thread(
                 txn_buffer.push((id, txn));
             },
             new_peer_txn = peer_txn_recv.recv() => {
-                let (src, txn) = match new_peer_txn {
+                let (src, txns) = match new_peer_txn {
                     Some((src, txn)) => {
                         if src == id {
                             // ignore txns sent by self
@@ -129,9 +129,10 @@ pub async fn txn_validation_thread(
                     },
                 };
 
-                pf_trace!(id; "got from peer {} new txn {:?}", src, txn);
-                peer_txns_recved += 1;
-                txn_buffer.push((src, txn));
+                pf_trace!(id; "got from peer {} new txns {:?}", src, txns);
+                peer_txns_recved += txns.len();
+                let txn_batch = txns.into_iter().map(|txn| (src, txn));
+                txn_buffer.extend(txn_batch);
             }
             _ = wait_validation_batch(&txn_buffer, txn_batch_time) => {
                 let txns_to_validate = txn_buffer.drain(0..).collect();
