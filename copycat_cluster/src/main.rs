@@ -5,7 +5,6 @@ use copycat::Node;
 use copycat::{fully_connected_topology, get_topology};
 use copycat::{ChainType, Config, CryptoScheme, DissemPattern};
 use copycat_flowgen::get_flow_gen;
-
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
@@ -14,6 +13,8 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use clap::Parser;
+use sysinfo::System;
+
 
 // TODO: add parameters to config individual node configs
 #[derive(Parser, Debug)]
@@ -225,10 +226,13 @@ fn main() {
     let frequency = args.frequency;
     let num_accounts = args.accounts;
 
+    // collect system information
+    let mut sys = System::new();
+
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
-        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence\n")
+        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence,Avg CPU Usage\n")
         .expect("write stats failed");
 
     // console_subscriber::init();
@@ -384,16 +388,26 @@ fn main() {
                     let run_time =  (report_time - start_time).as_secs_f64();
                     let newly_committed = stats.num_committed - prev_committed;
                     let tput = newly_committed as f64 / report_interval;
+
+                    sys.refresh_cpu_usage();
+                    let (cpu_usage, cpu_count) = sys.cpus()
+                        .into_iter()
+                        .map(|cpu| (cpu.cpu_usage(), 1))
+                        .reduce(|(usage1, count1), (usage2, count2)| (usage1 + usage2, count1 + count2))
+                        .expect("no CPU returned");
+                    let avg_cpu_usage = cpu_usage / cpu_count as f32;
+
                     log::info!(
-                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit confidence: {}",
+                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit confidence: {}, CPU Usage: {}",
                         run_time,
                         tput,
                         stats.latency,
                         stats.chain_length,
                         stats.commit_confidence,
+                        avg_cpu_usage,
                     );
                     stats_file
-                        .write_fmt(format_args!("{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence))
+                        .write_fmt(format_args!("{},{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence, avg_cpu_usage))
                         .expect("write stats failed");
                     log::info!("In the last minute: txns_sent: {}, inflight_txns: {}", txns_sent, stats.inflight_txns);
                     txns_sent = 0;
