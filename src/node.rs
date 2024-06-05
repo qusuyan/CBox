@@ -100,7 +100,7 @@ impl Node {
                 peer_messenger.clone(),
                 validated_txn_recv,
                 txn_ready_send,
-                _txn_validation_monitor.clone(),
+                _txn_dissemination_monitor.clone(),
             ),
         ));
 
@@ -112,7 +112,7 @@ impl Node {
             peer_pmaker_recv,
             pmaker_feedback_recv,
             pacemaker_send,
-            _txn_validation_monitor.clone(),
+            _pacemaker_monitor.clone(),
         )));
 
         let _block_management_monitor = TaskMonitor::new();
@@ -128,7 +128,7 @@ impl Node {
                 txn_ready_recv,
                 pacemaker_recv,
                 new_block_send,
-                _txn_validation_monitor.clone(),
+                _block_management_monitor.clone(),
             ),
         ));
 
@@ -141,7 +141,7 @@ impl Node {
                 peer_messenger.clone(),
                 new_block_recv,
                 block_ready_send,
-                _txn_validation_monitor.clone(),
+                _block_dissemination_monitor.clone(),
             ),
         ));
 
@@ -164,7 +164,7 @@ impl Node {
             config.clone(),
             commit_recv,
             executed_send,
-            _txn_validation_monitor.clone(),
+            _commit_monitor.clone(),
         )));
 
         pf_info!(id; "stages started");
