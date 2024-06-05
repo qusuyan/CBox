@@ -23,14 +23,6 @@ pub struct Node {
     id: NodeId,
     req_send: mpsc::Sender<Arc<Txn>>,
     _peer_messenger: Arc<PeerMessenger>,
-    // task monitor:
-    _txn_validation_monitor: TaskMonitor,
-    _txn_dissemination_monitor: TaskMonitor,
-    _pacemaker_monitor: TaskMonitor,
-    _block_management_monitor: TaskMonitor,
-    _block_dissemination_monitor: TaskMonitor,
-    _decision_monitor: TaskMonitor,
-    _commit_monitor: TaskMonitor,
     // actor threads
     _txn_validation_handle: JoinHandle<()>,
     _txn_dissemination_handle: JoinHandle<()>,
@@ -78,71 +70,54 @@ impl Node {
         let (commit_send, commit_recv) = mpsc::channel(0x1000000);
         let (executed_send, executed_recv) = mpsc::channel(0x1000000);
 
-        let _txn_validation_monitor = TaskMonitor::new();
-        let _txn_validation_handle =
-            tokio::spawn(_txn_validation_monitor.instrument(txn_validation_thread(
-                id,
-                config.clone(),
-                txn_crpyto,
-                req_recv,
-                peer_txn_recv,
-                validated_txn_send,
-                _txn_validation_monitor.clone(),
-            )));
-
-        let _txn_dissemination_monitor = TaskMonitor::new();
-        let _txn_dissemination_handle = tokio::spawn(_txn_dissemination_monitor.instrument(
-            txn_dissemination_thread(
-                id,
-                dissem_pattern,
-                config.clone(),
-                dissem_txns,
-                peer_messenger.clone(),
-                validated_txn_recv,
-                txn_ready_send,
-                _txn_validation_monitor.clone(),
-            ),
+        let _txn_validation_handle = tokio::spawn(txn_validation_thread(
+            id,
+            config.clone(),
+            txn_crpyto,
+            req_recv,
+            peer_txn_recv,
+            validated_txn_send,
         ));
 
-        let _pacemaker_monitor = TaskMonitor::new();
-        let _pacemaker_handle = tokio::spawn(_pacemaker_monitor.instrument(pacemaker_thread(
+        let _txn_dissemination_handle = tokio::spawn(txn_dissemination_thread(
+            id,
+            dissem_pattern,
+            config.clone(),
+            dissem_txns,
+            peer_messenger.clone(),
+            validated_txn_recv,
+            txn_ready_send,
+        ));
+
+        let _pacemaker_handle = tokio::spawn(pacemaker_thread(
             id,
             config.clone(),
             peer_messenger.clone(),
             peer_pmaker_recv,
             pmaker_feedback_recv,
             pacemaker_send,
-            _txn_validation_monitor.clone(),
-        )));
-
-        let _block_management_monitor = TaskMonitor::new();
-        let _block_management_handle = tokio::spawn(_block_management_monitor.instrument(
-            block_management_thread(
-                id,
-                config.clone(),
-                txn_crpyto,
-                peer_blk_recv,
-                peer_blk_req_recv,
-                // peer_blk_resp_recv,
-                peer_messenger.clone(),
-                txn_ready_recv,
-                pacemaker_recv,
-                new_block_send,
-                _txn_validation_monitor.clone(),
-            ),
         ));
 
-        let _block_dissemination_monitor = TaskMonitor::new();
-        let _block_dissemination_handle = tokio::spawn(_block_dissemination_monitor.instrument(
-            block_dissemination_thread(
-                id,
-                dissem_pattern,
-                config.clone(),
-                peer_messenger.clone(),
-                new_block_recv,
-                block_ready_send,
-                _txn_validation_monitor.clone(),
-            ),
+        let _block_management_handle = tokio::spawn(block_management_thread(
+            id,
+            config.clone(),
+            txn_crpyto,
+            peer_blk_recv,
+            peer_blk_req_recv,
+            // peer_blk_resp_recv,
+            peer_messenger.clone(),
+            txn_ready_recv,
+            pacemaker_recv,
+            new_block_send,
+        ));
+
+        let _block_dissemination_handle = tokio::spawn(block_dissemination_thread(
+            id,
+            dissem_pattern,
+            config.clone(),
+            peer_messenger.clone(),
+            new_block_recv,
+            block_ready_send,
         ));
 
         let _decision_monitor = TaskMonitor::new();
@@ -158,14 +133,12 @@ impl Node {
             _decision_monitor.clone(),
         )));
 
-        let _commit_monitor = TaskMonitor::new();
-        let _commit_handle = tokio::spawn(_commit_monitor.instrument(commit_thread(
+        let _commit_handle = tokio::spawn(commit_thread(
             id,
             config.clone(),
             commit_recv,
             executed_send,
-            _txn_validation_monitor.clone(),
-        )));
+        ));
 
         pf_info!(id; "stages started");
 
@@ -173,13 +146,6 @@ impl Node {
             Self {
                 id,
                 req_send,
-                _txn_validation_monitor,
-                _txn_dissemination_monitor,
-                _pacemaker_monitor,
-                _block_management_monitor,
-                _block_dissemination_monitor,
-                _decision_monitor,
-                _commit_monitor,
                 _peer_messenger: peer_messenger,
                 _txn_validation_handle,
                 _txn_dissemination_handle,

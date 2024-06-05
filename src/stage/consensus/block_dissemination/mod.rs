@@ -19,7 +19,6 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
-use tokio_metrics::TaskMonitor;
 
 use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
@@ -51,7 +50,6 @@ pub async fn block_dissemination_thread(
     peer_messenger: Arc<PeerMessenger>,
     mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     block_ready_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
-    task_monitor: TaskMonitor,
 ) {
     pf_info!(id; "block dissemination stage starting...");
 
@@ -61,7 +59,6 @@ pub async fn block_dissemination_thread(
         get_block_dissemination(id, dissem_pattern, config, peer_messenger);
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
-    let mut metric_intervals = task_monitor.intervals();
 
     loop {
         tokio::select! {
@@ -93,18 +90,6 @@ pub async fn block_dissemination_thread(
                 }
             },
             _ = tokio::time::sleep_until(report_timeout) => {
-                // report task monitor statistics
-                let metrics = match metric_intervals.next() {
-                    Some(metrics) => metrics,
-                    None => {
-                        pf_error!(id; "failed to fetch metrics for the last minute");
-                        continue;
-                    }
-                };
-                let sched_duration = metrics.mean_scheduled_duration().as_secs_f64() * 1000f64;
-                let sched_count = metrics.total_scheduled_count;
-                pf_info!(id; "In the last minute: mean scheduled duration: {} ms, scheduled count: {}", sched_duration, sched_count);
-
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }

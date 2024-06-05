@@ -9,7 +9,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
-use tokio_metrics::TaskMonitor;
 
 use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
@@ -73,11 +72,10 @@ pub async fn txn_validation_thread(
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
     validated_txn_send: mpsc::Sender<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
-    task_monitor: TaskMonitor,
 ) {
     pf_info!(id; "txn validation stage starting...");
 
-    let delay = Arc::new(AtomicF64::new(0f64));
+    let delay: Arc<AtomicF64> = Arc::new(AtomicF64::new(0f64));
 
     let txn_batch_interval = Duration::from_millis(100);
     let mut txn_validation_stage = get_txn_validation(crypto_scheme);
@@ -97,7 +95,6 @@ pub async fn txn_validation_thread(
     let mut report_time = Instant::now() + Duration::from_secs(60);
     let mut self_txns_recved = 0;
     let mut peer_txns_recved = 0;
-    let mut metric_intervals = task_monitor.intervals();
 
     loop {
         tokio::select! {
@@ -153,19 +150,6 @@ pub async fn txn_validation_thread(
                 pf_info!(id; "In the last minute: self_txns_recved: {}, peer_txns_recved: {}", self_txns_recved, peer_txns_recved);
                 self_txns_recved = 0;
                 peer_txns_recved = 0;
-
-                // report task monitor statistics
-                let metrics = match metric_intervals.next() {
-                    Some(metrics) => metrics,
-                    None => {
-                        pf_error!(id; "failed to fetch metrics for the last minute");
-                        continue;
-                    }
-                };
-                let sched_duration = metrics.mean_scheduled_duration().as_secs_f64() * 1000f64;
-                let sched_count = metrics.total_scheduled_count;
-                pf_info!(id; "In the last minute: mean scheduled duration: {} ms, scheduled count: {}", sched_duration, sched_count);
-
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);
             }

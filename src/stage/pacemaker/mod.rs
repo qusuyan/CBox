@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
-use tokio_metrics::TaskMonitor;
 
 use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
@@ -44,7 +43,6 @@ pub async fn pacemaker_thread(
     mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut pmaker_feedback_recv: mpsc::Receiver<Vec<u8>>,
     should_propose_send: mpsc::Sender<Vec<u8>>,
-    task_monitor: TaskMonitor,
 ) {
     pf_info!(id; "pacemaker starting...");
 
@@ -53,7 +51,6 @@ pub async fn pacemaker_thread(
     let mut pmaker = get_pacemaker(id, config, peer_messenger);
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
-    let mut metric_intervals = task_monitor.intervals();
 
     loop {
         tokio::select! {
@@ -104,18 +101,6 @@ pub async fn pacemaker_thread(
                 }
             }
             _ = tokio::time::sleep_until(report_timeout) => {
-                // report task monitor statistics
-                let metrics = match metric_intervals.next() {
-                    Some(metrics) => metrics,
-                    None => {
-                        pf_error!(id; "failed to fetch metrics for the last minute");
-                        continue;
-                    }
-                };
-                let sched_duration = metrics.mean_scheduled_duration().as_secs_f64() * 1000f64;
-                let sched_count = metrics.total_scheduled_count;
-                pf_info!(id; "In the last minute: mean scheduled duration: {} ms, scheduled count: {}", sched_duration, sched_count);
-
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
