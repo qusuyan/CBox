@@ -228,6 +228,7 @@ fn main() {
 
     // collect system information
     let mut sys = System::new();
+    sys.refresh_cpu_usage();
 
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
