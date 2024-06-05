@@ -80,10 +80,13 @@ pub async fn block_management_thread(
     mut txn_ready_recv: mpsc::Receiver<Vec<(Arc<Txn>, Arc<TxnCtx>)>>,
     mut pacemaker_recv: mpsc::Receiver<Vec<u8>>,
     new_block_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
+    concurrency: Arc<Semaphore>,
 ) {
     pf_info!(id; "block management stage starting...");
 
     let delay = Arc::new(AtomicF64::new(0f64));
+    let insert_delay_interval = Duration::from_millis(50);
+    let mut insert_delay_time = Instant::now() + insert_delay_interval;
 
     let mut block_management_stage = get_blk_creation(id, config, peer_messenger);
 
@@ -91,8 +94,6 @@ pub async fn block_management_thread(
     let mut batch_prepare_time = Instant::now() + batch_prepare_timeout;
     let mut is_blk_full = false;
 
-    let maximum_concurrency = 2;
-    let sem = Arc::new(Semaphore::new(maximum_concurrency));
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
 
     let txns_validated = Arc::new(DashSet::new());
@@ -109,6 +110,13 @@ pub async fn block_management_thread(
     loop {
         tokio::select! {
             new_txn = txn_ready_recv.recv() => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
                 match new_txn {
                     Some(txn_batch) => {
                         for (txn, ctx) in txn_batch {
@@ -129,6 +137,13 @@ pub async fn block_management_thread(
             },
 
             _ = tokio::time::sleep_until(batch_prepare_time), if !is_blk_full => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
                 match block_management_stage.prepare_new_block().await {
                     Ok(blk_full) => is_blk_full = blk_full,
                     Err(e) => pf_error!(id; "failed to prepare new block: {:?}", e),
@@ -137,6 +152,13 @@ pub async fn block_management_thread(
             },
 
             wait_result = block_management_stage.wait_to_propose() => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
                 if let Err(e) = wait_result {
                     pf_error!(id; "wait to propose failed: {:?}", e);
                     continue;
@@ -161,6 +183,13 @@ pub async fn block_management_thread(
             },
 
             peer_blk = peer_blk_recv.recv() => {
+                let permit = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
                 let (src, new_block) = match peer_blk {
                     Some((src, blk)) => {
                         if src == id {
@@ -179,12 +208,13 @@ pub async fn block_management_thread(
 
                 let blk_sender = pending_blk_sender.clone();
                 let txns_validated = txns_validated.clone();
-                let semaphore = sem.clone();
+                let sem = concurrency.clone();
+                drop(permit);
                 tokio::task::spawn(async move {
-                    let permit = match semaphore.acquire().await {
+                    let permit = match sem.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
-                            pf_error!(id; "failed to acquire concurrency: {:?}", e);
+                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
                             return;
                         }
                     };
@@ -232,6 +262,13 @@ pub async fn block_management_thread(
             }
 
             peer_blk_with_ctx = pending_blk_recver.recv() => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
                 let (src, peer_blk, peer_blk_ctx) = match peer_blk_with_ctx {
                     Some(data) => data,
                     None => {
@@ -265,6 +302,13 @@ pub async fn block_management_thread(
             }
 
             pmaker_msg = pacemaker_recv.recv() => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
                 match pmaker_msg {
                     Some(msg) => {
                         pf_debug!(id; "got pmaker msg");
@@ -281,6 +325,13 @@ pub async fn block_management_thread(
             }
 
             req = peer_blk_req_recv.recv() => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
                 match req {
                     Some((peer, msg)) => {
                         pf_debug!(id; "got block request {:?}", msg);
@@ -294,6 +345,23 @@ pub async fn block_management_thread(
                         continue;
                     }
                 }
+            }
+
+            _ = tokio::time::sleep_until(insert_delay_time) => {
+                // insert delay as appropriate
+                let sleep_time = delay.load(Ordering::Relaxed);
+                if sleep_time > 0.05 {
+                    let _ = match concurrency.acquire().await {
+                        Ok(permit) => permit,
+                        Err(e) => {
+                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                            continue;
+                        }
+                    };
+                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+                    delay.store(0f64, Ordering::Relaxed);
+                }
+                insert_delay_time = Instant::now() + insert_delay_interval;
             }
 
             _ = tokio::time::sleep_until(report_timeout) => {
@@ -311,13 +379,6 @@ pub async fn block_management_thread(
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
-        }
-
-        // insert delay as appropriate
-        let sleep_time = delay.load(Ordering::Relaxed);
-        if sleep_time > 0.05 {
-            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-            delay.store(0f64, Ordering::Relaxed);
         }
     }
 }
