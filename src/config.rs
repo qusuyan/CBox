@@ -136,10 +136,18 @@ impl Config {
             Config::ChainReplication { config } => {
                 let mut on_chain = HashSet::new();
                 let mut valid = true;
+                // make sure that nodes on chain are valid
                 for node in config.order.iter() {
                     if topology.contains_key(node) && !on_chain.contains(node) {
                         on_chain.insert(node);
                     } else {
+                        valid = false;
+                        break;
+                    }
+                }
+                // make sure that all nodes are included in the chain
+                for node in topology.keys() {
+                    if !on_chain.contains(node) {
                         valid = false;
                         break;
                     }
@@ -193,7 +201,7 @@ impl Config {
             Config::Dummy { config } => DissemPattern::from_str(&config.blk_dissem, true),
             Config::Bitcoin { config } => DissemPattern::from_str(&config.blk_dissem, true),
             Config::Avalanche { .. } => Ok(DissemPattern::Sample),
-            Config::ChainReplication { .. } => Ok(DissemPattern::Passthrough),
+            Config::ChainReplication { .. } => Ok(DissemPattern::Linear),
         }
     }
 

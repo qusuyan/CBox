@@ -86,7 +86,7 @@ pub async fn decision_thread(
         crypto_scheme,
         config,
         peer_messenger,
-        pmaker_feedback_send,
+        pmaker_feedback_send.clone(), // keep pmaker_feedback pipe around
         delay.clone(),
     );
 

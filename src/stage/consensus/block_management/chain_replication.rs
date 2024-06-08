@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 
 pub struct ChainReplicationBlockManagement {
+    id: NodeId,
     mem_pool: Vec<(Arc<Txn>, Arc<TxnCtx>)>,
     is_head: bool,
     block_size: usize,
@@ -24,13 +25,14 @@ pub struct ChainReplicationBlockManagement {
 }
 
 impl ChainReplicationBlockManagement {
-    pub fn new(me: NodeId, config: ChainReplicationConfig) -> Self {
-        let is_head = config.order[0] == me;
+    pub fn new(id: NodeId, config: ChainReplicationConfig) -> Self {
+        let is_head = config.order[0] == id;
         Self {
+            id,
             mem_pool: vec![],
             is_head,
             block_size: config.blk_size,
-            next_blk_id: Hash::zero(),
+            next_blk_id: Hash::one(),
             curr_batch_len: 0,
             curr_batch_size: 0,
             _notify: Notify::new(),
@@ -45,17 +47,26 @@ impl BlockManagement for ChainReplicationBlockManagement {
         txn: Arc<Txn>,
         ctx: Arc<TxnCtx>,
     ) -> Result<bool, CopycatError> {
+        if !self.is_head {
+            pf_trace!(self.id; "Non-head ignoring txn {:?}", txn);
+            return Ok(true);
+        }
+
         self.mem_pool.push((txn, ctx));
         Ok(true)
     }
 
     async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
+        if !self.is_head {
+            return Ok(true);
+        }
+
         let blk_full = loop {
             if self.curr_batch_size >= self.block_size {
                 break true;
             }
 
-            if self.curr_batch_len > self.mem_pool.len() {
+            if self.curr_batch_len >= self.mem_pool.len() {
                 break false;
             }
 
@@ -69,7 +80,7 @@ impl BlockManagement for ChainReplicationBlockManagement {
 
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         loop {
-            if self.curr_batch_size >= self.block_size {
+            if self.is_head && self.curr_batch_size >= self.block_size {
                 return Ok(());
             }
             self._notify.notified().await;
@@ -77,17 +88,18 @@ impl BlockManagement for ChainReplicationBlockManagement {
     }
 
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
+        assert!(self.is_head);
         let txns_with_ctx = self.mem_pool.drain(0..self.curr_batch_len);
         let (txns, txn_ctx) = txns_with_ctx.unzip();
 
-        let blk = Arc::new(Block {
-            header: BlockHeader::ChainReplication {
-                blk_id: self.next_blk_id,
-            },
-            txns,
-        });
-        let blk_ctx = Arc::new(BlkCtx::from_header_and_txns(&BlockHeader::Dummy, txn_ctx)?);
+        let header = BlockHeader::ChainReplication {
+            blk_id: self.next_blk_id,
+        };
+        let blk_ctx: Arc<BlkCtx> = Arc::new(BlkCtx::from_header_and_txns(&header, txn_ctx)?);
+        let blk = Arc::new(Block { header, txns });
 
+        self.curr_batch_len = 0;
+        self.curr_batch_size = 0;
         self.next_blk_id += Hash::one();
 
         Ok((blk, blk_ctx))

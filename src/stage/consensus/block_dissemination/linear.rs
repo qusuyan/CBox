@@ -22,7 +22,7 @@ impl LinearBlockDissemination {
             _ => unimplemented!(),
         };
 
-        let idx = 0;
+        let mut idx = 0;
         let (prev, next) = loop {
             assert!(idx < rep_order.len());
             if rep_order[idx] == me {
@@ -38,6 +38,7 @@ impl LinearBlockDissemination {
                 };
                 break (prev, next);
             }
+            idx += 1;
         };
 
         Self {
