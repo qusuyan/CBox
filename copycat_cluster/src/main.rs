@@ -36,6 +36,10 @@ struct CliArgs {
     #[clap(long, short = 't', default_value_t = 8)]
     num_threads: u64,
 
+    /// Max allowed per node concurrency
+    #[clap(long, short = 'r')]
+    per_node_concurrency: Option<usize>,
+
     /// Number of concurrent TCP streams between each pair of peers
     #[clap(long, short = 'o', default_value_t = 1)]
     num_conn_per_peer: usize,
@@ -276,6 +280,7 @@ fn main() {
                 node_config.clone(),
                 !args.disable_txn_dissem,
                 topology.remove(&node_id).unwrap_or(HashSet::new()),
+                args.per_node_concurrency,
             ).await;
             let (node, mut executed): (Node, _) = match result {
                 Ok(node) => node,

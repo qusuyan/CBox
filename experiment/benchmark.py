@@ -104,9 +104,9 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     clients_remainder = params["num-clients"] % params["num-machines"]
 
     if params["single-process-cluster"]:
-        num_threads = min(num_nodes_per_machine * params["node-threads"], params["cluster-threads"])
-        run_args = [params["build-type"], "@POS", num_threads, params["chain-type"], params["dissem"], params["crypto"], params["conn_multiply"], 
-                    clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["txn-span"], params["disable-txn-dissem"], params["config"]]
+        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["per-node-concurrency"], params["chain-type"], params["dissem"], params["crypto"], 
+                    params["conn_multiply"], clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["txn-span"], 
+                    params["disable-txn-dissem"], params["config"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -185,6 +185,7 @@ if __name__ == "__main__":
         "crypto": "dummy",
         "single-process-cluster": True,
         "conn_multiply": 1,
+        "per-node-concurrency": 2,
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

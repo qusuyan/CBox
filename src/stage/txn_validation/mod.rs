@@ -7,9 +7,8 @@ use crate::utils::{CopycatError, NodeId};
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{Duration, Instant};
-use tokio_metrics::TaskMonitor;
 
 use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
@@ -73,22 +72,30 @@ pub async fn txn_validation_thread(
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
     validated_txn_send: mpsc::Sender<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
-    task_monitor: TaskMonitor,
+    concurrency: Arc<Semaphore>,
 ) {
     pf_info!(id; "txn validation stage starting...");
 
-    let delay = Arc::new(AtomicF64::new(0f64));
+    let validation_batch_size = 100usize;
+
+    let delay: Arc<AtomicF64> = Arc::new(AtomicF64::new(0f64));
+    let insert_delay_interval = Duration::from_millis(50);
+    let mut insert_delay_time = Instant::now() + insert_delay_interval;
 
     let txn_batch_interval = Duration::from_millis(100);
     let mut txn_validation_stage = get_txn_validation(crypto_scheme);
     let mut txn_buffer = vec![];
     let mut txn_batch_time = Instant::now() + txn_batch_interval;
 
-    async fn wait_validation_batch(batch: &Vec<(u64, Arc<Txn>)>, timeout: Instant) {
+    async fn wait_validation_batch(
+        batch: &Vec<(u64, Arc<Txn>)>,
+        max_batch_size: usize,
+        timeout: Instant,
+    ) {
         let notify = tokio::sync::Notify::new();
         if batch.len() == 0 {
             notify.notified().await;
-        } else if batch.len() > 100 {
+        } else if batch.len() > max_batch_size {
             return;
         }
         tokio::time::sleep_until(timeout).await;
@@ -97,11 +104,18 @@ pub async fn txn_validation_thread(
     let mut report_time = Instant::now() + Duration::from_secs(60);
     let mut self_txns_recved = 0;
     let mut peer_txns_recved = 0;
-    let mut metric_intervals = task_monitor.intervals();
 
     loop {
         tokio::select! {
             new_txn = req_recv.recv() => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
+
                 let txn = match new_txn {
                     Some(txn) => txn,
                     None => {
@@ -115,6 +129,14 @@ pub async fn txn_validation_thread(
                 txn_buffer.push((id, txn));
             },
             new_peer_txn = peer_txn_recv.recv() => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
+
                 let (src, txns) = match new_peer_txn {
                     Some((src, txn)) => {
                         if src == id {
@@ -134,8 +156,17 @@ pub async fn txn_validation_thread(
                 let txn_batch = txns.into_iter().map(|txn| (src, txn));
                 txn_buffer.extend(txn_batch);
             }
-            _ = wait_validation_batch(&txn_buffer, txn_batch_time) => {
-                let txns_to_validate = txn_buffer.drain(0..).collect();
+            _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time) => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
+
+                let num_txns_to_drain = std::cmp::min(validation_batch_size, txn_buffer.len());
+                let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain).collect();
                 match txn_validation_stage.validate(txns_to_validate).await {
                     Ok(txns) => {
                         if let Err(e) = validated_txn_send.send(txns).await {
@@ -148,34 +179,30 @@ pub async fn txn_validation_thread(
                 };
                 txn_batch_time += txn_batch_interval;
             }
+            _ = tokio::time::sleep_until(insert_delay_time) => {
+                // insert delay as appropriate
+                let sleep_time = delay.load(Ordering::Relaxed);
+                if sleep_time > 0.05 {
+                    let _ = match concurrency.acquire().await {
+                        Ok(permit) => permit,
+                        Err(e) => {
+                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                            continue;
+                        }
+                    };
+                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+                    delay.store(0f64, Ordering::Relaxed);
+                }
+                insert_delay_time = Instant::now() + insert_delay_interval;
+            }
             _ = tokio::time::sleep_until(report_time) => {
                 // report basic statistics
                 pf_info!(id; "In the last minute: self_txns_recved: {}, peer_txns_recved: {}", self_txns_recved, peer_txns_recved);
                 self_txns_recved = 0;
                 peer_txns_recved = 0;
-
-                // report task monitor statistics
-                let metrics = match metric_intervals.next() {
-                    Some(metrics) => metrics,
-                    None => {
-                        pf_error!(id; "failed to fetch metrics for the last minute");
-                        continue;
-                    }
-                };
-                let sched_duration = metrics.mean_scheduled_duration().as_secs_f64() * 1000f64;
-                let sched_count = metrics.total_scheduled_count;
-                pf_info!(id; "In the last minute: mean scheduled duration: {} ms, scheduled count: {}", sched_duration, sched_count);
-
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);
             }
         };
-
-        // insert delay as appropriate
-        let sleep_time = delay.load(Ordering::Relaxed);
-        if sleep_time > 0.05 {
-            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-            delay.store(0f64, Ordering::Relaxed);
-        }
     }
 }
