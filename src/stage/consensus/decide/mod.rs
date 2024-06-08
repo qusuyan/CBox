@@ -48,7 +48,7 @@ fn get_decision(
     delay: Arc<AtomicF64>,
 ) -> Box<dyn Decision> {
     match config {
-        Config::Dummy => Box::new(DummyDecision::new()),
+        Config::Dummy { .. } => Box::new(DummyDecision::new()),
         Config::Bitcoin { config } => Box::new(BitcoinDecision::new(id, config)),
         Config::Avalanche { config } => Box::new(AvalancheDecision::new(
             id,

@@ -30,7 +30,7 @@ fn get_pacemaker(
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn Pacemaker> {
     match config {
-        Config::Dummy => Box::new(DummyPacemaker::new()),
+        Config::Dummy { .. } => Box::new(DummyPacemaker::new()),
         Config::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO
         Config::Avalanche { config } => Box::new(AvalanchePacemaker::new(config)),
         Config::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,

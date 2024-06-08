@@ -21,7 +21,7 @@ pub trait Commit: Sync + Send {
 
 pub fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
     match config {
-        Config::Dummy => Box::new(DummyCommit::new()),
+        Config::Dummy { .. } => Box::new(DummyCommit::new()),
         Config::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:
         Config::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
         Config::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:

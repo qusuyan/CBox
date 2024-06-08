@@ -3,7 +3,7 @@ use mailbox::Mailbox;
 use copycat::log::colored_level;
 use copycat::Node;
 use copycat::{fully_connected_topology, get_topology};
-use copycat::{ChainType, Config, CryptoScheme, DissemPattern};
+use copycat::{ChainType, Config, CryptoScheme};
 use copycat_flowgen::get_flow_gen;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -47,10 +47,6 @@ struct CliArgs {
     /// The type of blockchain
     #[arg(long, short = 'c', value_enum, default_value = "dummy")]
     chain: ChainType,
-
-    /// Dissemination pattern
-    #[arg(long, short = 'd', default_value = "broadcast")]
-    dissem_pattern: DissemPattern,
 
     /// Cryptography scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
@@ -111,17 +107,17 @@ impl CliArgs {
         //     self.txn_span = 0;
         // }
 
-        if matches!(self.chain, ChainType::Avalanche)
-            && !matches!(self.dissem_pattern, DissemPattern::Sample)
-        {
-            log::warn!("Avalanche is based on sampling, using dissem pattern sample instead");
-            self.dissem_pattern = DissemPattern::Sample;
-        }
+        // if matches!(self.chain, ChainType::Avalanche)
+        //     && !matches!(self.dissem_pattern, DissemPattern::Sample)
+        // {
+        //     log::warn!("Avalanche is based on sampling, using dissem pattern sample instead");
+        //     self.dissem_pattern = DissemPattern::Sample;
+        // }
 
-        if !matches!(self.dissem_pattern, DissemPattern::Gossip) && !self.topology.is_empty() {
-            log::warn!("Topology files are only used for gossipping, but the dissem pattern is {:?}, ignoring topology file...", self.dissem_pattern);
-            self.topology = String::from("");
-        }
+        // if !matches!(self.dissem_pattern, DissemPattern::Gossip) && !self.topology.is_empty() {
+        //     log::warn!("Topology files are only used for gossipping, but the dissem pattern is {:?}, ignoring topology file...", self.dissem_pattern);
+        //     self.topology = String::from("");
+        // }
     }
 }
 
@@ -270,7 +266,6 @@ fn main() {
             let result = Node::init(
                 node_id,
                 args.chain,
-                args.dissem_pattern,
                 txn_crypto,
                 p2p_crypto,
                 node_config.clone(),

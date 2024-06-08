@@ -6,11 +6,11 @@ use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
 
 use async_trait::async_trait;
 use rand::Rng;
-use tokio::sync::Notify;
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 
 const UNSET: usize = 0;

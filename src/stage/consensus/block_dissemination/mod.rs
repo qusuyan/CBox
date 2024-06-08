@@ -33,11 +33,10 @@ pub trait BlockDissemination: Sync + Send {
 
 fn get_block_dissemination(
     id: NodeId,
-    dissem_pattern: DissemPattern,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockDissemination> {
-    match dissem_pattern {
+    match config.get_blk_dissem() {
         DissemPattern::Broadcast => Box::new(BroadcastBlockDissemination::new(id, peer_messenger)),
         DissemPattern::Gossip => Box::new(GossipBlockDissemination::new(id, peer_messenger)),
         DissemPattern::Sample => {
@@ -52,7 +51,6 @@ fn get_block_dissemination(
 
 pub async fn block_dissemination_thread(
     id: NodeId,
-    dissem_pattern: DissemPattern,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
     mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
@@ -65,8 +63,7 @@ pub async fn block_dissemination_thread(
     let insert_delay_interval = Duration::from_millis(50);
     let mut insert_delay_time = Instant::now() + insert_delay_interval;
 
-    let block_dissemination_stage =
-        get_block_dissemination(id, dissem_pattern, config, peer_messenger);
+    let block_dissemination_stage = get_block_dissemination(id, config, peer_messenger);
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
 

@@ -49,4 +49,12 @@ impl BitcoinTxn {
     }
 }
 
-impl GetSize for BitcoinTxn {}
+impl GetSize for BitcoinTxn {
+    fn get_size(&self) -> usize {
+        let mut size = Self::get_stack_size() + GetSize::get_heap_size(self);
+        if let BitcoinTxn::Send { script_bytes, .. } = self {
+            size += *script_bytes as usize;
+        }
+        size
+    }
+}

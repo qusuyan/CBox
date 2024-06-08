@@ -1,15 +1,32 @@
 use std::collections::{HashMap, HashSet};
 
+use clap::ValueEnum;
+
 use crate::protocol::ChainType;
 use crate::utils::CopycatError;
-use crate::{parsed_config, NodeId};
+use crate::{parsed_config, DissemPattern, NodeId};
 
 #[derive(Clone, Debug)]
 pub enum Config {
-    Dummy,
+    Dummy { config: DummyConfig },
     Bitcoin { config: BitcoinConfig },
     Avalanche { config: AvalancheConfig },
     ChainReplication { config: ChainReplicationConfig },
+}
+
+#[derive(Clone, Debug)]
+pub struct DummyConfig {
+    pub txn_dissem: String,
+    pub blk_dissem: String,
+}
+
+impl Default for DummyConfig {
+    fn default() -> Self {
+        Self {
+            txn_dissem: String::from("broadcast"),
+            blk_dissem: String::from("broadcast"),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -17,6 +34,8 @@ pub struct BitcoinConfig {
     pub difficulty: u8,
     pub compute_power: f64,
     pub commit_depth: u8,
+    pub txn_dissem: String,
+    pub blk_dissem: String,
 }
 
 impl Default for BitcoinConfig {
@@ -25,6 +44,8 @@ impl Default for BitcoinConfig {
             difficulty: 25,
             compute_power: 1.0,
             commit_depth: 6,
+            txn_dissem: String::from("gossip"),
+            blk_dissem: String::from("gossip"),
         }
     }
 }
@@ -38,6 +59,7 @@ pub struct AvalancheConfig {
     pub beta2: u64,
     pub proposal_timeout_secs: f64,
     pub max_inflight_blk: usize,
+    pub txn_dissem: String,
 }
 
 // https://arxiv.org/pdf/1906.08936.pdf
@@ -51,6 +73,7 @@ impl Default for AvalancheConfig {
             beta2: 150,
             proposal_timeout_secs: 5.0,
             max_inflight_blk: 40, // 40 * blk_len ~ 1800 txns / blk (bitcoin)
+            txn_dissem: String::from("broadcast"),
         }
     }
 }
@@ -73,12 +96,14 @@ impl Default for ChainReplicationConfig {
 impl Config {
     pub fn from_str(chain_type: ChainType, input: Option<&str>) -> Result<Self, CopycatError> {
         match chain_type {
-            ChainType::Dummy => Ok(Config::Dummy),
+            ChainType::Dummy => Ok(Config::Dummy {
+                config: parsed_config!(input => DummyConfig; txn_dissem, blk_dissem)?,
+            }),
             ChainType::Bitcoin => Ok(Config::Bitcoin {
-                config: parsed_config!(input => BitcoinConfig; difficulty, commit_depth, compute_power)?,
+                config: parsed_config!(input => BitcoinConfig; difficulty, commit_depth, compute_power, txn_dissem, blk_dissem)?,
             }),
             ChainType::Avalanche => Ok(Config::Avalanche {
-                config: parsed_config!(input => AvalancheConfig; blk_len, k, alpha, beta1, beta2, proposal_timeout_secs, max_inflight_blk)?,
+                config: parsed_config!(input => AvalancheConfig; blk_len, k, alpha, beta1, beta2, proposal_timeout_secs, max_inflight_blk, txn_dissem)?,
             }),
             ChainType::ChainReplication => Ok(Config::ChainReplication {
                 config: parsed_config!(input => ChainReplicationConfig; order)?,
@@ -88,7 +113,7 @@ impl Config {
 
     pub fn validate(&mut self, topology: &HashMap<NodeId, HashSet<NodeId>>) {
         match self {
-            Config::Dummy => {}
+            Config::Dummy { .. } => {}
             Config::Bitcoin { .. } => {}
             Config::Avalanche { config } => {
                 let min_neighbors = topology
@@ -126,5 +151,53 @@ impl Config {
                 }
             }
         }
+        self.validate_dissem_patterns();
+    }
+
+    fn validate_dissem_patterns(&mut self) {
+        if let Err(e) = self.get_txn_dissem_inner() {
+            log::warn!("Invalid txn dissem pattern: {e}, restore to default");
+            match self {
+                Config::Dummy { config } => config.txn_dissem = String::from("broadcast"),
+                Config::Bitcoin { config } => config.txn_dissem = String::from("gossip"),
+                Config::Avalanche { config } => config.txn_dissem = String::from("broadcast"),
+                Config::ChainReplication { .. } => {}
+            }
+        }
+
+        if let Err(e) = self.get_blk_dissem_inner() {
+            log::warn!("Invalid blk dissem pattern: {e}, restore to default");
+            match self {
+                Config::Dummy { config } => config.blk_dissem = String::from("broadcast"),
+                Config::Bitcoin { config } => config.blk_dissem = String::from("gossip"),
+                Config::ChainReplication { .. } | Config::Avalanche { .. } => {}
+            }
+        }
+    }
+
+    fn get_txn_dissem_inner(&self) -> Result<DissemPattern, String> {
+        match self {
+            Config::Dummy { config } => DissemPattern::from_str(&config.txn_dissem, true),
+            Config::Bitcoin { config } => DissemPattern::from_str(&config.txn_dissem, true),
+            Config::Avalanche { config } => DissemPattern::from_str(&config.txn_dissem, true),
+            Config::ChainReplication { .. } => Ok(DissemPattern::Passthrough),
+        }
+    }
+
+    pub fn get_txn_dissem(&self) -> DissemPattern {
+        self.get_txn_dissem_inner().unwrap()
+    }
+
+    fn get_blk_dissem_inner(&self) -> Result<DissemPattern, String> {
+        match self {
+            Config::Dummy { config } => DissemPattern::from_str(&config.blk_dissem, true),
+            Config::Bitcoin { config } => DissemPattern::from_str(&config.blk_dissem, true),
+            Config::Avalanche { .. } => Ok(DissemPattern::Sample),
+            Config::ChainReplication { .. } => Ok(DissemPattern::Passthrough),
+        }
+    }
+
+    pub fn get_blk_dissem(&self) -> DissemPattern {
+        self.get_blk_dissem_inner().unwrap()
     }
 }

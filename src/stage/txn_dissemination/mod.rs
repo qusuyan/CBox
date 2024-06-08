@@ -30,15 +30,14 @@ pub trait TxnDissemination: Send + Sync {
 fn get_txn_dissemination(
     id: NodeId,
     enabled: bool,
-    dissem_pattern: DissemPattern,
-    _config: Config,
+    config: Config,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn TxnDissemination> {
     if !enabled {
         return Box::new(PassthroughTxnDissemination::new());
     }
 
-    match dissem_pattern {
+    match config.get_txn_dissem() {
         DissemPattern::Broadcast => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)),
         DissemPattern::Gossip => Box::new(GossipTxnDissemination::new(id, peer_messenger)),
         DissemPattern::Sample => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)), // TODO: use gossip for now
@@ -49,7 +48,6 @@ fn get_txn_dissemination(
 
 pub async fn txn_dissemination_thread(
     id: NodeId,
-    dissem_pattern: DissemPattern,
     config: Config,
     enabled: bool,
     peer_messenger: Arc<PeerMessenger>,
@@ -63,8 +61,7 @@ pub async fn txn_dissemination_thread(
     let insert_delay_interval = Duration::from_millis(50);
     let mut insert_delay_time = Instant::now() + insert_delay_interval;
 
-    let txn_dissemination_stage =
-        get_txn_dissemination(id, enabled, dissem_pattern, config, peer_messenger);
+    let txn_dissemination_stage = get_txn_dissemination(id, enabled, config, peer_messenger);
     let mut batch = vec![];
     let mut txn_dissem_time = Instant::now() + Duration::from_millis(100);
 

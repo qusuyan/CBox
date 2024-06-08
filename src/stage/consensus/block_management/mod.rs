@@ -62,7 +62,7 @@ fn get_blk_creation(
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
     match config {
-        Config::Dummy => Box::new(DummyBlockManagement::new()),
+        Config::Dummy { .. } => Box::new(DummyBlockManagement::new()),
         Config::Bitcoin { config } => {
             Box::new(BitcoinBlockManagement::new(id, config, peer_messenger))
         }

@@ -81,6 +81,8 @@ impl Decision for ChainReplicationDecision {
             unreachable!("Avalanche blocks are in DAG not chain")
         };
 
+        pf_debug!(self.me; "got new block: {:?}", new_blk);
+
         match self.role {
             Role::Head => {
                 self.inflight_blks.insert(new_blk_ctx.id, new_blk);
