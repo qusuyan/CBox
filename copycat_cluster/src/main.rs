@@ -198,12 +198,8 @@ fn main() {
             }
         }
     };
-    let min_neighbors = topology
-        .iter()
-        .map(|(_, neighbors)| neighbors.len())
-        .min()
-        .unwrap();
-    node_config.validate(min_neighbors);
+    
+    node_config.validate(&topology);
     log::info!("Node config: {:?}", node_config);
 
     // get flow generation metrics

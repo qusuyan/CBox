@@ -7,6 +7,9 @@ use gossip::GossipBlockDissemination;
 mod sampling;
 use sampling::SamplingBlockDissemination;
 
+mod linear;
+use linear::LinearBlockDissemination;
+
 use crate::config::Config;
 use crate::context::BlkCtx;
 use crate::peers::PeerMessenger;
@@ -40,6 +43,10 @@ fn get_block_dissemination(
         DissemPattern::Sample => {
             Box::new(SamplingBlockDissemination::new(id, peer_messenger, config))
         }
+        DissemPattern::Linear => {
+            Box::new(LinearBlockDissemination::new(id, peer_messenger, config))
+        }
+        DissemPattern::Passthrough => unimplemented!(),
     }
 }
 

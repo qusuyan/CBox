@@ -1,6 +1,5 @@
 use super::BlockManagement;
 use crate::config::AvalancheConfig;
-
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
@@ -264,12 +263,10 @@ impl BlockManagement for AvalancheBlockManagement {
         //TODO: add noop txns to drive consensus as needed
         assert!(self.blk_quota > 0);
         let txn_hashs: Vec<Hash> = self.curr_batch.drain(0..).collect();
-        let txns_with_ctx: Vec<(Arc<Txn>, Arc<TxnCtx>)> = txn_hashs
+        let txns_with_ctx = txn_hashs
             .iter()
-            .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone())
-            .collect();
-        let txns = txns_with_ctx.iter().map(|(txn, _)| txn.clone()).collect();
-        let txn_ctx: Vec<Arc<TxnCtx>> = txns_with_ctx.iter().map(|(_, ctx)| ctx.clone()).collect();
+            .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone());
+        let (txns, txn_ctx) = txns_with_ctx.unzip();
 
         let header = BlockHeader::Avalanche {
             proposer: self.id,

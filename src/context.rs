@@ -47,6 +47,7 @@ impl BlkCtx {
                 let serialized_header = bincode::serialize(header)?;
                 Ok(sha256(&serialized_header)?)
             }
+            BlockHeader::ChainReplication { blk_id } => Ok(*blk_id),
         }
     }
 

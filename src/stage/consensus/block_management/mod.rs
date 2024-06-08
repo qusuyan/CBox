@@ -7,6 +7,9 @@ use bitcoin::BitcoinBlockManagement;
 mod avalanche;
 use avalanche::AvalancheBlockManagement;
 
+mod chain_replication;
+use chain_replication::ChainReplicationBlockManagement;
+
 use crate::config::Config;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
@@ -65,6 +68,9 @@ fn get_blk_creation(
         }
         Config::Avalanche { config } => {
             Box::new(AvalancheBlockManagement::new(id, config, peer_messenger))
+        }
+        Config::ChainReplication { config } => {
+            Box::new(ChainReplicationBlockManagement::new(id, config))
         }
     }
 }

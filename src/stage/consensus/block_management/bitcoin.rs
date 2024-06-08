@@ -328,13 +328,11 @@ impl BlockManagement for BitcoinBlockManagement {
 
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
         // TODO: add incentive txn
-        let txns_with_ctx: Vec<(Arc<Txn>, Arc<TxnCtx>)> = self
+        let txns_with_ctx = self
             .block_under_construction
             .drain(0..)
-            .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone())
-            .collect();
-        let txns = txns_with_ctx.iter().map(|(txn, _)| txn.clone()).collect();
-        let txn_ctxs = txns_with_ctx.into_iter().map(|(_, ctx)| ctx).collect();
+            .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone());
+        let (txns, txn_ctxs) = txns_with_ctx.unzip();
 
         let header = BlockHeader::Bitcoin {
             prev_hash: self.chain_tail.clone(),

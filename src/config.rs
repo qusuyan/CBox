@@ -1,12 +1,15 @@
-use crate::parsed_config;
+use std::collections::{HashMap, HashSet};
+
 use crate::protocol::ChainType;
 use crate::utils::CopycatError;
+use crate::{parsed_config, NodeId};
 
 #[derive(Clone, Debug)]
 pub enum Config {
     Dummy,
     Bitcoin { config: BitcoinConfig },
     Avalanche { config: AvalancheConfig },
+    ChainReplication { config: ChainReplicationConfig },
 }
 
 #[derive(Clone, Debug)]
@@ -52,6 +55,21 @@ impl Default for AvalancheConfig {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ChainReplicationConfig {
+    pub order: Vec<NodeId>,
+    pub blk_size: usize,
+}
+
+impl Default for ChainReplicationConfig {
+    fn default() -> Self {
+        Self {
+            order: vec![],
+            blk_size: 0x100000,
+        }
+    }
+}
+
 impl Config {
     pub fn from_str(chain_type: ChainType, input: Option<&str>) -> Result<Self, CopycatError> {
         match chain_type {
@@ -62,15 +80,23 @@ impl Config {
             ChainType::Avalanche => Ok(Config::Avalanche {
                 config: parsed_config!(input => AvalancheConfig; blk_len, k, alpha, beta1, beta2, proposal_timeout_secs, max_inflight_blk)?,
             }),
+            ChainType::ChainReplication => Ok(Config::ChainReplication {
+                config: parsed_config!(input => ChainReplicationConfig; order)?,
+            }),
         }
     }
 
-    pub fn validate(&mut self, num_neighbors: usize) {
+    pub fn validate(&mut self, topology: &HashMap<NodeId, HashSet<NodeId>>) {
         match self {
             Config::Dummy => {}
             Config::Bitcoin { .. } => {}
             Config::Avalanche { config } => {
-                let max_voters = num_neighbors + 1;
+                let min_neighbors = topology
+                    .iter()
+                    .map(|(_, neighbors)| neighbors.len())
+                    .min()
+                    .unwrap();
+                let max_voters = min_neighbors + 1;
                 if config.k > max_voters {
                     log::warn!("not enough neighbors, setting k to {max_voters} instead");
                     config.k = max_voters;
@@ -80,6 +106,23 @@ impl Config {
                         "alpha has to be greater than 0.5 to ensure majority vote, setting to 0.51"
                     );
                     config.alpha = 0.51
+                }
+            }
+            Config::ChainReplication { config } => {
+                let mut on_chain = HashSet::new();
+                let mut valid = true;
+                for node in config.order.iter() {
+                    if topology.contains_key(node) && !on_chain.contains(node) {
+                        on_chain.insert(node);
+                    } else {
+                        valid = false;
+                        break;
+                    }
+                }
+                if !valid {
+                    let valid_order = topology.keys().cloned().collect();
+                    log::warn!("invalid order, setting to {valid_order:?} instead");
+                    config.order = valid_order;
                 }
             }
         }

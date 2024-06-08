@@ -32,7 +32,8 @@ fn get_pacemaker(
     match config {
         Config::Dummy => Box::new(DummyPacemaker::new()),
         Config::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO
-        Config::Avalanche { config } => Box::new(AvalanchePacemaker::new(config)), // TODO
+        Config::Avalanche { config } => Box::new(AvalanchePacemaker::new(config)),
+        Config::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,
     }
 }
 

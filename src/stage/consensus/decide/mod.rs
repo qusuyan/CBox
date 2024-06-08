@@ -1,9 +1,14 @@
 mod dummy;
 use dummy::DummyDecision;
+
 mod bitcoin;
 use bitcoin::BitcoinDecision;
+
 mod avalanche;
 use avalanche::AvalancheDecision;
+
+mod chain_replication;
+use chain_replication::ChainReplicationDecision;
 
 use crate::context::BlkCtx;
 use crate::protocol::block::Block;
@@ -53,6 +58,9 @@ fn get_decision(
             pmaker_feedback_send,
             delay,
         )),
+        Config::ChainReplication { .. } => {
+            Box::new(ChainReplicationDecision::new(id, config, peer_messenger))
+        }
     }
 }
 
