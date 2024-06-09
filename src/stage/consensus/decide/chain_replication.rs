@@ -10,7 +10,7 @@ use crate::{Config, CopycatError, NodeId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Notify;
 
@@ -32,7 +32,8 @@ pub struct ChainReplicationDecision {
     tail: NodeId,
     peer_messenger: Arc<PeerMessenger>,
     inflight_blks: HashMap<Hash, Arc<Block>>,
-    commit_ready: VecDeque<Hash>,
+    commit_ready: HashSet<Hash>,
+    next_to_commit: Hash,
     _notify: Notify,
 }
 
@@ -60,7 +61,8 @@ impl ChainReplicationDecision {
             tail,
             peer_messenger,
             inflight_blks: HashMap::new(),
-            commit_ready: VecDeque::new(),
+            commit_ready: HashSet::new(),
+            next_to_commit: Hash::one(),
             _notify: Notify::new(),
         }
     }
@@ -108,7 +110,7 @@ impl Decision for ChainReplicationDecision {
 
     async fn commit_ready(&self) -> Result<(), CopycatError> {
         loop {
-            if self.commit_ready.len() > 0 {
+            if self.commit_ready.contains(&self.next_to_commit) {
                 return Ok(());
             }
             self._notify.notified().await;
@@ -116,9 +118,11 @@ impl Decision for ChainReplicationDecision {
     }
 
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
-        let blk_id = self.commit_ready.pop_front().unwrap();
+        assert!(self.commit_ready.remove(&self.next_to_commit));
+        let blk_id = self.next_to_commit;
         let blk = self.inflight_blks.remove(&blk_id).unwrap();
         let txns = blk.txns.clone();
+        self.next_to_commit += Hash::one();
         Ok((blk_id.as_u64(), txns))
     }
 
@@ -127,7 +131,7 @@ impl Decision for ChainReplicationDecision {
         assert!(src == self.tail);
         let msg: Msg = bincode::deserialize(&content)?;
         if self.inflight_blks.contains_key(&msg.recved) {
-            self.commit_ready.push_back(msg.recved);
+            self.commit_ready.insert(msg.recved);
         } else {
             pf_error!(self.me; "Received block that is not inflight: {}", msg.recved);
         }
