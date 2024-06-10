@@ -145,7 +145,6 @@ impl FlowGen for AvalancheFlowGen {
         } else {
             std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len())
         };
-        log::debug!("Sending new batch of {batch_size} txns");
         for _ in 0..batch_size {
             let node = self.client_list[rand::random::<usize>() % self.client_list.len()];
             let accounts = self.accounts.get(&node).unwrap();
@@ -199,7 +198,6 @@ impl FlowGen for AvalancheFlowGen {
             };
             self.next_batch_time = start_time + Duration::from_secs_f64(interarrival_time);
         }
-        log::debug!("New batch of {batch_size} txns sent");
         Ok(batch)
     }
 
@@ -209,10 +207,6 @@ impl FlowGen for AvalancheFlowGen {
         txns: Vec<Arc<Txn>>,
         blk_height: u64,
     ) -> Result<(), CopycatError> {
-        log::debug!(
-            "Got txn batch at block height {blk_height} ({})",
-            txns.len()
-        );
         // avoid counting blocks that are
         let chain_info = self.dag_info.entry(node).or_insert(DagInfo {
             num_blks: 0,
