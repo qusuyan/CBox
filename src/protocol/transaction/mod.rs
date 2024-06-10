@@ -14,7 +14,7 @@ use crate::{CopycatError, CryptoScheme};
 
 // TODO: for better accuracy, we should implement GetSize manually so that message size
 // matches the size after marshalling.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Txn {
     Dummy { txn: DummyTxn },
     Bitcoin { txn: BitcoinTxn },
@@ -27,6 +27,16 @@ impl Txn {
             Txn::Dummy { .. } => Ok((true, 0f64)),
             Txn::Bitcoin { txn } => txn.validate(crypto),
             Txn::Avalanche { txn } => txn.validate(crypto),
+        }
+    }
+}
+
+impl GetSize for Txn {
+    fn get_size(&self) -> usize {
+        match self {
+            Txn::Dummy { txn } => txn.get_size(),
+            Txn::Avalanche { txn } => txn.get_size(),
+            Txn::Bitcoin { txn } => BitcoinTxn::get_size(&txn),
         }
     }
 }

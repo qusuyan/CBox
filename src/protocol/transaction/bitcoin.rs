@@ -47,14 +47,14 @@ impl BitcoinTxn {
             BitcoinTxn::Grant { .. } | BitcoinTxn::Incentive { .. } => Ok((true, 0f64)),
         }
     }
-}
 
-impl GetSize for BitcoinTxn {
-    fn get_size(&self) -> usize {
-        let mut size = Self::get_stack_size() + GetSize::get_heap_size(self);
+    pub fn get_size(&self) -> usize {
+        let mut size = GetSize::get_size(self);
         if let BitcoinTxn::Send { script_bytes, .. } = self {
             size += *script_bytes as usize;
         }
         size
     }
 }
+
+impl GetSize for BitcoinTxn {}
