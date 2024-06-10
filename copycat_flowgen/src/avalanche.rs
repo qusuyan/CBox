@@ -6,10 +6,10 @@ use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
 
 use async_trait::async_trait;
 use rand::Rng;
-use tokio::sync::Notify;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 
 const UNSET: usize = 0;
@@ -145,6 +145,7 @@ impl FlowGen for AvalancheFlowGen {
         } else {
             std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len())
         };
+        log::debug!("Sending new batch of {batch_size} txns");
         for _ in 0..batch_size {
             let node = self.client_list[rand::random::<usize>() % self.client_list.len()];
             let accounts = self.accounts.get(&node).unwrap();
@@ -198,6 +199,7 @@ impl FlowGen for AvalancheFlowGen {
             };
             self.next_batch_time = start_time + Duration::from_secs_f64(interarrival_time);
         }
+        log::debug!("New batch of {batch_size} txns sent");
         Ok(batch)
     }
 
@@ -207,6 +209,10 @@ impl FlowGen for AvalancheFlowGen {
         txns: Vec<Arc<Txn>>,
         blk_height: u64,
     ) -> Result<(), CopycatError> {
+        log::debug!(
+            "Got txn batch at block height {blk_height} ({})",
+            txns.len()
+        );
         // avoid counting blocks that are
         let chain_info = self.dag_info.entry(node).or_insert(DagInfo {
             num_blks: 0,
@@ -253,14 +259,14 @@ impl FlowGen for AvalancheFlowGen {
             .dag_info
             .values()
             .map(|info| {
-                let num_committed = (1..info.num_blks)
-                    .map(|height| info.txn_count.get(&height).unwrap_or(&0))
-                    .sum();
-                (
-                    num_committed,
-                    info.num_blks,
-                    num_committed as f64 / info.total_committed as f64,
-                )
+                // since blocks can get committed out of order
+                let num_committed = info.txn_count.values().sum();
+                let commit_confidence = if info.total_committed == 0 {
+                    1f64
+                } else {
+                    num_committed as f64 / info.total_committed as f64
+                };
+                (num_committed, info.num_blks, commit_confidence)
             })
             .reduce(|acc, e| {
                 (

@@ -75,6 +75,7 @@ impl BlockManagement for ChainReplicationBlockManagement {
             self.curr_batch_size += next_txn.get_size();
         };
 
+        // pf_debug!(self.id; "blk_full: {}, curr_batch_size: {}, curr_batch_len: {}, mem_pool size: {}", blk_full, self.curr_batch_size, self.curr_batch_len, self.mem_pool.len());
         Ok(blk_full)
     }
 

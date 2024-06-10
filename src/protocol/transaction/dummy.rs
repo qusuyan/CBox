@@ -1,1 +1,1 @@
-pub type DummyTxn = String;
+pub type DummyTxn = Vec<u8>;
