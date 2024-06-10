@@ -27,6 +27,7 @@ pub struct ChainReplicationFlowGen {
     next_batch_time: Instant,
     client_list: Vec<ClientId>,
     txn_size: usize,
+    next_txn_id: Hash,
     in_flight: HashMap<Hash, Instant>,
     stats: HashMap<NodeId, LogInfo>,
     total_time_sec: f64,
@@ -56,6 +57,7 @@ impl ChainReplicationFlowGen {
             next_batch_time: Instant::now(),
             client_list,
             txn_size,
+            next_txn_id: Hash::zero(),
             in_flight: HashMap::new(),
             stats: HashMap::new(),
             total_time_sec: 0f64,
@@ -96,11 +98,23 @@ impl FlowGen for ChainReplicationFlowGen {
             std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len())
         };
 
+        let mut rng = rand::thread_rng();
         for _ in 0..batch_size {
             let client_id = self.client_list[rand::random::<usize>() % self.client_list.len()];
-            let mut txn_content = DummyTxn::with_capacity(self.txn_size);
-            rand::thread_rng().fill_bytes(&mut txn_content);
-            let txn = Arc::new(Txn::Dummy { txn: txn_content });
+            let mut txn_content = Vec::with_capacity(self.txn_size);
+            unsafe { txn_content.set_len(self.txn_size) }
+            rng.fill_bytes(&mut txn_content);
+            let txn = Arc::new(Txn::Dummy {
+                txn: DummyTxn {
+                    id: self.next_txn_id,
+                    content: txn_content,
+                },
+            });
+            let txn_ctx = TxnCtx::from_txn(&txn)?;
+            let txn_hash = txn_ctx.id;
+
+            self.next_txn_id += Hash::one();
+            self.in_flight.insert(txn_hash, Instant::now());
             batch.push((client_id, txn));
         }
 
@@ -113,7 +127,6 @@ impl FlowGen for ChainReplicationFlowGen {
             };
             self.next_batch_time = start_time + Duration::from_secs_f64(interarrival_time);
         }
-        log::debug!("New batch of {batch_size} txns sent");
         Ok(batch)
     }
 
