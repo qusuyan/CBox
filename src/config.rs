@@ -139,15 +139,8 @@ impl Config {
                 // make sure that nodes on chain are valid
                 for node in config.order.iter() {
                     if topology.contains_key(node) && !on_chain.contains(node) {
-                        on_chain.insert(node);
+                        on_chain.insert(*node);
                     } else {
-                        valid = false;
-                        break;
-                    }
-                }
-                // make sure that all nodes are included in the chain
-                for node in topology.keys() {
-                    if !on_chain.contains(node) {
                         valid = false;
                         break;
                     }
@@ -156,6 +149,12 @@ impl Config {
                     let valid_order = topology.keys().cloned().collect();
                     log::warn!("invalid order, setting to {valid_order:?} instead");
                     config.order = valid_order;
+                }
+                // make sure that all nodes are included in the chain
+                for node in topology.keys() {
+                    if !on_chain.contains(node) {
+                        config.order.push(*node)
+                    }
                 }
             }
         }
