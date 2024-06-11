@@ -2,25 +2,17 @@
 num_iterations = 1
 
 [parameters]
-chain-type = "avalanche"
+chain-type = "chain-replication"
 cluster-threads = 32
-# config = [
-#   "blk_len=40+max_inflight_blk=30",
-#   "blk_len=40+max_inflight_blk=50",
-#   "blk_len=20+max_inflight_blk=60",
-#   "blk_len=20+max_inflight_blk=70",
-#   "blk_len=20+max_inflight_blk=80",
-#   "blk_len=20+max_inflight_blk=90",
-# ]
-config = "blk_len=40+max_inflight_blk=40+k=4"
+config = ["blk_size=100000+order=[0]", "blk_size=1000000+order=[0]", "blk_size=500000+order=[0]"]
 conn_multiply = 1
-crypto = ["dummy", "dummy-ecdsa", "ecdsa"]
-dissem = "sample"
-exp-time = 320
-max-inflight-txns = 4000
-node-threads = [1, 2]
-num-accounts = 160
+crypto = "dummy"
+exp-time = 200
+frequency = 8000
+max-inflight-txns = 0
+num-accounts = 1000
 num-clients = 1
 num-machines = 1
-num-nodes = [4, 8, 12, 16, 20]
-txn-span = 0
+num-nodes = [16, 24, 32, 40, 48]
+per-node-concurrency = 2
+txn-span = 1

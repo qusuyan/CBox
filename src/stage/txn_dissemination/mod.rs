@@ -4,6 +4,9 @@ use broadcast::BroadcastTxnDissemination;
 mod gossip;
 use gossip::GossipTxnDissemination;
 
+mod passthrough;
+use passthrough::PassthroughTxnDissemination;
+
 use crate::context::TxnCtx;
 use crate::protocol::transaction::Txn;
 use crate::protocol::DissemPattern;
@@ -11,7 +14,6 @@ use crate::utils::{CopycatError, NodeId};
 use crate::{config::Config, peers::PeerMessenger};
 
 use async_trait::async_trait;
-use get_size::GetSize;
 
 use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
@@ -27,20 +29,25 @@ pub trait TxnDissemination: Send + Sync {
 
 fn get_txn_dissemination(
     id: NodeId,
-    dissem_pattern: DissemPattern,
-    _config: Config,
+    enabled: bool,
+    config: Config,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn TxnDissemination> {
-    match dissem_pattern {
+    if !enabled {
+        return Box::new(PassthroughTxnDissemination::new());
+    }
+
+    match config.get_txn_dissem() {
         DissemPattern::Broadcast => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)),
         DissemPattern::Gossip => Box::new(GossipTxnDissemination::new(id, peer_messenger)),
         DissemPattern::Sample => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)), // TODO: use gossip for now
+        DissemPattern::Passthrough => Box::new(PassthroughTxnDissemination::new()),
+        DissemPattern::Linear => Box::new(PassthroughTxnDissemination::new()), // TODO: use passthrough for now
     }
 }
 
 pub async fn txn_dissemination_thread(
     id: NodeId,
-    dissem_pattern: DissemPattern,
     config: Config,
     enabled: bool,
     peer_messenger: Arc<PeerMessenger>,
@@ -54,7 +61,7 @@ pub async fn txn_dissemination_thread(
     let insert_delay_interval = Duration::from_millis(50);
     let mut insert_delay_time = Instant::now() + insert_delay_interval;
 
-    let txn_dissemination_stage = get_txn_dissemination(id, dissem_pattern, config, peer_messenger);
+    let txn_dissemination_stage = get_txn_dissemination(id, enabled, config, peer_messenger);
     let mut batch = vec![];
     let mut txn_dissem_time = Instant::now() + Duration::from_millis(100);
 
@@ -62,7 +69,7 @@ pub async fn txn_dissemination_thread(
         let notify = tokio::sync::Notify::new();
         if batch.len() == 0 {
             notify.notified().await;
-        } else if batch.get_size() > 0x100000 {
+        } else if batch.len() > 2000 {
             return;
         }
         tokio::time::sleep_until(timeout).await;
@@ -104,11 +111,9 @@ pub async fn txn_dissemination_thread(
 
                 let send_batch: Vec<(u64, (Arc<Txn>, Arc<TxnCtx>))> = batch.drain(0..).collect();
                 let txns = send_batch.iter().map(|(src, (txn, _))| (*src, txn.clone())).collect();
-                if enabled {
-                    if let Err(e) = txn_dissemination_stage.disseminate(&txns).await {
-                        pf_error!(id; "failed to disseminate txn: {:?}", e);
-                        continue;
-                    }
+                if let Err(e) = txn_dissemination_stage.disseminate(&txns).await {
+                    pf_error!(id; "failed to disseminate txn: {:?}", e);
+                    continue;
                 }
 
                 let batched_txns = send_batch.into_iter().map(|(_, txn_with_ctx)| txn_with_ctx).collect();

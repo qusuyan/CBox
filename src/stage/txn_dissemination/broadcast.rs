@@ -21,7 +21,7 @@ impl BroadcastTxnDissemination {
 
 #[async_trait]
 impl TxnDissemination for BroadcastTxnDissemination {
-    async fn disseminate(&self, txn_batch: &Vec<(u64, Arc<Txn>)>) -> Result<(), CopycatError> {
+    async fn disseminate(&self, txn_batch: &Vec<(NodeId, Arc<Txn>)>) -> Result<(), CopycatError> {
         // only the node that receives the txn first needs to broadcast
         let txn_to_dissem: Vec<Txn> = txn_batch
             .iter()

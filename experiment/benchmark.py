@@ -104,7 +104,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     clients_remainder = params["num-clients"] % params["num-machines"]
 
     if params["single-process-cluster"]:
-        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["per-node-concurrency"], params["chain-type"], params["dissem"], params["crypto"], 
+        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["per-node-concurrency"], params["chain-type"], params["crypto"], 
                     params["conn_multiply"], clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["txn-span"], 
                     params["disable-txn-dissem"], params["config"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
@@ -180,7 +180,6 @@ if __name__ == "__main__":
         "config": "",
         "topo-degree": 3,
         "topo-skewness": 0.0, # uniform
-        "dissem": "broadcast", # broadcast or gossip
         "disable-txn-dissem": False,
         "crypto": "dummy",
         "single-process-cluster": True,

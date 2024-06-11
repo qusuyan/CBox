@@ -1,9 +1,14 @@
 mod dummy;
 use dummy::DummyDecision;
+
 mod bitcoin;
 use bitcoin::BitcoinDecision;
+
 mod avalanche;
 use avalanche::AvalancheDecision;
+
+mod chain_replication;
+use chain_replication::ChainReplicationDecision;
 
 use crate::context::BlkCtx;
 use crate::protocol::block::Block;
@@ -43,7 +48,7 @@ fn get_decision(
     delay: Arc<AtomicF64>,
 ) -> Box<dyn Decision> {
     match config {
-        Config::Dummy => Box::new(DummyDecision::new()),
+        Config::Dummy { .. } => Box::new(DummyDecision::new()),
         Config::Bitcoin { config } => Box::new(BitcoinDecision::new(id, config)),
         Config::Avalanche { config } => Box::new(AvalancheDecision::new(
             id,
@@ -53,6 +58,9 @@ fn get_decision(
             pmaker_feedback_send,
             delay,
         )),
+        Config::ChainReplication { .. } => {
+            Box::new(ChainReplicationDecision::new(id, config, peer_messenger))
+        }
     }
 }
 
@@ -78,7 +86,7 @@ pub async fn decision_thread(
         crypto_scheme,
         config,
         peer_messenger,
-        pmaker_feedback_send,
+        pmaker_feedback_send.clone(), // keep pmaker_feedback pipe around
         delay.clone(),
     );
 

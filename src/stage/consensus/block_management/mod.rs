@@ -7,6 +7,9 @@ use bitcoin::BitcoinBlockManagement;
 mod avalanche;
 use avalanche::AvalancheBlockManagement;
 
+mod chain_replication;
+use chain_replication::ChainReplicationBlockManagement;
+
 use crate::config::Config;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
@@ -59,12 +62,15 @@ fn get_blk_creation(
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
     match config {
-        Config::Dummy => Box::new(DummyBlockManagement::new()),
+        Config::Dummy { .. } => Box::new(DummyBlockManagement::new()),
         Config::Bitcoin { config } => {
             Box::new(BitcoinBlockManagement::new(id, config, peer_messenger))
         }
         Config::Avalanche { config } => {
             Box::new(AvalancheBlockManagement::new(id, config, peer_messenger))
+        }
+        Config::ChainReplication { config } => {
+            Box::new(ChainReplicationBlockManagement::new(id, config))
         }
     }
 }
@@ -279,7 +285,7 @@ pub async fn block_management_thread(
 
                 peer_blks_recv += 1;
                 peer_txns_recv += peer_blk.txns.len();
-                pf_debug!(id; "Validating block {:?}", peer_blk);
+                pf_debug!(id; "Validating block ({:?}, {:?})", peer_blk, peer_blk_ctx);
                 match block_management_stage.validate_block(peer_blk, peer_blk_ctx).await {
                         Ok(new_tail) => {
                             if !new_tail.is_empty() {

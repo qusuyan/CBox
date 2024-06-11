@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::protocol::transaction::Txn;
-use crate::protocol::{ChainType, CryptoScheme, DissemPattern};
+use crate::protocol::{ChainType, CryptoScheme};
 use crate::utils::{CopycatError, NodeId};
 
 use tokio::sync::Semaphore;
@@ -37,7 +37,6 @@ impl Node {
     pub async fn init(
         id: NodeId,
         chain_type: ChainType,
-        dissem_pattern: DissemPattern,
         txn_crpyto: CryptoScheme,
         p2p_crypto: CryptoScheme,
         config: Config,
@@ -86,7 +85,6 @@ impl Node {
 
         let _txn_dissemination_handle = tokio::spawn(txn_dissemination_thread(
             id,
-            dissem_pattern,
             config.clone(),
             dissem_txns,
             peer_messenger.clone(),
@@ -121,7 +119,6 @@ impl Node {
 
         let _block_dissemination_handle = tokio::spawn(block_dissemination_thread(
             id,
-            dissem_pattern,
             config.clone(),
             peer_messenger.clone(),
             new_block_recv,

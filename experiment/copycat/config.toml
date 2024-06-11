@@ -20,7 +20,6 @@ cluster = [
   ["threads", "32"],
   ["node_concurrency", "2"],
   ["chain_type", "bitcoin"],
-  ["dissem", "broadcast"],
   ["crypto", "dummy"],
   ["conn_multiply", "1"],
   ["num_clients", "1"],
