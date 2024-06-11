@@ -106,7 +106,7 @@ impl Config {
                 config: parsed_config!(input => AvalancheConfig; blk_len, k, alpha, beta1, beta2, proposal_timeout_secs, max_inflight_blk, txn_dissem)?,
             }),
             ChainType::ChainReplication => Ok(Config::ChainReplication {
-                config: parsed_config!(input => ChainReplicationConfig; order)?,
+                config: parsed_config!(input => ChainReplicationConfig; order, blk_size)?,
             }),
         }
     }
