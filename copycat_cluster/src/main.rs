@@ -4,7 +4,9 @@ use copycat::log::colored_level;
 use copycat::Node;
 use copycat::{fully_connected_topology, get_topology};
 use copycat::{ChainType, Config, CryptoScheme};
+use copycat::protocol::MsgType;
 use copycat_flowgen::get_flow_gen;
+
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
@@ -243,7 +245,7 @@ fn main() {
 
     runtime.block_on(async {
         // start mailbox
-        let _mailbox = match Mailbox::init(id, machine_list, pipe_info, args.num_conn_per_peer).await {
+        let _mailbox = match Mailbox::init::<MsgType>(id, machine_list, pipe_info, args.num_conn_per_peer).await {
             Ok(mailbox) => mailbox,
             Err(e) => {
                 log::error!("Mailbox initialization failed with error {:?}", e);

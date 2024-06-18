@@ -1,3 +1,4 @@
+use copycat::protocol::MsgType;
 use mailbox::{config, MachineId, Mailbox};
 
 use tokio::runtime::Builder;
@@ -82,14 +83,16 @@ fn main() {
         .expect("Creating new runtime failed");
 
     runtime.block_on(async {
-        let mailbox = match Mailbox::init(id, machine_list, pipe_info, args.num_conn_per_peer).await
-        {
-            Ok(mailbox) => mailbox,
-            Err(e) => {
-                log::error!("Mailbox initialization failed with error {:?}", e);
-                std::process::exit(-1);
-            }
-        };
+        let mailbox =
+            match Mailbox::init::<MsgType>(id, machine_list, pipe_info, args.num_conn_per_peer)
+                .await
+            {
+                Ok(mailbox) => mailbox,
+                Err(e) => {
+                    log::error!("Mailbox initialization failed with error {:?}", e);
+                    std::process::exit(-1);
+                }
+            };
 
         if let Err(e) = mailbox.wait().await {
             log::error!("Mailbox failed with error {:?}", e);

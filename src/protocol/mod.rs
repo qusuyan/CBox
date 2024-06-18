@@ -4,6 +4,7 @@ pub use crypto::CryptoScheme;
 pub mod transaction;
 
 use block::Block;
+use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use transaction::Txn;
 
@@ -24,7 +25,7 @@ pub enum DissemPattern {
     Passthrough,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
 pub enum MsgType {
     NewTxn { txn_batch: Vec<Txn> },
     NewBlock { blk: Block },
