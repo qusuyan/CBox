@@ -3,7 +3,6 @@
 import os, sys, re
 from subprocess import check_output
 
-import itertools
 import pandas as pd
 
 file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"

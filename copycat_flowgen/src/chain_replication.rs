@@ -5,7 +5,7 @@ use copycat::protocol::transaction::{DummyTxn, Txn};
 use copycat::{CopycatError, NodeId, TxnCtx};
 
 use async_trait::async_trait;
-use rand::{Rng, RngCore};
+use rand::Rng;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -98,12 +98,9 @@ impl FlowGen for ChainReplicationFlowGen {
             std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len())
         };
 
-        let mut rng = rand::thread_rng();
         for _ in 0..batch_size {
             let client_id = self.client_list[rand::random::<usize>() % self.client_list.len()];
-            let mut txn_content = Vec::with_capacity(self.txn_size);
-            unsafe { txn_content.set_len(self.txn_size) }
-            rng.fill_bytes(&mut txn_content);
+            let txn_content = vec![0u8; self.txn_size];
             let txn = Arc::new(Txn::Dummy {
                 txn: DummyTxn {
                     id: self.next_txn_id,
