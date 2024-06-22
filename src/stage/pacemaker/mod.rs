@@ -149,12 +149,6 @@ pub async fn pacemaker_thread(
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
         }
-
-        // insert delay as appropriate
-        let sleep_time = delay.load(Ordering::Relaxed);
-        if sleep_time > 0.05 {
-            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-            delay.store(0f64, Ordering::Relaxed);
-        }
+        tokio::task::yield_now().await;
     }
 }

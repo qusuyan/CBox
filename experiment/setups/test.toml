@@ -7,12 +7,12 @@ cluster-threads = 32
 config = "blk_size=500000+order=[0]"
 conn_multiply = 1
 crypto = "dummy"
-exp-time = 200
+exp-time = 620
 frequency = 8000
 max-inflight-txns = 0
 num-accounts = 1000
 num-clients = 1
 num-machines = 1
-num-nodes = [400, 440, 480]
+num-nodes = 480
 per-node-concurrency = 2
 txn-span = 1

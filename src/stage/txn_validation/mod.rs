@@ -203,6 +203,7 @@ pub async fn txn_validation_thread(
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);
             }
-        };
+        }
+        tokio::task::yield_now().await;
     }
 }
