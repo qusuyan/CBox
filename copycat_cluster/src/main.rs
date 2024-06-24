@@ -238,6 +238,7 @@ fn main() {
 
     let runtime = Builder::new_multi_thread()
         .enable_all()
+        .disable_lifo_slot()
         .worker_threads(args.num_threads as usize)
         .thread_name("copycat-cluster-thread")
         .build()
