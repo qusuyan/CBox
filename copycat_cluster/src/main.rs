@@ -10,7 +10,7 @@ use copycat_flowgen::get_flow_gen;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
-use tokio::runtime::Builder;
+use tokio::runtime::{Builder, Handle};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
@@ -338,6 +338,8 @@ fn main() {
         let mut txns_sent = 0;
         let mut prev_committed = 0;
 
+        let rt_handle = Handle::current();
+
         loop {
             tokio::select! {
                 wait_next_req = flow_gen.wait_next() => {
@@ -397,6 +399,13 @@ fn main() {
                         .expect("no CPU returned");
                     let avg_cpu_usage = cpu_usage / cpu_count as f32;
 
+                    let rt_metrics = rt_handle.metrics();
+                    let active_tasks = rt_metrics.active_tasks_count();
+                    let avg_queue_depth = (0..rt_metrics.num_workers()).map(|id| rt_metrics.worker_local_queue_depth(id)).sum::<usize>() / rt_metrics.num_workers();
+                    let avg_poll_count = (0..rt_metrics.num_workers()).map(|id| rt_metrics.worker_poll_count(id)).sum::<u64>() / rt_metrics.num_workers() as u64;
+                    let avg_overflow_count = (0..rt_metrics.num_workers()).map(|id| rt_metrics.worker_overflow_count(id)).sum::<u64>() / rt_metrics.num_workers() as u64;
+                    let avg_steal_count = (0..rt_metrics.num_workers()).map(|id| rt_metrics.worker_steal_count(id)).sum::<u64>() / rt_metrics.num_workers() as u64;
+
                     log::info!(
                         "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit confidence: {}, CPU Usage: {}",
                         run_time,
@@ -410,6 +419,7 @@ fn main() {
                         .write_fmt(format_args!("{},{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence, avg_cpu_usage))
                         .expect("write stats failed");
                     log::info!("In the last minute: txns_sent: {}, inflight_txns: {}", txns_sent, stats.inflight_txns);
+                    log::info!("Cumulatively: active tasks: {} avg queue depth: {}, avg poll count: {}, avg overflow count: {}, avg steal count: {}", active_tasks, avg_queue_depth, avg_poll_count, avg_overflow_count, avg_steal_count);
                     txns_sent = 0;
                     prev_committed = stats.num_committed;
                     report_time += Duration::from_secs_f64(report_interval);
