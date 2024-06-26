@@ -110,9 +110,8 @@ pub async fn txn_validation_thread(
     let mut txns_validated = 0;
 
     let mut batch_validate_count = 0;
-    let mut grab_sem_dur = 0f64;
+    let mut fetch_txn_dur = 0f64;
     let mut validate_dur = 0f64;
-    let mut send_to_dissem_dur = 0f64;
 
     let mut intervals = monitor.intervals();
 
@@ -172,7 +171,6 @@ pub async fn txn_validation_thread(
                 txn_buffer.extend(txn_batch);
             }
             _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time), if txn_batch_time.is_some() => {
-                let start_time = Instant::now();
 
                 let _ = match concurrency.acquire().await {
                     Ok(permit) => permit,
@@ -182,7 +180,7 @@ pub async fn txn_validation_thread(
                     }
                 };
 
-                let validation_start = Instant::now();
+                let start_time = Instant::now();
 
                 let num_txns_to_drain = std::cmp::min(validation_batch_size, txn_buffer.len());
                 let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain).collect();
@@ -190,6 +188,7 @@ pub async fn txn_validation_thread(
                 txn_batches_validated += 1;
                 txns_validated += num_txns_to_drain;
 
+                let validation_start = Instant::now();
                 let validate_result = txn_validation_stage.validate(txns_to_validate).await;
                 let validated = Instant::now();
 
@@ -205,11 +204,9 @@ pub async fn txn_validation_thread(
                 };
                 txn_batch_time = None;
 
-                let finish = Instant::now();
                 batch_validate_count += 1;
-                grab_sem_dur += validation_start.duration_since(start_time).as_secs_f64();
+                fetch_txn_dur += validation_start.duration_since(start_time).as_secs_f64();
                 validate_dur += validated.duration_since(validation_start).as_secs_f64();
-                send_to_dissem_dur += finish.duration_since(validated).as_secs_f64();
             }
             _ = tokio::time::sleep_until(insert_delay_time) => {
                 // insert delay as appropriate
@@ -244,12 +241,11 @@ pub async fn txn_validation_thread(
                 txn_batches_validated = 0;
                 txns_validated = 0;
 
-                pf_info!(id; "In the last minute: batch_validate_count: {}, grab_sem_dur: {}, validate_dur: {}: send_to_dissem_dur: {}", batch_validate_count, grab_sem_dur, validate_dur, send_to_dissem_dur);
+                pf_info!(id; "In the last minute: batch_validate_count: {}, fetch_txn_dur: {}, validate_dur: {}", batch_validate_count, fetch_txn_dur, validate_dur);
 
                 batch_validate_count = 0;
-                grab_sem_dur = 0f64;
+                fetch_txn_dur = 0f64;
                 validate_dur = 0f64;
-                send_to_dissem_dur = 0f64;
 
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);
