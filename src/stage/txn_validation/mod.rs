@@ -109,6 +109,13 @@ pub async fn txn_validation_thread(
     let mut txn_batches_validated = 0;
     let mut txns_validated = 0;
 
+    let mut get_self_txn_count = 0;
+    let mut get_self_txn_duration = 0f64;
+    let mut get_peer_txn_count = 0;
+    let mut get_peer_txn_duration = 0f64;
+    let mut batch_validate_count = 0;
+    let mut batch_validate_duration = 0f64;
+
     let mut intervals = monitor.intervals();
 
     loop {
@@ -121,6 +128,7 @@ pub async fn txn_validation_thread(
                 //         continue;
                 //     }
                 // };
+                let start_time = Instant::now();
 
                 let txn = match new_txn {
                     Some(txn) => txn,
@@ -137,8 +145,13 @@ pub async fn txn_validation_thread(
                 if txn_batch_time.is_none() {
                     txn_batch_time = Some(Instant::now() + txn_batch_interval);
                 }
+
+                get_self_txn_count += 1;
+                get_self_txn_duration += Instant::now().duration_since(start_time).as_secs_f64();
             },
             new_peer_txn = peer_txn_recv.recv() => {
+                let start_time = Instant::now();
+
                 let _ = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -165,8 +178,13 @@ pub async fn txn_validation_thread(
                 peer_txns_recved += txns.len();
                 let txn_batch = txns.into_iter().map(|txn| (src, txn));
                 txn_buffer.extend(txn_batch);
+
+                get_peer_txn_count += 1;
+                get_peer_txn_duration += Instant::now().duration_since(start_time).as_secs_f64();
             }
             _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time), if txn_batch_time.is_some() => {
+                let start_time = Instant::now();
+
                 let _ = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -192,6 +210,9 @@ pub async fn txn_validation_thread(
                     }
                 };
                 txn_batch_time = None;
+
+                batch_validate_count += 1;
+                batch_validate_duration += Instant::now().duration_since(start_time).as_secs_f64();
             }
             _ = tokio::time::sleep_until(insert_delay_time) => {
                 // insert delay as appropriate
@@ -221,11 +242,20 @@ pub async fn txn_validation_thread(
                 let poll_duration = metrics.total_poll_duration.as_secs_f64();
                 pf_info!(id; "In the last minute: avg_sched_duration: {}, total_poll_duration: {}", avg_sched_duration, poll_duration);
 
-
                 self_txns_recved = 0;
                 peer_txns_recved = 0;
                 txn_batches_validated = 0;
                 txns_validated = 0;
+
+                pf_info!(id; "In the last minute: get_self_txn_count: {}, get_self_txn_duration: {}, get_peer_txn_count: {}, get_peer_txn_duration: {}, batch_validate_count: {}, batch_validate_duration: {}", get_self_txn_count, get_self_txn_duration, get_peer_txn_count, get_peer_txn_duration, batch_validate_count, batch_validate_duration);
+
+                get_self_txn_count = 0;
+                get_self_txn_duration = 0f64;
+                get_peer_txn_count = 0;
+                get_peer_txn_duration = 0f64;
+                batch_validate_count = 0;
+                batch_validate_duration = 0f64;
+
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);
             }
