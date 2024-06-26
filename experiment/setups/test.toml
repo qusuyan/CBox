@@ -3,7 +3,7 @@ num_iterations = 1
 
 [parameters]
 chain-type = "chain-replication"
-cluster-threads = 32
+cluster-threads = 16
 config = "blk_size=100000+order=[0]"
 conn_multiply = 1
 crypto = "dummy"

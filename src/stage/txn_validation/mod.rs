@@ -109,12 +109,10 @@ pub async fn txn_validation_thread(
     let mut txn_batches_validated = 0;
     let mut txns_validated = 0;
 
-    let mut get_self_txn_count = 0;
-    let mut get_self_txn_duration = 0f64;
-    let mut get_peer_txn_count = 0;
-    let mut get_peer_txn_duration = 0f64;
     let mut batch_validate_count = 0;
-    let mut batch_validate_duration = 0f64;
+    let mut grab_sem_dur = 0f64;
+    let mut validate_dur = 0f64;
+    let mut send_to_dissem_dur = 0f64;
 
     let mut intervals = monitor.intervals();
 
@@ -128,7 +126,6 @@ pub async fn txn_validation_thread(
                 //         continue;
                 //     }
                 // };
-                let start_time = Instant::now();
 
                 let txn = match new_txn {
                     Some(txn) => txn,
@@ -145,13 +142,8 @@ pub async fn txn_validation_thread(
                 if txn_batch_time.is_none() {
                     txn_batch_time = Some(Instant::now() + txn_batch_interval);
                 }
-
-                get_self_txn_count += 1;
-                get_self_txn_duration += Instant::now().duration_since(start_time).as_secs_f64();
             },
             new_peer_txn = peer_txn_recv.recv() => {
-                let start_time = Instant::now();
-
                 let _ = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -178,9 +170,6 @@ pub async fn txn_validation_thread(
                 peer_txns_recved += txns.len();
                 let txn_batch = txns.into_iter().map(|txn| (src, txn));
                 txn_buffer.extend(txn_batch);
-
-                get_peer_txn_count += 1;
-                get_peer_txn_duration += Instant::now().duration_since(start_time).as_secs_f64();
             }
             _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time), if txn_batch_time.is_some() => {
                 let start_time = Instant::now();
@@ -193,13 +182,18 @@ pub async fn txn_validation_thread(
                     }
                 };
 
+                let validation_start = Instant::now();
+
                 let num_txns_to_drain = std::cmp::min(validation_batch_size, txn_buffer.len());
                 let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain).collect();
 
                 txn_batches_validated += 1;
                 txns_validated += num_txns_to_drain;
 
-                match txn_validation_stage.validate(txns_to_validate).await {
+                let validate_result = txn_validation_stage.validate(txns_to_validate).await;
+                let validated = Instant::now();
+
+                match validate_result {
                     Ok(txns) => {
                         if let Err(e) = validated_txn_send.send(txns).await {
                             pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
@@ -211,8 +205,11 @@ pub async fn txn_validation_thread(
                 };
                 txn_batch_time = None;
 
+                let finish = Instant::now();
                 batch_validate_count += 1;
-                batch_validate_duration += Instant::now().duration_since(start_time).as_secs_f64();
+                grab_sem_dur += validation_start.duration_since(start_time).as_secs_f64();
+                validate_dur += validated.duration_since(validation_start).as_secs_f64();
+                send_to_dissem_dur += finish.duration_since(validated).as_secs_f64();
             }
             _ = tokio::time::sleep_until(insert_delay_time) => {
                 // insert delay as appropriate
@@ -247,14 +244,12 @@ pub async fn txn_validation_thread(
                 txn_batches_validated = 0;
                 txns_validated = 0;
 
-                pf_info!(id; "In the last minute: get_self_txn_count: {}, get_self_txn_duration: {}, get_peer_txn_count: {}, get_peer_txn_duration: {}, batch_validate_count: {}, batch_validate_duration: {}", get_self_txn_count, get_self_txn_duration, get_peer_txn_count, get_peer_txn_duration, batch_validate_count, batch_validate_duration);
+                pf_info!(id; "In the last minute: batch_validate_count: {}, grab_sem_dur: {}, validate_dur: {}: send_to_dissem_dur: {}", batch_validate_count, grab_sem_dur, validate_dur, send_to_dissem_dur);
 
-                get_self_txn_count = 0;
-                get_self_txn_duration = 0f64;
-                get_peer_txn_count = 0;
-                get_peer_txn_duration = 0f64;
                 batch_validate_count = 0;
-                batch_validate_duration = 0f64;
+                grab_sem_dur = 0f64;
+                validate_dur = 0f64;
+                send_to_dissem_dur = 0f64;
 
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);
