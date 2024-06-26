@@ -206,9 +206,10 @@ pub async fn txn_validation_thread(
                     };
                     tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
                     delay.store(0f64, Ordering::Relaxed);
-                } else {
-                    tokio::task::yield_now().await;
                 }
+                // else {
+                //     tokio::task::yield_now().await;
+                // }
                 insert_delay_time = Instant::now() + insert_delay_interval;
             }
             _ = tokio::time::sleep_until(report_time) => {
