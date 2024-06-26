@@ -21,7 +21,7 @@ pub struct BlkCtx {
 impl TxnCtx {
     pub fn from_txn(txn: &Txn) -> Result<Self, CopycatError> {
         let id = match txn {
-            Txn::Dummy { txn } => txn.id,
+            Txn::Dummy { txn } => txn.id.clone(),
             Txn::Bitcoin { .. } => {
                 let serialized = bincode::serialize(txn)?;
                 sha256(&serialized)?
