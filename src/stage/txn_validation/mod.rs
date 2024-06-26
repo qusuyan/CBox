@@ -17,7 +17,7 @@ use tokio_metrics::TaskMonitor;
 pub struct TxnValidation {
     txn_seen: HashSet<Hash>,
     crypto_scheme: CryptoScheme,
-    pub statistics: (usize, usize, f64, f64, f64),
+    pub statistics: (usize, usize, f64, f64),
 }
 
 impl TxnValidation {
@@ -25,7 +25,7 @@ impl TxnValidation {
         Self {
             txn_seen: HashSet::new(),
             crypto_scheme,
-            statistics: (0, 0, 0f64, 0f64, 0f64),
+            statistics: (0, 0, 0f64, 0f64),
         }
     }
 
@@ -41,19 +41,19 @@ impl TxnValidation {
 
         for (src, txn) in txn_batch.into_iter() {
             let start = Instant::now();
-
-            let txn_ctx = Arc::new(TxnCtx::from_txn(&txn)?);
+            let txn_ctx_raw = TxnCtx::from_txn(&txn)?;
+            let ctx_found = Instant::now();
+            let txn_ctx = Arc::new(txn_ctx_raw);
             let hash = &txn_ctx.id;
-
             let ctx_complete = Instant::now();
+            self.statistics.2 += ctx_found.duration_since(start).as_secs_f64();
+            self.statistics.3 += ctx_complete.duration_since(ctx_found).as_secs_f64();
 
             // ignore duplicates
             if self.txn_seen.contains(hash) {
                 continue;
             }
             self.txn_seen.insert(*hash);
-
-            let duplicates_checked = Instant::now();
 
             // ignore invalid txns
             let (valid, vtime) = txn.validate(self.crypto_scheme)?;
@@ -62,17 +62,7 @@ impl TxnValidation {
                 continue;
             }
 
-            let txn_validated = Instant::now();
-
             correct_txns.push((src, (txn, txn_ctx)));
-
-            self.statistics.2 += ctx_complete.duration_since(start).as_secs_f64();
-            self.statistics.3 += duplicates_checked
-                .duration_since(ctx_complete)
-                .as_secs_f64();
-            self.statistics.4 += txn_validated
-                .duration_since(duplicates_checked)
-                .as_secs_f64();
         }
 
         // TODO:
@@ -251,8 +241,8 @@ pub async fn txn_validation_thread(
                 txn_batches_validated = 0;
                 txns_validated = 0;
 
-                let (batches_validated, txns_validated, ctx_time, duplicate_time, validation_time) = txn_validation_stage.statistics;
-                pf_info!(id; "In the last minute: batches_validated: {}, txns_validated: {}, ctx_time: {}, duplicate_time: {}, validation_time: {}", batches_validated, txns_validated, ctx_time, duplicate_time, validation_time);
+                let (batches_validated, txns_validated, from_txn_dur, other_dur) = txn_validation_stage.statistics;
+                pf_info!(id; "In the last minute: batches_validated: {}, txns_validated: {}, from_txn_dur: {}, other_dur: {}", batches_validated, txns_validated, from_txn_dur, other_dur);
 
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);
