@@ -106,6 +106,8 @@ pub async fn txn_validation_thread(
     let mut report_time = Instant::now() + Duration::from_secs(60);
     let mut self_txns_recved = 0;
     let mut peer_txns_recved = 0;
+    let mut txn_batches_validated = 0;
+    let mut txns_validated = 0;
 
     let mut intervals = monitor.intervals();
 
@@ -175,6 +177,10 @@ pub async fn txn_validation_thread(
 
                 let num_txns_to_drain = std::cmp::min(validation_batch_size, txn_buffer.len());
                 let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain).collect();
+
+                txn_batches_validated += 1;
+                txns_validated += num_txns_to_drain;
+
                 match txn_validation_stage.validate(txns_to_validate).await {
                     Ok(txns) => {
                         if let Err(e) = validated_txn_send.send(txns).await {
@@ -208,6 +214,7 @@ pub async fn txn_validation_thread(
             _ = tokio::time::sleep_until(report_time) => {
                 // report basic statistics
                 pf_info!(id; "In the last minute: self_txns_recved: {}, peer_txns_recved: {}", self_txns_recved, peer_txns_recved);
+                pf_info!(id; "In the last minute: txn_batches_validated: {}, txns_validated: {}", txn_batches_validated, txns_validated);
 
                 let metrics = intervals.next().unwrap();
                 let avg_sched_duration = metrics.mean_scheduled_duration().as_secs_f64();
@@ -217,6 +224,8 @@ pub async fn txn_validation_thread(
 
                 self_txns_recved = 0;
                 peer_txns_recved = 0;
+                txn_batches_validated = 0;
+                txns_validated = 0;
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);
             }
