@@ -87,20 +87,20 @@ pub async fn txn_validation_thread(
     let txn_batch_interval = Duration::from_millis(100);
     let mut txn_validation_stage = get_txn_validation(crypto_scheme);
     let mut txn_buffer = vec![];
-    let mut txn_batch_time = Instant::now() + txn_batch_interval;
+    let mut txn_batch_time = None;
 
     async fn wait_validation_batch(
         batch: &Vec<(u64, Arc<Txn>)>,
         max_batch_size: usize,
-        timeout: Instant,
+        timeout: Option<Instant>,
     ) {
         let notify = tokio::sync::Notify::new();
-        if batch.len() == 0 {
+        if batch.len() == 0 || timeout.is_none() {
             notify.notified().await;
         } else if batch.len() > max_batch_size {
             return;
         }
-        tokio::time::sleep_until(timeout).await;
+        tokio::time::sleep_until(timeout.unwrap()).await;
     }
 
     let mut report_time = Instant::now() + Duration::from_secs(60);
@@ -131,6 +131,10 @@ pub async fn txn_validation_thread(
                 pf_trace!(id; "got from self new txn {:?}", txn);
                 self_txns_recved += 1;
                 txn_buffer.push((id, txn));
+
+                if txn_batch_time.is_none() {
+                    txn_batch_time = Some(Instant::now() + txn_batch_interval);
+                }
             },
             new_peer_txn = peer_txn_recv.recv() => {
                 let _ = match concurrency.acquire().await {
@@ -160,7 +164,7 @@ pub async fn txn_validation_thread(
                 let txn_batch = txns.into_iter().map(|txn| (src, txn));
                 txn_buffer.extend(txn_batch);
             }
-            _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time) => {
+            _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time), if txn_batch_time.is_some() => {
                 let _ = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -181,7 +185,7 @@ pub async fn txn_validation_thread(
                         pf_error!(id; "error validating txns: {:?}", e);
                     }
                 };
-                txn_batch_time = Instant::now() + txn_batch_interval;
+                txn_batch_time = None;
             }
             _ = tokio::time::sleep_until(insert_delay_time) => {
                 // insert delay as appropriate
