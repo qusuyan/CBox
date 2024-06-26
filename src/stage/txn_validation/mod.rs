@@ -17,6 +17,7 @@ use tokio_metrics::TaskMonitor;
 pub struct TxnValidation {
     txn_seen: HashSet<Hash>,
     crypto_scheme: CryptoScheme,
+    pub statistics: (usize, usize, f64, f64, f64),
 }
 
 impl TxnValidation {
@@ -24,6 +25,7 @@ impl TxnValidation {
         Self {
             txn_seen: HashSet::new(),
             crypto_scheme,
+            statistics: (0, 0, 0f64, 0f64, 0f64),
         }
     }
 
@@ -33,15 +35,25 @@ impl TxnValidation {
     ) -> Result<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>, CopycatError> {
         let mut correct_txns = vec![];
         let mut verification_time = 0f64;
+
+        self.statistics.0 += 1;
+        self.statistics.1 += txn_batch.len();
+
         for (src, txn) in txn_batch.into_iter() {
+            let start = Instant::now();
+
             let txn_ctx = Arc::new(TxnCtx::from_txn(&txn)?);
             let hash = &txn_ctx.id;
+
+            let ctx_complete = Instant::now();
 
             // ignore duplicates
             if self.txn_seen.contains(hash) {
                 continue;
             }
             self.txn_seen.insert(*hash);
+
+            let duplicates_checked = Instant::now();
 
             // ignore invalid txns
             let (valid, vtime) = txn.validate(self.crypto_scheme)?;
@@ -50,9 +62,21 @@ impl TxnValidation {
                 continue;
             }
 
+            let txn_validated = Instant::now();
+
             correct_txns.push((src, (txn, txn_ctx)));
+
+            self.statistics.2 += ctx_complete.duration_since(start).as_secs_f64();
+            self.statistics.3 += duplicates_checked
+                .duration_since(ctx_complete)
+                .as_secs_f64();
+            self.statistics.4 += txn_validated
+                .duration_since(duplicates_checked)
+                .as_secs_f64();
         }
 
+        // TODO:
+        assert!(verification_time == 0f64);
         // 1ms
         if verification_time > 0.001 {
             tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
@@ -108,10 +132,6 @@ pub async fn txn_validation_thread(
     let mut peer_txns_recved = 0;
     let mut txn_batches_validated = 0;
     let mut txns_validated = 0;
-
-    let mut batch_validate_count = 0;
-    let mut fetch_txn_dur = 0f64;
-    let mut validate_dur = 0f64;
 
     let mut intervals = monitor.intervals();
 
@@ -180,19 +200,13 @@ pub async fn txn_validation_thread(
                     }
                 };
 
-                let start_time = Instant::now();
-
                 let num_txns_to_drain = std::cmp::min(validation_batch_size, txn_buffer.len());
                 let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain).collect();
 
                 txn_batches_validated += 1;
                 txns_validated += num_txns_to_drain;
 
-                let validation_start = Instant::now();
-                let validate_result = txn_validation_stage.validate(txns_to_validate).await;
-                let validated = Instant::now();
-
-                match validate_result {
+                match txn_validation_stage.validate(txns_to_validate).await {
                     Ok(txns) => {
                         if let Err(e) = validated_txn_send.send(txns).await {
                             pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
@@ -203,10 +217,6 @@ pub async fn txn_validation_thread(
                     }
                 };
                 txn_batch_time = None;
-
-                batch_validate_count += 1;
-                fetch_txn_dur += validation_start.duration_since(start_time).as_secs_f64();
-                validate_dur += validated.duration_since(validation_start).as_secs_f64();
             }
             _ = tokio::time::sleep_until(insert_delay_time) => {
                 // insert delay as appropriate
@@ -241,11 +251,8 @@ pub async fn txn_validation_thread(
                 txn_batches_validated = 0;
                 txns_validated = 0;
 
-                pf_info!(id; "In the last minute: batch_validate_count: {}, fetch_txn_dur: {}, validate_dur: {}", batch_validate_count, fetch_txn_dur, validate_dur);
-
-                batch_validate_count = 0;
-                fetch_txn_dur = 0f64;
-                validate_dur = 0f64;
+                let (batches_validated, txns_validated, ctx_time, duplicate_time, validation_time) = txn_validation_stage.statistics;
+                pf_info!(id; "In the last minute: batches_validated: {}, txns_validated: {}, ctx_time: {}, duplicate_time: {}, validation_time: {}", batches_validated, txns_validated, ctx_time, duplicate_time, validation_time);
 
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);
