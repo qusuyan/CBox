@@ -114,13 +114,13 @@ pub async fn txn_validation_thread(
     loop {
         tokio::select! {
             new_txn = req_recv.recv() => {
-                let _ = match concurrency.acquire().await {
-                    Ok(permit) => permit,
-                    Err(e) => {
-                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                        continue;
-                    }
-                };
+                // let _ = match concurrency.acquire().await {
+                //     Ok(permit) => permit,
+                //     Err(e) => {
+                //         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                //         continue;
+                //     }
+                // };
 
                 let txn = match new_txn {
                     Some(txn) => txn,
