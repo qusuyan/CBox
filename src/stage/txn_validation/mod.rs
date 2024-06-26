@@ -181,7 +181,7 @@ pub async fn txn_validation_thread(
                         pf_error!(id; "error validating txns: {:?}", e);
                     }
                 };
-                txn_batch_time += txn_batch_interval;
+                txn_batch_time = Instant::now() + txn_batch_interval;
             }
             _ = tokio::time::sleep_until(insert_delay_time) => {
                 // insert delay as appropriate
