@@ -151,7 +151,9 @@ impl Config {
                     config.order = valid_order;
                 }
                 // make sure that all nodes are included in the chain
-                for node in topology.keys() {
+                let mut all_nodes: Vec<&u64> = topology.keys().into_iter().collect();
+                all_nodes.sort();
+                for node in all_nodes.into_iter() {
                     if !on_chain.contains(node) {
                         config.order.push(*node)
                     }
