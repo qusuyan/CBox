@@ -37,6 +37,7 @@ pub struct Node {
 impl Node {
     pub async fn init(
         id: NodeId,
+        num_mailbox_workers: usize,
         chain_type: ChainType,
         txn_crpyto: CryptoScheme,
         p2p_crypto: CryptoScheme,
@@ -60,7 +61,7 @@ impl Node {
             peer_pmaker_recv,
             peer_blk_req_recv,
             // peer_blk_resp_recv,
-        ) = PeerMessenger::new(id, neighbors).await?;
+        ) = PeerMessenger::new(id, num_mailbox_workers, neighbors).await?;
 
         let peer_messenger = Arc::new(peer_messenger);
 

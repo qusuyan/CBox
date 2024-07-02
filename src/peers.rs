@@ -32,6 +32,7 @@ pub struct PeerMessenger {
 impl PeerMessenger {
     pub async fn new(
         id: NodeId,
+        num_mailbox_workers: usize,
         neighbors: HashSet<NodeId>,
     ) -> Result<
         (
@@ -45,7 +46,7 @@ impl PeerMessenger {
         ),
         CopycatError,
     > {
-        let (send_half, recv_half) = mailbox_client::new_stub(id).await?;
+        let (send_half, recv_half) = mailbox_client::new_stub(id, num_mailbox_workers).await?;
 
         let (rx_txn_send, rx_txn_recv) = mpsc::channel(0x1000000);
         let (rx_blk_send, rx_blk_recv) = mpsc::channel(0x100000);
