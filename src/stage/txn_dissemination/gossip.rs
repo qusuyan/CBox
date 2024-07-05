@@ -22,7 +22,7 @@ impl GossipTxnDissemination {
 
 #[async_trait]
 impl TxnDissemination for GossipTxnDissemination {
-    async fn disseminate(&self, txn_batch: &Vec<(u64, Arc<Txn>)>) -> Result<(), CopycatError> {
+    async fn disseminate(&self, txn_batch: &Vec<(NodeId, Arc<Txn>)>) -> Result<(), CopycatError> {
         // gossip to all neighbors except where it comes from
         let mut txn_batches_by_sender = HashMap::new();
         for (src, txn) in txn_batch {

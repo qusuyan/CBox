@@ -1,4 +1,5 @@
-mod dummy;
+mod chain_replication;
+use chain_replication::ChainReplicationFlowGen;
 
 mod bitcoin;
 use bitcoin::BitcoinFlowGen;
@@ -46,6 +47,7 @@ pub fn get_flow_gen(
     crypto: CryptoScheme,
 ) -> Box<dyn FlowGen> {
     match chain {
+        ChainType::Dummy => todo!(),
         ChainType::Bitcoin => Box::new(BitcoinFlowGen::new(
             id,
             client_list,
@@ -62,6 +64,11 @@ pub fn get_flow_gen(
             frequency,
             crypto,
         )),
-        _ => todo!(),
+        ChainType::ChainReplication => Box::new(ChainReplicationFlowGen::new(
+            client_list,
+            num_accounts, // TODO:
+            max_inflight,
+            frequency,
+        )),
     }
 }

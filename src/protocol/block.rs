@@ -28,6 +28,9 @@ pub enum BlockHeader {
         // new batches have depth 0, and the txns parents would have depth 1, and their parents would have depth 2, etc
         depth: usize,
     },
+    ChainReplication {
+        blk_id: Hash,
+    },
 }
 
 impl GetSize for BlockHeader {}

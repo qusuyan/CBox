@@ -12,6 +12,7 @@ pub enum ChainType {
     Dummy,
     Bitcoin,
     Avalanche,
+    ChainReplication,
 }
 
 #[derive(Copy, Clone, Debug, clap::ValueEnum)]
@@ -19,6 +20,8 @@ pub enum DissemPattern {
     Broadcast,
     Gossip,
     Sample,
+    Linear,
+    Passthrough,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

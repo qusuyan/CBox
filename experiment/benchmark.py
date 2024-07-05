@@ -104,8 +104,9 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     clients_remainder = params["num-clients"] % params["num-machines"]
 
     if params["single-process-cluster"]:
-        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["chain-type"], params["dissem"], params["crypto"], params["conn_multiply"], 
-                    clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["txn-span"], params["disable-txn-dissem"], params["config"]]
+        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["per-node-concurrency"], params["chain-type"], params["crypto"], 
+                    params["conn_multiply"], clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["txn-span"], 
+                    params["disable-txn-dissem"], params["config"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -151,7 +152,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
         df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
         stats["peak_tput"] = max(stats["peak_tput"], df.loc[:, 'Throughput (txn/s)'].max())
-        cumulative_tput += df.loc[:, 'Throughput (txn/s)'].mean()
+        cumulative_tput += df.loc[1:, 'Throughput (txn/s)'].mean()
     stats["avg_tput"] = cumulative_tput / len(files)
 
     with open(f"./results/{exp_name}/stats.json", "w") as f:
@@ -179,11 +180,11 @@ if __name__ == "__main__":
         "config": "",
         "topo-degree": 3,
         "topo-skewness": 0.0, # uniform
-        "dissem": "broadcast", # broadcast or gossip
         "disable-txn-dissem": False,
         "crypto": "dummy",
         "single-process-cluster": True,
         "conn_multiply": 1,
+        "per-node-concurrency": 2,
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

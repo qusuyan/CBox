@@ -10,7 +10,11 @@ use crate::{config::Config, peers::PeerMessenger};
 use async_trait::async_trait;
 
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
+use tokio::time::{Duration, Instant};
+
+use atomic_float::AtomicF64;
+use std::sync::atomic::Ordering;
 
 #[async_trait]
 pub trait Pacemaker: Sync + Send {
@@ -26,9 +30,10 @@ fn get_pacemaker(
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn Pacemaker> {
     match config {
-        Config::Dummy => Box::new(DummyPacemaker::new()),
+        Config::Dummy { .. } => Box::new(DummyPacemaker::new()),
         Config::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO
-        Config::Avalanche { config } => Box::new(AvalanchePacemaker::new(config)), // TODO
+        Config::Avalanche { config } => Box::new(AvalanchePacemaker::new(config)),
+        Config::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,
     }
 }
 
@@ -39,14 +44,29 @@ pub async fn pacemaker_thread(
     mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut pmaker_feedback_recv: mpsc::Receiver<Vec<u8>>,
     should_propose_send: mpsc::Sender<Vec<u8>>,
+    concurrency: Arc<Semaphore>,
 ) {
     pf_info!(id; "pacemaker starting...");
 
+    let delay = Arc::new(AtomicF64::new(0f64));
+    let insert_delay_interval = Duration::from_millis(50);
+    let mut insert_delay_time = Instant::now() + insert_delay_interval;
+
     let mut pmaker = get_pacemaker(id, config, peer_messenger);
+
+    let mut report_timeout = Instant::now() + Duration::from_secs(60);
 
     loop {
         tokio::select! {
             _ = pmaker.wait_to_propose() => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
+
                 let propose_msg = match pmaker.get_propose_msg().await {
                     Ok(msg) => msg,
                     Err(e) => {
@@ -63,6 +83,14 @@ pub async fn pacemaker_thread(
                 }
             },
             feedback_msg = pmaker_feedback_recv.recv() => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
+
                 let feedback = match feedback_msg {
                     Some(msg) => msg,
                     None => {
@@ -78,6 +106,14 @@ pub async fn pacemaker_thread(
                 }
             }
             peer_msg = peer_pmaker_recv.recv() => {
+                let _ = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
+
                 let (src, msg) = match peer_msg {
                     Some(msg) => msg,
                     None => {
@@ -92,6 +128,33 @@ pub async fn pacemaker_thread(
                     continue;
                 }
             }
+            _ = tokio::time::sleep_until(insert_delay_time) => {
+                // insert delay as appropriate
+                let sleep_time = delay.load(Ordering::Relaxed);
+                if sleep_time > 0.05 {
+                    let _ = match concurrency.acquire().await {
+                        Ok(permit) => permit,
+                        Err(e) => {
+                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                            continue;
+                        }
+                    };
+                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+                    delay.store(0f64, Ordering::Relaxed);
+                }
+                insert_delay_time = Instant::now() + insert_delay_interval;
+            }
+            _ = tokio::time::sleep_until(report_timeout) => {
+                // reset report time
+                report_timeout = Instant::now() + Duration::from_secs(60);
+            }
+        }
+
+        // insert delay as appropriate
+        let sleep_time = delay.load(Ordering::Relaxed);
+        if sleep_time > 0.05 {
+            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
+            delay.store(0f64, Ordering::Relaxed);
         }
     }
 }

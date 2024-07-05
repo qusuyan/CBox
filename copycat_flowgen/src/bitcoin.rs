@@ -6,11 +6,11 @@ use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
 
 use async_trait::async_trait;
 use rand::Rng;
-use tokio::sync::Notify;
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 
 const UNSET: usize = 0;
@@ -262,9 +262,13 @@ impl FlowGen for BitcoinFlowGen {
             .chain_info
             .values()
             .map(|info| {
-                let num_committed = (1..info.chain_length)
-                    .map(|height| info.txn_count.get(&height).unwrap())
-                    .sum();
+                let num_committed = if info.chain_length > 0 {
+                    (1..info.chain_length)
+                        .map(|height| info.txn_count.get(&height).unwrap())
+                        .sum()
+                } else {
+                    0
+                };
                 (
                     num_committed,
                     info.chain_length,

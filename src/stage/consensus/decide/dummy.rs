@@ -66,7 +66,5 @@ impl Decision for DummyDecision {
         unreachable!();
     }
 
-    async fn batch_wait(&mut self) {}
-
     fn report(&mut self) {}
 }

@@ -2,9 +2,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::protocol::transaction::Txn;
-use crate::protocol::{ChainType, CryptoScheme, DissemPattern};
+use crate::protocol::{ChainType, CryptoScheme};
 use crate::utils::{CopycatError, NodeId};
 
+use tokio::sync::Semaphore;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::config::Config;
@@ -19,10 +20,10 @@ use crate::stage::txn_validation::txn_validation_thread;
 // use crate::state::ChainState;
 
 pub struct Node {
+    id: NodeId,
     req_send: mpsc::Sender<Arc<Txn>>,
-    // _state: Arc<ChainState>,
-    // actor threads
     _peer_messenger: Arc<PeerMessenger>,
+    // actor threads
     _txn_validation_handle: JoinHandle<()>,
     _txn_dissemination_handle: JoinHandle<()>,
     _pacemaker_handle: JoinHandle<()>,
@@ -36,16 +37,19 @@ impl Node {
     pub async fn init(
         id: NodeId,
         chain_type: ChainType,
-        dissem_pattern: DissemPattern,
         txn_crpyto: CryptoScheme,
         p2p_crypto: CryptoScheme,
         config: Config,
         dissem_txns: bool,
         neighbors: HashSet<NodeId>,
+        max_concurrency: Option<usize>,
     ) -> Result<(Self, mpsc::Receiver<(u64, Vec<Arc<Txn>>)>), CopycatError> {
         pf_trace!(id; "starting: {:?}", chain_type);
 
         // let state = Arc::new(ChainState::new(chain_type));
+        let concurrency = Arc::new(Semaphore::new(
+            max_concurrency.unwrap_or(Semaphore::MAX_PERMITS),
+        ));
 
         let (
             peer_messenger,
@@ -76,16 +80,17 @@ impl Node {
             req_recv,
             peer_txn_recv,
             validated_txn_send,
+            concurrency.clone(),
         ));
 
         let _txn_dissemination_handle = tokio::spawn(txn_dissemination_thread(
             id,
-            dissem_pattern,
             config.clone(),
             dissem_txns,
             peer_messenger.clone(),
             validated_txn_recv,
             txn_ready_send,
+            concurrency.clone(),
         ));
 
         let _pacemaker_handle = tokio::spawn(pacemaker_thread(
@@ -95,6 +100,7 @@ impl Node {
             peer_pmaker_recv,
             pmaker_feedback_recv,
             pacemaker_send,
+            concurrency.clone(),
         ));
 
         let _block_management_handle = tokio::spawn(block_management_thread(
@@ -108,15 +114,16 @@ impl Node {
             txn_ready_recv,
             pacemaker_recv,
             new_block_send,
+            concurrency.clone(),
         ));
 
         let _block_dissemination_handle = tokio::spawn(block_dissemination_thread(
             id,
-            dissem_pattern,
             config.clone(),
             peer_messenger.clone(),
             new_block_recv,
             block_ready_send,
+            concurrency.clone(),
         ));
 
         let _decision_handle = tokio::spawn(decision_thread(
@@ -128,6 +135,7 @@ impl Node {
             block_ready_recv,
             commit_send,
             pmaker_feedback_send,
+            concurrency.clone(),
         ));
 
         let _commit_handle = tokio::spawn(commit_thread(
@@ -135,12 +143,14 @@ impl Node {
             config.clone(),
             commit_recv,
             executed_send,
+            concurrency.clone(),
         ));
 
         pf_info!(id; "stages started");
 
         Ok((
             Self {
+                id,
                 req_send,
                 _peer_messenger: peer_messenger,
                 _txn_validation_handle,
@@ -167,6 +177,7 @@ impl Node {
     // }
 
     pub async fn send_req(&self, txn: Arc<Txn>) -> Result<(), CopycatError> {
+        pf_trace!(self.id; "sending new txn {:?}", txn);
         if let Err(e) = self.req_send.send(txn).await {
             return Err(CopycatError(format!("{e:?}")));
         }

@@ -6,10 +6,10 @@ use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
 
 use async_trait::async_trait;
 use rand::Rng;
-use tokio::sync::Notify;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 
 const UNSET: usize = 0;
@@ -253,14 +253,14 @@ impl FlowGen for AvalancheFlowGen {
             .dag_info
             .values()
             .map(|info| {
-                let num_committed = (1..info.num_blks)
-                    .map(|height| info.txn_count.get(&height).unwrap_or(&0))
-                    .sum();
-                (
-                    num_committed,
-                    info.num_blks,
-                    num_committed as f64 / info.total_committed as f64,
-                )
+                // since blocks can get committed out of order
+                let num_committed = info.txn_count.values().sum();
+                let commit_confidence = if info.total_committed == 0 {
+                    1f64
+                } else {
+                    num_committed as f64 / info.total_committed as f64
+                };
+                (num_committed, info.num_blks, commit_confidence)
             })
             .reduce(|acc, e| {
                 (

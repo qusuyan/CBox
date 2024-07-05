@@ -43,7 +43,7 @@ impl BlockManagement for DummyBlockManagement {
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         loop {
             let now = Instant::now();
-            if self.mem_pool.get_size() >= 0x1000000
+            if self.mem_pool.get_size() >= 0x100000
                 || now - self.last_block >= Duration::from_secs(10)
             {
                 return Ok(());

@@ -3,9 +3,8 @@ use mailbox::Mailbox;
 use copycat::log::colored_level;
 use copycat::Node;
 use copycat::{fully_connected_topology, get_topology};
-use copycat::{ChainType, Config, CryptoScheme, DissemPattern};
+use copycat::{ChainType, Config, CryptoScheme};
 use copycat_flowgen::get_flow_gen;
-
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
@@ -14,6 +13,8 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use clap::Parser;
+use sysinfo::System;
+
 
 // TODO: add parameters to config individual node configs
 #[derive(Parser, Debug)]
@@ -35,6 +36,10 @@ struct CliArgs {
     #[clap(long, short = 't', default_value_t = 8)]
     num_threads: u64,
 
+    /// Max allowed per node concurrency
+    #[clap(long, short = 'r')]
+    per_node_concurrency: Option<usize>,
+
     /// Number of concurrent TCP streams between each pair of peers
     #[clap(long, short = 'o', default_value_t = 1)]
     num_conn_per_peer: usize,
@@ -42,10 +47,6 @@ struct CliArgs {
     /// The type of blockchain
     #[arg(long, short = 'c', value_enum, default_value = "dummy")]
     chain: ChainType,
-
-    /// Dissemination pattern
-    #[arg(long, short = 'd', default_value = "broadcast")]
-    dissem_pattern: DissemPattern,
 
     /// Cryptography scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
@@ -106,17 +107,17 @@ impl CliArgs {
         //     self.txn_span = 0;
         // }
 
-        if matches!(self.chain, ChainType::Avalanche)
-            && !matches!(self.dissem_pattern, DissemPattern::Sample)
-        {
-            log::warn!("Avalanche is based on sampling, using dissem pattern sample instead");
-            self.dissem_pattern = DissemPattern::Sample;
-        }
+        // if matches!(self.chain, ChainType::Avalanche)
+        //     && !matches!(self.dissem_pattern, DissemPattern::Sample)
+        // {
+        //     log::warn!("Avalanche is based on sampling, using dissem pattern sample instead");
+        //     self.dissem_pattern = DissemPattern::Sample;
+        // }
 
-        if !matches!(self.dissem_pattern, DissemPattern::Gossip) && !self.topology.is_empty() {
-            log::warn!("Topology files are only used for gossipping, but the dissem pattern is {:?}, ignoring topology file...", self.dissem_pattern);
-            self.topology = String::from("");
-        }
+        // if !matches!(self.dissem_pattern, DissemPattern::Gossip) && !self.topology.is_empty() {
+        //     log::warn!("Topology files are only used for gossipping, but the dissem pattern is {:?}, ignoring topology file...", self.dissem_pattern);
+        //     self.topology = String::from("");
+        // }
     }
 }
 
@@ -193,12 +194,8 @@ fn main() {
             }
         }
     };
-    let min_neighbors = topology
-        .iter()
-        .map(|(_, neighbors)| neighbors.len())
-        .min()
-        .unwrap();
-    node_config.validate(min_neighbors);
+    
+    node_config.validate(&topology);
     log::info!("Node config: {:?}", node_config);
 
     // get flow generation metrics
@@ -225,10 +222,14 @@ fn main() {
     let frequency = args.frequency;
     let num_accounts = args.accounts;
 
+    // collect system information
+    let mut sys = System::new();
+    sys.refresh_cpu_usage();
+
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
-        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence\n")
+        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence,Avg CPU Usage\n")
         .expect("write stats failed");
 
     // console_subscriber::init();
@@ -236,7 +237,7 @@ fn main() {
     let runtime = Builder::new_multi_thread()
         .enable_all()
         .worker_threads(args.num_threads as usize)
-        .thread_name("copycat-mailbox-thread")
+        .thread_name("copycat-cluster-thread")
         .build()
         .expect("Creating new runtime failed");
 
@@ -253,20 +254,26 @@ fn main() {
         // start nodes
         let (combine_tx, mut combine_rx) = mpsc::channel(0x1000000);
         let mut node_map = HashMap::new();
+        // let mut node_rt = HashMap::new();
         let mut redirect_handles = HashMap::new();
         for node_id in local_nodes.clone() {
-            let (node, mut executed): (Node, _) = match Node::init(
+            // let rt = Builder::new_multi_thread()
+            //     .enable_all()
+            //     .worker_threads(2)
+            //     .thread_name(format!("copycat-node-{node_id}-thread"))
+            //     .build()
+            //     .expect("Creating new runtime failed");
+            let result = Node::init(
                 node_id,
                 args.chain,
-                args.dissem_pattern,
                 txn_crypto,
                 p2p_crypto,
                 node_config.clone(),
                 !args.disable_txn_dissem,
                 topology.remove(&node_id).unwrap_or(HashSet::new()),
-            )
-            .await
-            {
+                args.per_node_concurrency,
+            ).await;
+            let (node, mut executed): (Node, _) = match result {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("failed to start node: {e:?}");
@@ -274,6 +281,7 @@ fn main() {
                 }
             };
             node_map.insert(node_id, node);
+            // node_rt.insert(node_id, rt);
 
             let tx = combine_tx.clone();
             let redirect_handle = tokio::spawn(async move {
@@ -377,16 +385,26 @@ fn main() {
                     let run_time =  (report_time - start_time).as_secs_f64();
                     let newly_committed = stats.num_committed - prev_committed;
                     let tput = newly_committed as f64 / report_interval;
+
+                    sys.refresh_cpu_usage();
+                    let (cpu_usage, cpu_count) = sys.cpus()
+                        .into_iter()
+                        .map(|cpu| (cpu.cpu_usage(), 1))
+                        .reduce(|(usage1, count1), (usage2, count2)| (usage1 + usage2, count1 + count2))
+                        .expect("no CPU returned");
+                    let avg_cpu_usage = cpu_usage / cpu_count as f32;
+
                     log::info!(
-                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit confidence: {}",
+                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit confidence: {}, CPU Usage: {}",
                         run_time,
                         tput,
                         stats.latency,
                         stats.chain_length,
                         stats.commit_confidence,
+                        avg_cpu_usage,
                     );
                     stats_file
-                        .write_fmt(format_args!("{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence))
+                        .write_fmt(format_args!("{},{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence, avg_cpu_usage))
                         .expect("write stats failed");
                     log::info!("In the last minute: txns_sent: {}, inflight_txns: {}", txns_sent, stats.inflight_txns);
                     txns_sent = 0;

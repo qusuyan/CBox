@@ -1,6 +1,6 @@
 use copycat::get_neighbors;
 use copycat::log::colored_level;
-use copycat::{ChainType, Config, CryptoScheme, DissemPattern, Node};
+use copycat::{ChainType, Config, CryptoScheme, Node};
 use copycat_flowgen::get_flow_gen;
 
 use std::collections::HashSet;
@@ -25,10 +25,6 @@ struct CliArgs {
     /// Number of executor threads
     #[arg(long, short = 't', default_value = "8")]
     num_threads: usize,
-
-    /// Dissemination pattern
-    #[arg(long, short = 'n', default_value = "broadcast")]
-    dissem_pattern: DissemPattern,
 
     /// Cryptography scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
@@ -132,7 +128,7 @@ pub fn main() {
 
     runtime.block_on(async {
         let (node, mut executed): (Node, _) =
-            match Node::init(id, args.chain, args.dissem_pattern, args.crypto, args.crypto, config, !args.disable_txn_dissem, neighbors).await {
+            match Node::init(id, args.chain, args.crypto, args.crypto, config, !args.disable_txn_dissem, neighbors, None).await {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("failed to start node: {e:?}");

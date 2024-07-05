@@ -11,13 +11,16 @@ use crate::{CryptoScheme, NodeId};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
-use tokio::sync::Notify;
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::sync::Notify;
+
+use atomic_float::AtomicF64;
+use std::sync::atomic::Ordering;
 
 struct ConflictSet {
     pub has_conflicts: bool,
@@ -67,7 +70,7 @@ pub struct AvalancheDecision {
     is_strongly_preferred_calls: usize,
     is_preferred_checks: usize,
     // batch sleep time to reduce overhead
-    delay: f64,
+    delay: Arc<AtomicF64>,
 }
 
 impl AvalancheDecision {
@@ -77,6 +80,7 @@ impl AvalancheDecision {
         config: AvalancheConfig,
         peer_messenger: Arc<PeerMessenger>,
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
+        delay: Arc<AtomicF64>,
     ) -> Self {
         // pk can be generated deterministically on demand
         let (_, sk) = crypto_scheme.gen_key_pair(id.into());
@@ -106,7 +110,7 @@ impl AvalancheDecision {
             pmaker_feedback_send,
             is_strongly_preferred_calls: 0,
             is_preferred_checks: 0,
-            delay: 0f64,
+            delay,
         }
     }
 
@@ -549,7 +553,7 @@ impl Decision for AvalancheDecision {
             let msg_content = ((proposer, blk_id), votes);
             let serialized_msg = &bincode::serialize(&msg_content)?;
             let (signature, stime) = self.crypto_scheme.sign(&self.sk, serialized_msg)?;
-            self.delay += stime;
+            let delay = self.delay.fetch_add(stime, Ordering::Relaxed);
             let vote_msg = VoteMsg {
                 round: msg_content.0,
                 votes: msg_content.1,
@@ -561,7 +565,7 @@ impl Decision for AvalancheDecision {
                     MsgType::ConsensusMsg {
                         msg: bincode::serialize(&vote_msg)?,
                     },
-                    Duration::from_secs_f64(self.delay),
+                    Duration::from_secs_f64(delay),
                 )
                 .await?;
         }
@@ -604,19 +608,12 @@ impl Decision for AvalancheDecision {
         let (valid, vtime) =
             self.crypto_scheme
                 .verify(&peer_pk, &serialized_content, &msg.signature)?;
-        self.delay += vtime;
+        self.delay.fetch_add(vtime, Ordering::Relaxed);
         if valid {
             self.handle_votes(blk_id, src, votes).await?;
         }
 
         Ok(())
-    }
-
-    async fn batch_wait(&mut self) {
-        if self.delay > 0.05 {
-            tokio::time::sleep(Duration::from_secs_f64(self.delay)).await;
-            self.delay = 0f64;
-        }
     }
 
     fn report(&mut self) {
