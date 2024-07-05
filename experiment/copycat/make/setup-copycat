@@ -18,6 +18,7 @@ else
 fi
 
 cd ${PROJECT_NAME}
+# git reset --hard
 git pull --ff
 
 echo "Using branch '${BRANCH}'"
