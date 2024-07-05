@@ -6,12 +6,14 @@ use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
 
 use std::collections::HashSet;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
 
 pub struct TxnValidation {
     txn_seen: HashSet<Hash>,
@@ -32,6 +34,7 @@ impl TxnValidation {
     ) -> Result<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>, CopycatError> {
         let mut correct_txns = vec![];
         let mut verification_time = 0f64;
+
         for (src, txn) in txn_batch.into_iter() {
             let txn_ctx = Arc::new(TxnCtx::from_txn(&txn)?);
             let hash = &txn_ctx.id;
@@ -85,38 +88,40 @@ pub async fn txn_validation_thread(
     let txn_batch_interval = Duration::from_millis(100);
     let mut txn_validation_stage = get_txn_validation(crypto_scheme);
     let mut txn_buffer = vec![];
-    let mut txn_batch_time = Instant::now() + txn_batch_interval;
+    let mut txn_batch_time = None;
 
     async fn wait_validation_batch(
         batch: &Vec<(u64, Arc<Txn>)>,
         max_batch_size: usize,
-        timeout: Instant,
+        timeout: Option<Instant>,
     ) {
         let notify = tokio::sync::Notify::new();
-        if batch.len() == 0 {
+        if batch.len() == 0 || timeout.is_none() {
             notify.notified().await;
-        } else if batch.len() > max_batch_size {
+        } else if batch.len() >= max_batch_size {
             return;
         }
-        tokio::time::sleep_until(timeout).await;
+        tokio::time::sleep_until(timeout.unwrap()).await;
     }
 
     let mut report_time = Instant::now() + Duration::from_secs(60);
     let mut self_txns_recved = 0;
     let mut peer_txns_recved = 0;
+    let mut txn_batches_validated = 0;
+    let mut txns_validated = 0;
 
     loop {
         tokio::select! {
-            new_txn = req_recv.recv() => {
-                let _ = match concurrency.acquire().await {
-                    Ok(permit) => permit,
-                    Err(e) => {
-                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                        continue;
-                    }
-                };
+            new_txn = req_recv.recv(), if txn_buffer.len() < validation_batch_size => {
+                // let _ = match concurrency.acquire().await {
+                //     Ok(permit) => permit,
+                //     Err(e) => {
+                //         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                //         continue;
+                //     }
+                // };
 
-                let txn = match new_txn {
+                let mut txn = match new_txn {
                     Some(txn) => txn,
                     None => {
                         pf_error!(id; "request pipe closed");
@@ -124,9 +129,30 @@ pub async fn txn_validation_thread(
                     }
                 };
 
-                pf_trace!(id; "got from self new txn {:?}", txn);
-                self_txns_recved += 1;
-                txn_buffer.push((id, txn));
+                loop {
+                    pf_trace!(id; "got from self new txn {:?}", txn);
+                    self_txns_recved += 1;
+                    txn_buffer.push((id, txn));
+
+                    if txn_buffer.len() >= validation_batch_size {
+                        break;
+                    }
+
+                    txn = match req_recv.try_recv() {
+                        Ok(txn) => txn,
+                        Err(e) => match e {
+                            TryRecvError::Empty => break,
+                            TryRecvError::Disconnected => {
+                                pf_error!(id; "request pipe closed");
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if txn_batch_time.is_none() {
+                    txn_batch_time = Some(Instant::now() + txn_batch_interval);
+                }
             },
             new_peer_txn = peer_txn_recv.recv() => {
                 let _ = match concurrency.acquire().await {
@@ -155,8 +181,13 @@ pub async fn txn_validation_thread(
                 peer_txns_recved += txns.len();
                 let txn_batch = txns.into_iter().map(|txn| (src, txn));
                 txn_buffer.extend(txn_batch);
+
+                if txn_batch_time.is_none() {
+                    txn_batch_time = Some(Instant::now() + txn_batch_interval);
+                }
             }
-            _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time) => {
+            _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time), if txn_batch_time.is_some() => {
+
                 let _ = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -167,6 +198,10 @@ pub async fn txn_validation_thread(
 
                 let num_txns_to_drain = std::cmp::min(validation_batch_size, txn_buffer.len());
                 let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain).collect();
+
+                txn_batches_validated += 1;
+                txns_validated += num_txns_to_drain;
+
                 match txn_validation_stage.validate(txns_to_validate).await {
                     Ok(txns) => {
                         if let Err(e) = validated_txn_send.send(txns).await {
@@ -177,7 +212,7 @@ pub async fn txn_validation_thread(
                         pf_error!(id; "error validating txns: {:?}", e);
                     }
                 };
-                txn_batch_time += txn_batch_interval;
+                txn_batch_time = None;
             }
             _ = tokio::time::sleep_until(insert_delay_time) => {
                 // insert delay as appropriate
@@ -200,8 +235,13 @@ pub async fn txn_validation_thread(
             _ = tokio::time::sleep_until(report_time) => {
                 // report basic statistics
                 pf_info!(id; "In the last minute: self_txns_recved: {}, peer_txns_recved: {}", self_txns_recved, peer_txns_recved);
+                pf_info!(id; "In the last minute: txn_batches_validated: {}, txns_validated: {}", txn_batches_validated, txns_validated);
+
                 self_txns_recved = 0;
                 peer_txns_recved = 0;
+                txn_batches_validated = 0;
+                txns_validated = 0;
+
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);
             }
