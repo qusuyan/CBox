@@ -14,7 +14,6 @@ use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
-use tokio_metrics::TaskMonitor;
 
 pub struct TxnValidation {
     txn_seen: HashSet<Hash>,
@@ -56,8 +55,6 @@ impl TxnValidation {
             correct_txns.push((src, (txn, txn_ctx)));
         }
 
-        // TODO:
-        assert!(verification_time == 0f64);
         // 1ms
         if verification_time > 0.001 {
             tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
@@ -79,7 +76,6 @@ pub async fn txn_validation_thread(
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
     validated_txn_send: mpsc::Sender<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
     concurrency: Arc<Semaphore>,
-    monitor: TaskMonitor,
 ) {
     pf_info!(id; "txn validation stage starting...");
 
@@ -113,8 +109,6 @@ pub async fn txn_validation_thread(
     let mut peer_txns_recved = 0;
     let mut txn_batches_validated = 0;
     let mut txns_validated = 0;
-
-    let mut intervals = monitor.intervals();
 
     loop {
         tokio::select! {
@@ -242,11 +236,6 @@ pub async fn txn_validation_thread(
                 // report basic statistics
                 pf_info!(id; "In the last minute: self_txns_recved: {}, peer_txns_recved: {}", self_txns_recved, peer_txns_recved);
                 pf_info!(id; "In the last minute: txn_batches_validated: {}, txns_validated: {}", txn_batches_validated, txns_validated);
-
-                let metrics = intervals.next().unwrap();
-                let avg_sched_duration = metrics.mean_scheduled_duration().as_secs_f64();
-                let poll_duration = metrics.total_poll_duration.as_secs_f64();
-                pf_info!(id; "In the last minute: avg_sched_duration: {}, total_poll_duration: {}", avg_sched_duration, poll_duration);
 
                 self_txns_recved = 0;
                 peer_txns_recved = 0;
