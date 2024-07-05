@@ -4,10 +4,15 @@ use mailbox_client::{ClientStubRecvHalf, ClientStubSendHalf};
 
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
+
+use tokio::time::{Duration, Instant};
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
-use tokio::time::Duration;
+use std::collections::HashSet;
+use std::fmt::Debug;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 #[derive(Debug, Serialize, Deserialize)]
 enum SendRequest {
@@ -19,6 +24,7 @@ pub struct PeerMessenger {
     id: NodeId,
     transport_hub: ClientStubSendHalf<MsgType>,
     neighbors: HashSet<NodeId>,
+    msgs_sent: Arc<AtomicU64>,
     _peer_receiver_rt: Option<tokio::runtime::Runtime>,
     _peer_receiver_handle: JoinHandle<()>,
 }
@@ -26,6 +32,7 @@ pub struct PeerMessenger {
 impl PeerMessenger {
     pub async fn new(
         id: NodeId,
+        num_mailbox_workers: usize,
         neighbors: HashSet<NodeId>,
     ) -> Result<
         (
@@ -39,7 +46,7 @@ impl PeerMessenger {
         ),
         CopycatError,
     > {
-        let (send_half, recv_half) = mailbox_client::new_stub(id).await?;
+        let (send_half, recv_half) = mailbox_client::new_stub(id, num_mailbox_workers).await?;
 
         let (rx_txn_send, rx_txn_recv) = mpsc::channel(0x1000000);
         let (rx_blk_send, rx_blk_recv) = mpsc::channel(0x100000);
@@ -47,6 +54,8 @@ impl PeerMessenger {
         let (rx_pmaker_send, rx_pmaker_recv) = mpsc::channel(0x100000);
         let (rx_blk_req_send, rx_blk_req_recv) = mpsc::channel(0x100000);
         // let (rx_blk_resp_send, rx_blk_resp_recv) = mpsc::channel(0x100000);
+
+        let msgs_sent = Arc::new(AtomicU64::new(0));
 
         // put receiver runtime on a separate thread for the bug here: https://github.com/tokio-rs/tokio/issues/4730
         let (_peer_receiver_handle, _peer_receiver_rt) = if cfg!(feature = "interprocess") {
@@ -64,6 +73,7 @@ impl PeerMessenger {
                 rx_consensus_send,
                 rx_pmaker_send,
                 rx_blk_req_send,
+                msgs_sent.clone(),
                 // rx_blk_resp_send,
             ));
             (_peer_receiver_handle, Some(runtime))
@@ -76,6 +86,7 @@ impl PeerMessenger {
                 rx_consensus_send,
                 rx_pmaker_send,
                 rx_blk_req_send,
+                msgs_sent.clone(),
                 // rx_blk_resp_send,
             ));
             (_peer_receiver_handle, None)
@@ -86,6 +97,7 @@ impl PeerMessenger {
                 id,
                 transport_hub: send_half,
                 neighbors,
+                msgs_sent,
                 _peer_receiver_rt,
                 _peer_receiver_handle,
             },
@@ -103,6 +115,7 @@ impl PeerMessenger {
         if let Err(e) = self.transport_hub.send(dest, msg).await {
             return Err(CopycatError(format!("send to {dest} failed: {e:?}")));
         }
+        self.msgs_sent.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -116,6 +129,7 @@ impl PeerMessenger {
         if let Err(e) = self.transport_hub.delayed_send(dest, msg, delay).await {
             return Err(CopycatError(format!("send to {dest} failed: {e:?}")));
         }
+        self.msgs_sent.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -124,6 +138,7 @@ impl PeerMessenger {
         if let Err(e) = self.transport_hub.broadcast(msg).await {
             return Err(CopycatError(format!("broadcast failed: {e:?}")));
         }
+        self.msgs_sent.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -138,6 +153,7 @@ impl PeerMessenger {
             if let Err(e) = self.transport_hub.multicast(dests, msg).await {
                 return Err(CopycatError(format!("gossip failed: {e:?}")));
             }
+            self.msgs_sent.fetch_add(1, Ordering::Relaxed);
         }
         Ok(())
     }
@@ -153,6 +169,7 @@ impl PeerMessenger {
             if let Err(e) = self.transport_hub.multicast(dests, msg).await {
                 return Err(CopycatError(format!("sample multicast failed: {e:?}")));
             }
+            self.msgs_sent.fetch_add(1, Ordering::Relaxed);
         }
         Ok(())
     }
@@ -165,50 +182,66 @@ impl PeerMessenger {
         rx_consensus_send: mpsc::Sender<(NodeId, Vec<u8>)>,
         rx_pmaker_send: mpsc::Sender<(NodeId, Vec<u8>)>,
         rx_blk_req_send: mpsc::Sender<(NodeId, Vec<u8>)>,
+        msgs_sent: Arc<AtomicU64>,
         // rx_blk_resp_send: mpsc::Sender<(NodeId, (Hash, Arc<Block>))>,
     ) {
         pf_info!(id; "peer receiver thread started");
 
+        let report_interval = Duration::from_secs(60);
+        let mut report_time = Instant::now() + report_interval;
+        let mut msgs_recv = 0;
+
         loop {
-            match transport_hub.recv().await {
-                Ok(msg) => {
-                    let (src, content) = msg;
-                    match content {
-                        MsgType::NewTxn { txn_batch } => {
-                            let txns = txn_batch.into_iter().map(|txn| Arc::new(txn)).collect();
-                            if let Err(e) = rx_txn_send.send((src, txns)).await {
-                                pf_error!(id; "rx_txn_send failed: {:?}", e)
+            tokio::select! {
+                msg_recv = transport_hub.recv() => {
+                    match msg_recv {
+                        Ok(msg) => {
+                            msgs_recv += 1;
+                            let (src, content) = msg;
+                            match content {
+                                MsgType::NewTxn { txn_batch } => {
+                                    let txns = txn_batch.into_iter().map(|txn| Arc::new(txn)).collect();
+                                    if let Err(e) = rx_txn_send.send((src, txns)).await {
+                                        pf_error!(id; "rx_txn_send failed: {:?}", e)
+                                    }
+                                }
+                                MsgType::NewBlock { blk } => {
+                                    if let Err(e) = rx_blk_send.send((src, Arc::new(blk))).await {
+                                        pf_error!(id; "rx_blk_send failed: {:?}", e)
+                                    }
+                                }
+                                MsgType::ConsensusMsg { msg } => {
+                                    if let Err(e) = rx_consensus_send.send((src, msg)).await {
+                                        pf_error!(id; "rx_consensus_send failed: {:?}", e)
+                                    }
+                                }
+                                MsgType::PMakerMsg { msg } => {
+                                    if let Err(e) = rx_pmaker_send.send((src, msg)).await {
+                                        pf_error!(id; "rx_pmaker_send failed: {:?}", e)
+                                    }
+                                }
+                                MsgType::BlockReq { msg } => {
+                                    if let Err(e) = rx_blk_req_send.send((src, msg)).await {
+                                        pf_error!(id; "rx_pmaker_send failed: {:?}", e)
+                                    }
+                                } // MsgType::BlockResp { id, blk } => {
+                                  //     if let Err(e) = rx_blk_resp_send.send((src, (id, Arc::new(blk)))).await
+                                  //     {
+                                  //         pf_error!(id; "rx_pmaker_send failed: {e:?}")
+                                  //     }
+                                  // }
                             }
                         }
-                        MsgType::NewBlock { blk } => {
-                            if let Err(e) = rx_blk_send.send((src, Arc::new(blk))).await {
-                                pf_error!(id; "rx_blk_send failed: {:?}", e)
-                            }
+                        Err(e) => {
+                            pf_error!(id; "got error listening to peers: {:?}", e);
                         }
-                        MsgType::ConsensusMsg { msg } => {
-                            if let Err(e) = rx_consensus_send.send((src, msg)).await {
-                                pf_error!(id; "rx_consensus_send failed: {:?}", e)
-                            }
-                        }
-                        MsgType::PMakerMsg { msg } => {
-                            if let Err(e) = rx_pmaker_send.send((src, msg)).await {
-                                pf_error!(id; "rx_pmaker_send failed: {:?}", e)
-                            }
-                        }
-                        MsgType::BlockReq { msg } => {
-                            if let Err(e) = rx_blk_req_send.send((src, msg)).await {
-                                pf_error!(id; "rx_pmaker_send failed: {:?}", e)
-                            }
-                        } // MsgType::BlockResp { id, blk } => {
-                          //     if let Err(e) = rx_blk_resp_send.send((src, (id, Arc::new(blk)))).await
-                          //     {
-                          //         pf_error!(id; "rx_pmaker_send failed: {e:?}")
-                          //     }
-                          // }
                     }
-                }
-                Err(e) => {
-                    pf_error!(id; "got error listening to peers: {:?}", e);
+                },
+                _ = tokio::time::sleep_until(report_time) => {
+                    let num_msgs_sent = msgs_sent.swap(0, Ordering::Relaxed);
+                    pf_info!(id; "In the last minute: {} msgs sent and {} msgs recved", num_msgs_sent, msgs_recv);
+                    msgs_recv = 0;
+                    report_time += report_interval;
                 }
             }
         }

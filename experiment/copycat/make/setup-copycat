@@ -18,10 +18,13 @@ else
 fi
 
 cd ${PROJECT_NAME}
+# git reset --hard
 git pull --ff
 
 echo "Using branch '${BRANCH}'"
 git checkout ${BRANCH}
+
+export RUSTFLAGS="--cfg tokio_unstable"
 
 cargo build -p copycat_server ${BUILD_FLAGS}
 cargo build -p copycat_mailbox ${BUILD_FLAGS}

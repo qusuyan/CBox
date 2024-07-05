@@ -18,6 +18,7 @@ cluster = [
   ["buildtype", "release"],
   ["id", "@POS"],
   ["threads", "32"],
+  ["mailbox_workers", "32"],
   ["node_concurrency", "2"],
   ["chain_type", "bitcoin"],
   ["crypto", "dummy"],
