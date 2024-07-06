@@ -38,6 +38,10 @@ struct CliArgs {
     #[clap(long, short = 't', default_value_t = 8)]
     num_threads: u64,
 
+    /// Number of mailbox workers
+    #[clap(long, short = 'w', default_value_t = 8)]
+    num_mailbox_workers: usize,
+
     /// Max allowed per node concurrency
     #[clap(long, short = 'r')]
     per_node_concurrency: Option<usize>,
@@ -246,7 +250,7 @@ fn main() {
 
     runtime.block_on(async {
         // start mailbox
-        let _mailbox = match Mailbox::init::<MsgType>(id, machine_list, pipe_info, args.num_conn_per_peer).await {
+        let _mailbox = match Mailbox::init::<MsgType>(id, machine_list, pipe_info, args.num_mailbox_workers, args.num_conn_per_peer).await {
             Ok(mailbox) => mailbox,
             Err(e) => {
                 log::error!("Mailbox initialization failed with error {:?}", e);
@@ -268,6 +272,7 @@ fn main() {
             //     .expect("Creating new runtime failed");
             let result = Node::init(
                 node_id,
+                args.num_mailbox_workers,
                 args.chain,
                 txn_crypto,
                 p2p_crypto,

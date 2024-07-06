@@ -7,7 +7,6 @@ use crate::utils::{CopycatError, NodeId};
 
 use tokio::sync::Semaphore;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tokio_metrics::TaskMonitor;
 
 use crate::config::Config;
 use crate::peers::PeerMessenger;
@@ -37,6 +36,7 @@ pub struct Node {
 impl Node {
     pub async fn init(
         id: NodeId,
+        num_mailbox_workers: usize,
         chain_type: ChainType,
         txn_crpyto: CryptoScheme,
         p2p_crypto: CryptoScheme,
@@ -60,7 +60,7 @@ impl Node {
             peer_pmaker_recv,
             peer_blk_req_recv,
             // peer_blk_resp_recv,
-        ) = PeerMessenger::new(id, neighbors).await?;
+        ) = PeerMessenger::new(id, num_mailbox_workers, neighbors).await?;
 
         let peer_messenger = Arc::new(peer_messenger);
 
@@ -74,8 +74,7 @@ impl Node {
         let (commit_send, commit_recv) = mpsc::channel(0x1000000);
         let (executed_send, executed_recv) = mpsc::channel(0x1000000);
 
-        let _txn_monitor = TaskMonitor::new();
-        let _txn_validation_handle = tokio::spawn(_txn_monitor.instrument(txn_validation_thread(
+        let _txn_validation_handle = tokio::spawn(txn_validation_thread(
             id,
             config.clone(),
             txn_crpyto,
@@ -83,8 +82,7 @@ impl Node {
             peer_txn_recv,
             validated_txn_send,
             concurrency.clone(),
-            _txn_monitor.clone(),
-        )));
+        ));
 
         let _txn_dissemination_handle = tokio::spawn(txn_dissemination_thread(
             id,

@@ -9,18 +9,19 @@ export RUST_BACKTRACE=full
 BUILDTYPE=$1
 ID=$2
 THREADS=$3
-NODE_CONCURRENCY=$4
-CHAIN_TYPE=$5
-CRYPTO=$6
-CONN_MULTIPLY=$7
-NUM_CLIENTS=$8
-CLIENTS_REMAINDER=$9
-ACCOUNTS=${10}
-MAX_INFLIGHT=${11}
-FREQUENCY=${12}
-TXN_SPAN=${13}
-DISABLE_TXN_DISSEM=${14}
-CONFIG=${15}
+MAILBOX_WORKERS=$4
+NODE_CONCURRENCY=$5
+CHAIN_TYPE=$6
+CRYPTO=$7
+CONN_MULTIPLY=$8
+NUM_CLIENTS=$9
+CLIENTS_REMAINDER=${10}
+ACCOUNTS=${11}
+MAX_INFLIGHT=${12}
+FREQUENCY=${13}
+TXN_SPAN=${14}
+DISABLE_TXN_DISSEM=${15}
+CONFIG=${16}
 
 if [[ $CONFIG == "" ]]; then
     CONFIG_ARG=""
@@ -41,7 +42,7 @@ else
 fi
 
 ./blockchain_copycat/target/${BUILDTYPE}/copycat_cluster -i ${ID} -t ${THREADS} \
-    -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} \
+    -w ${MAILBOX_WORKERS} -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} \
     -r ${NODE_CONCURRENCY} -p ${CRYPTO} -o ${CONN_MULTIPLY} -l ${CLIENTS} \
     -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} \
     ${DISABLE_TXN_DISSEM} ${CONFIG_ARG} --topology bench_topo.json

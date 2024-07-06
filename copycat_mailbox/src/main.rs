@@ -26,6 +26,10 @@ struct Args {
     #[clap(long, short = 't', default_value_t = 8)]
     num_threads: u64,
 
+    /// Number of mailbox workers
+    #[clap(long, short = 'w', default_value_t = 8)]
+    num_mailbox_workers: usize,
+
     /// Number of concurrent TCP streams between each pair of peers
     #[clap(long, short = 'o', default_value_t = 1)]
     num_conn_per_peer: usize,
@@ -83,16 +87,21 @@ fn main() {
         .expect("Creating new runtime failed");
 
     runtime.block_on(async {
-        let mailbox =
-            match Mailbox::init::<MsgType>(id, machine_list, pipe_info, args.num_conn_per_peer)
-                .await
-            {
-                Ok(mailbox) => mailbox,
-                Err(e) => {
-                    log::error!("Mailbox initialization failed with error {:?}", e);
-                    std::process::exit(-1);
-                }
-            };
+        let mailbox = match Mailbox::init::<MsgType>(
+            id,
+            machine_list,
+            pipe_info,
+            args.num_mailbox_workers,
+            args.num_conn_per_peer,
+        )
+        .await
+        {
+            Ok(mailbox) => mailbox,
+            Err(e) => {
+                log::error!("Mailbox initialization failed with error {:?}", e);
+                std::process::exit(-1);
+            }
+        };
 
         if let Err(e) = mailbox.wait().await {
             log::error!("Mailbox failed with error {:?}", e);

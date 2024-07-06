@@ -26,6 +26,10 @@ struct CliArgs {
     #[arg(long, short = 't', default_value = "8")]
     num_threads: usize,
 
+    /// Number of mailbox workers
+    #[clap(long, short = 'w', default_value_t = 8)]
+    num_mailbox_workers: usize,
+
     /// Cryptography scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
     crypto: CryptoScheme,
@@ -128,7 +132,7 @@ pub fn main() {
 
     runtime.block_on(async {
         let (node, mut executed): (Node, _) =
-            match Node::init(id, args.chain, args.crypto, args.crypto, config, !args.disable_txn_dissem, neighbors, None).await {
+            match Node::init(id, args.num_mailbox_workers, args.chain, args.crypto, args.crypto, config, !args.disable_txn_dissem, neighbors, None).await {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("failed to start node: {e:?}");
