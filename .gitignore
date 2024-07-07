@@ -1,6 +1,7 @@
 /target/
 /tmp/
 *.json
+.idea
 
 # perf data
 *.data
