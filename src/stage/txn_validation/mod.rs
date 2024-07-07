@@ -15,7 +15,7 @@ use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
 
-pub struct TxnValidation {
+struct TxnValidation {
     txn_seen: HashSet<Hash>,
     crypto_scheme: CryptoScheme,
 }

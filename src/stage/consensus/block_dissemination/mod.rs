@@ -27,7 +27,7 @@ use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 
 #[async_trait]
-pub trait BlockDissemination: Sync + Send {
+trait BlockDissemination: Sync + Send {
     async fn disseminate(&self, src: NodeId, block: &Block) -> Result<(), CopycatError>;
 }
 

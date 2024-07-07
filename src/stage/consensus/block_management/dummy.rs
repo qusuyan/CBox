@@ -1,4 +1,4 @@
-use super::BlockManagement;
+use super::{BlockManagement, CurBlockState};
 
 use crate::context::{BlkCtx, TxnCtx};
 use crate::protocol::block::{Block, BlockHeader};
@@ -36,8 +36,8 @@ impl BlockManagement for DummyBlockManagement {
         Ok(true)
     }
 
-    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
-        Ok(true)
+    async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError> {
+        Ok(CurBlockState::Full)
     }
 
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {

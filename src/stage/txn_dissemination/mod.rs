@@ -23,7 +23,7 @@ use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 
 #[async_trait]
-pub trait TxnDissemination: Send + Sync {
+trait TxnDissemination: Send + Sync {
     async fn disseminate(&self, txn_batch: &Vec<(u64, Arc<Txn>)>) -> Result<(), CopycatError>;
 }
 

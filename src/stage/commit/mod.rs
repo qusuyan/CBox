@@ -15,11 +15,11 @@ use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 
 #[async_trait]
-pub trait Commit: Sync + Send {
+trait Commit: Sync + Send {
     async fn commit(&self, block: &Vec<Arc<Txn>>) -> Result<(), CopycatError>;
 }
 
-pub fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
+fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
     match config {
         Config::Dummy { .. } => Box::new(DummyCommit::new()),
         Config::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:

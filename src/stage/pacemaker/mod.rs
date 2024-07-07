@@ -17,7 +17,7 @@ use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 
 #[async_trait]
-pub trait Pacemaker: Sync + Send {
+trait Pacemaker: Sync + Send {
     async fn wait_to_propose(&self);
     async fn get_propose_msg(&mut self) -> Result<Vec<u8>, CopycatError>;
     async fn handle_feedback(&mut self, feedback: Vec<u8>) -> Result<(), CopycatError>;

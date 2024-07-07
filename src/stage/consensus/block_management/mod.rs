@@ -29,14 +29,20 @@ use dashmap::DashSet;
 use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 
+enum CurBlockState {
+    Working,
+    Full,
+    EmptyMempool,
+}
+
 #[async_trait]
-pub trait BlockManagement: Sync + Send {
+trait BlockManagement: Sync + Send {
     async fn record_new_txn(
         &mut self,
         txn: Arc<Txn>,
         ctx: Arc<TxnCtx>,
     ) -> Result<bool, CopycatError>;
-    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError>; // return a bool indicating if the block is full
+    async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError>; // return a bool indicating if the block is full
     async fn wait_to_propose(&self) -> Result<(), CopycatError>;
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError>;
     async fn validate_block(
@@ -98,7 +104,7 @@ pub async fn block_management_thread(
 
     let batch_prepare_timeout = Duration::from_millis(1);
     let mut batch_prepare_time = Instant::now() + batch_prepare_timeout;
-    let mut is_blk_full = false;
+    let mut blk_state = CurBlockState::Working;
 
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
 
@@ -140,9 +146,13 @@ pub async fn block_management_thread(
                         return;
                     }
                 }
+
+                if matches!(blk_state, CurBlockState::EmptyMempool) {
+                    blk_state = CurBlockState::Working;
+                }
             },
 
-            _ = tokio::time::sleep_until(batch_prepare_time), if !is_blk_full => {
+            _ = tokio::time::sleep_until(batch_prepare_time), if matches!(blk_state, CurBlockState::Working) => {
                 let _ = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -151,7 +161,7 @@ pub async fn block_management_thread(
                     }
                 };
                 match block_management_stage.prepare_new_block().await {
-                    Ok(blk_full) => is_blk_full = blk_full,
+                    Ok(blk_full) => blk_state = blk_full,
                     Err(e) => pf_error!(id; "failed to prepare new block: {:?}", e),
                 }
                 batch_prepare_time = Instant::now() + batch_prepare_timeout;
@@ -173,7 +183,7 @@ pub async fn block_management_thread(
                 match block_management_stage.get_new_block().await {
                     Ok((block, ctx)) => {
                         pf_debug!(id; "proposing new block {:?}", block);
-                        is_blk_full = false;
+                        blk_state = CurBlockState::Working;
                         self_blks_sent += 1;
                         self_txns_sent += block.txns.len();
                         if let Err(e) = new_block_send.send((id, vec![(block, ctx)])).await {
@@ -289,7 +299,7 @@ pub async fn block_management_thread(
                 match block_management_stage.validate_block(peer_blk, peer_blk_ctx).await {
                         Ok(new_tail) => {
                             if !new_tail.is_empty() {
-                                is_blk_full = false;
+                                blk_state = CurBlockState::Working;
                                 for (blk, _) in new_tail.iter() {
                                     peer_blks_sent += 1;
                                     peer_txns_sent += blk.txns.len();

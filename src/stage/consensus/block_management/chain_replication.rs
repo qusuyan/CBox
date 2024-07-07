@@ -1,4 +1,4 @@
-use super::BlockManagement;
+use super::{BlockManagement, CurBlockState};
 use crate::config::ChainReplicationConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::protocol::block::{Block, BlockHeader};
@@ -56,18 +56,18 @@ impl BlockManagement for ChainReplicationBlockManagement {
         Ok(true)
     }
 
-    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
+    async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError> {
         if !self.is_head {
-            return Ok(true);
+            return Ok(CurBlockState::Full);
         }
 
         let blk_full = loop {
             if self.curr_batch_size >= self.block_size {
-                break true;
+                break CurBlockState::Full;
             }
 
             if self.curr_batch_len >= self.mem_pool.len() {
-                break false;
+                break CurBlockState::EmptyMempool;
             }
 
             let (next_txn, _) = &self.mem_pool[self.curr_batch_len];

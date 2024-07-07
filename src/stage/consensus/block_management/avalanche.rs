@@ -1,4 +1,4 @@
-use super::BlockManagement;
+use super::{BlockManagement, CurBlockState};
 use crate::config::AvalancheConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
@@ -206,15 +206,15 @@ impl BlockManagement for AvalancheBlockManagement {
         Ok(true)
     }
 
-    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
+    async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError> {
         let blk_full = loop {
             if self.curr_batch.len() >= self.blk_len {
-                break true;
+                break CurBlockState::Full;
             }
 
             let next_txn = match self.dag_frontier.pop_front() {
                 Some(txn) => txn,
-                None => break false,
+                None => break CurBlockState::EmptyMempool,
             };
 
             let node = match self.txn_dag.remove(&next_txn) {

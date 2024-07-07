@@ -27,7 +27,7 @@ use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 
 #[async_trait]
-pub trait Decision: Sync + Send {
+trait Decision: Sync + Send {
     async fn new_tail(
         &mut self,
         src: NodeId,
