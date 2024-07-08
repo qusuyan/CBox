@@ -9,6 +9,7 @@ use avalanche::AvalancheBlockManagement;
 
 mod chain_replication;
 use chain_replication::ChainReplicationBlockManagement;
+use tokio_metrics::TaskMonitor;
 
 use crate::config::Config;
 use crate::context::{BlkCtx, TxnCtx};
@@ -93,6 +94,7 @@ pub async fn block_management_thread(
     mut pacemaker_recv: mpsc::Receiver<Vec<u8>>,
     new_block_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     concurrency: Arc<Semaphore>,
+    monitor: TaskMonitor,
 ) {
     pf_info!(id; "block management stage starting...");
 
@@ -118,6 +120,7 @@ pub async fn block_management_thread(
     let mut txns_recv = 0;
     let mut peer_blks_recv = 0;
     let mut peer_txns_recv = 0;
+    let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
@@ -394,6 +397,14 @@ pub async fn block_management_thread(
                 peer_txns_sent = 0;
                 peer_blks_recv = 0;
                 peer_txns_recv = 0;
+
+                let metrics = task_interval.next().unwrap();
+                let sched_count = metrics.total_scheduled_count;
+                let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();
+                let poll_count = metrics.total_poll_count;
+                let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
+                pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
+
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }

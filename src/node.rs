@@ -7,6 +7,7 @@ use crate::utils::{CopycatError, NodeId};
 
 use tokio::sync::Semaphore;
 use tokio::{sync::mpsc, task::JoinHandle};
+use tokio_metrics::TaskMonitor;
 
 use crate::config::Config;
 use crate::peers::PeerMessenger;
@@ -74,7 +75,8 @@ impl Node {
         let (commit_send, commit_recv) = mpsc::channel(0x1000000);
         let (executed_send, executed_recv) = mpsc::channel(0x1000000);
 
-        let _txn_validation_handle = tokio::spawn(txn_validation_thread(
+        let _txn_validation_monitor = TaskMonitor::new();
+        let _txn_validation_handle = tokio::spawn(_txn_validation_monitor.instrument(txn_validation_thread(
             id,
             config.clone(),
             txn_crpyto,
@@ -82,9 +84,11 @@ impl Node {
             peer_txn_recv,
             validated_txn_send,
             concurrency.clone(),
-        ));
+            _txn_validation_monitor.clone(),
+        )));
 
-        let _txn_dissemination_handle = tokio::spawn(txn_dissemination_thread(
+        let _txn_dissemination_monitor = TaskMonitor::new();
+        let _txn_dissemination_handle = tokio::spawn(_txn_dissemination_monitor.instrument(txn_dissemination_thread(
             id,
             config.clone(),
             dissem_txns,
@@ -92,9 +96,11 @@ impl Node {
             validated_txn_recv,
             txn_ready_send,
             concurrency.clone(),
-        ));
+            _txn_dissemination_monitor.clone(),
+        )));
 
-        let _pacemaker_handle = tokio::spawn(pacemaker_thread(
+        let _pacemaker_monitor = TaskMonitor::new();
+        let _pacemaker_handle = tokio::spawn(_pacemaker_monitor.instrument(pacemaker_thread(
             id,
             config.clone(),
             peer_messenger.clone(),
@@ -102,9 +108,11 @@ impl Node {
             pmaker_feedback_recv,
             pacemaker_send,
             concurrency.clone(),
-        ));
+            _pacemaker_monitor.clone(),
+        )));
 
-        let _block_management_handle = tokio::spawn(block_management_thread(
+        let _block_management_monitor = TaskMonitor::new();
+        let _block_management_handle = tokio::spawn(_block_management_monitor.instrument(block_management_thread(
             id,
             config.clone(),
             txn_crpyto,
@@ -116,17 +124,21 @@ impl Node {
             pacemaker_recv,
             new_block_send,
             concurrency.clone(),
-        ));
+            _block_management_monitor.clone(),
+        )));
 
-        let _block_dissemination_handle = tokio::spawn(block_dissemination_thread(
+        let _block_dissemination_monitor = TaskMonitor::new();
+        let _block_dissemination_handle = tokio::spawn(_block_dissemination_monitor.instrument(block_dissemination_thread(
             id,
             config.clone(),
             peer_messenger.clone(),
             new_block_recv,
             block_ready_send,
             concurrency.clone(),
-        ));
+            _block_dissemination_monitor.clone(),
+        )));
 
+        let _decision_monitor = TaskMonitor::new();
         let _decision_handle = tokio::spawn(decision_thread(
             id,
             p2p_crypto,
@@ -137,15 +149,18 @@ impl Node {
             commit_send,
             pmaker_feedback_send,
             concurrency.clone(),
+            _decision_monitor.clone(),
         ));
 
-        let _commit_handle = tokio::spawn(commit_thread(
+        let _commit_monitor = TaskMonitor::new();
+        let _commit_handle = tokio::spawn(_commit_monitor.instrument(commit_thread(
             id,
             config.clone(),
             commit_recv,
             executed_send,
             concurrency.clone(),
-        ));
+            _commit_monitor.clone(),
+        )));
 
         pf_info!(id; "stages started");
 

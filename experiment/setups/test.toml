@@ -4,16 +4,16 @@ num_iterations = 1
 [parameters]
 chain-type = "chain-replication"
 cluster-threads = 32
-config = "blk_size=100000+order=[0]"
+config = "blk_size=500000+order=[0]"
 conn_multiply = 1
 crypto = "dummy"
-exp-time = 200
+exp-time = 320
 frequency = 8000
-mailbox_workers = [24, 32, 40, 48, 56, 64]
+mailbox_workers = [8, 24, 48]
 max-inflight-txns = 0
 num-accounts = 1000
 num-clients = 1
 num-machines = 1
-num-nodes = [320, 360, 400, 440, 480, 520, 560, 600]
+num-nodes = [600, 640, 680, 720, 760, 800]
 per-node-concurrency = 2
 txn-span = 1

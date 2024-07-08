@@ -9,6 +9,7 @@ use sampling::SamplingBlockDissemination;
 
 mod linear;
 use linear::LinearBlockDissemination;
+use tokio_metrics::TaskMonitor;
 
 use crate::config::Config;
 use crate::context::BlkCtx;
@@ -56,6 +57,7 @@ pub async fn block_dissemination_thread(
     mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     block_ready_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     concurrency: Arc<Semaphore>,
+    monitor: TaskMonitor,
 ) {
     pf_info!(id; "block dissemination stage starting...");
 
@@ -66,6 +68,7 @@ pub async fn block_dissemination_thread(
     let block_dissemination_stage = get_block_dissemination(id, config, peer_messenger);
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
+    let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
@@ -123,6 +126,12 @@ pub async fn block_dissemination_thread(
                 insert_delay_time = Instant::now() + insert_delay_interval;
             }
             _ = tokio::time::sleep_until(report_timeout) => {
+                let metrics = task_interval.next().unwrap();
+                let sched_count = metrics.total_scheduled_count;
+                let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();
+                let poll_count = metrics.total_poll_count;
+                let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
+                pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }

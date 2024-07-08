@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
+use tokio_metrics::TaskMonitor;
 
 struct TxnValidation {
     txn_seen: HashSet<Hash>,
@@ -76,6 +77,7 @@ pub async fn txn_validation_thread(
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
     validated_txn_send: mpsc::Sender<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
     concurrency: Arc<Semaphore>,
+    monitor: TaskMonitor,
 ) {
     pf_info!(id; "txn validation stage starting...");
 
@@ -109,6 +111,7 @@ pub async fn txn_validation_thread(
     let mut peer_txns_recved = 0;
     let mut txn_batches_validated = 0;
     let mut txns_validated = 0;
+    let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
@@ -241,6 +244,13 @@ pub async fn txn_validation_thread(
                 peer_txns_recved = 0;
                 txn_batches_validated = 0;
                 txns_validated = 0;
+
+                let metrics = task_interval.next().unwrap();
+                let sched_count = metrics.total_scheduled_count;
+                let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();
+                let poll_count = metrics.total_poll_count;
+                let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
+                pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
 
                 // reset report time
                 report_time = Instant::now() + Duration::from_secs(60);

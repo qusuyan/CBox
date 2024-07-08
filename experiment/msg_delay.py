@@ -8,12 +8,15 @@ import pandas as pd
 file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
 deliver_regex = "mailbox::msg_queue: message get delivered later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
 arrive_regex = "Messenger ([\d]+)->([\d]+): message arrived later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
+msgs_sent_recv_regex = "copycat::peers: \(([\d]+)\) In the last minute: ([\d]+) msgs sent and ([\d]+) msgs recved"
 
 log_dir = sys.argv[1]
 log_files = os.listdir(log_dir)
 
 arrive_late_metrics = []
 deliver_late_metrics = []
+msgs_sent = {}
+msgs_recv = {}
 
 def to_secs(quantity, unit):
     if unit == "s":
@@ -32,6 +35,21 @@ for file_name in log_files:
         continue
 
     log_file = os.path.join(log_dir, file_name)
+    
+    # number of msgs sent and recved in total
+    try:
+        msgs_sent_recv = check_output(f"cat {log_file} | grep 'copycat::peers:'", shell=True, encoding="utf-8")
+        msgs_sent_recv = msgs_sent_recv.split('\n')
+    except:
+        msgs_sent_recv = []
+
+    msgs_sent_recv_pattern = [re.search(msgs_sent_recv_regex, line) for line in msgs_sent_recv]
+    msgs_sent_recv_pattern = filter(lambda x: x is not None, msgs_sent_recv_pattern)
+    msgs_sent_recv_parsed = [pattern.groups() for pattern in msgs_sent_recv_pattern]
+    for (node, send, recv) in msgs_sent_recv_parsed:
+        msgs_sent[node] = msgs_sent.get(node, 0) + int(send)
+        msgs_recv[node] = msgs_recv.get(node, 0) + int(recv)
+
     try:
         arrive_late = check_output(f"cat {log_file} | grep 'message arrived later than it should'", shell=True, encoding="utf-8")
         arrive_late = arrive_late.split('\n')
@@ -73,4 +91,9 @@ deliver_late_avg = deliver_late_secs.mean()
 print("deliver late count: ", deliver_late_count)
 print("deliver late mean: ", deliver_late_avg)
 
-    
+msgs_sent_total = sum(msgs_sent.values())
+msgs_recv_total = sum(msgs_recv.values())
+print("total msgs sent: ", msgs_sent_total)
+print("total msgs recv: ", msgs_recv_total)
+print("msgs arrive late chance: ", arrive_late_count / msgs_sent_total)
+print("msgs deliver late chance: ", deliver_late_count / msgs_sent_total)

@@ -9,6 +9,7 @@ use avalanche::AvalancheDecision;
 
 mod chain_replication;
 use chain_replication::ChainReplicationDecision;
+use tokio_metrics::TaskMonitor;
 
 use crate::context::BlkCtx;
 use crate::protocol::block::Block;
@@ -74,6 +75,7 @@ pub async fn decision_thread(
     commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
     concurrency: Arc<Semaphore>,
+    monitor: TaskMonitor,
 ) {
     pf_info!(id; "decision stage starting...");
 
@@ -95,6 +97,7 @@ pub async fn decision_thread(
     let mut txns_sent = 0;
     let mut blks_recv = 0;
     let mut txns_recv = 0;
+    let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
@@ -204,6 +207,14 @@ pub async fn decision_thread(
                 txns_recv = 0;
                 blks_sent = 0;
                 txns_sent = 0;
+
+                let metrics = task_interval.next().unwrap();
+                let sched_count = metrics.total_scheduled_count;
+                let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();
+                let poll_count = metrics.total_poll_count;
+                let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
+                pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
+
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }

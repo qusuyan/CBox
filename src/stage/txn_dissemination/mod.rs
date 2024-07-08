@@ -6,6 +6,7 @@ use gossip::GossipTxnDissemination;
 
 mod passthrough;
 use passthrough::PassthroughTxnDissemination;
+use tokio_metrics::TaskMonitor;
 
 use crate::context::TxnCtx;
 use crate::protocol::transaction::Txn;
@@ -54,6 +55,7 @@ pub async fn txn_dissemination_thread(
     mut validated_txn_recv: mpsc::Receiver<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
     txn_ready_send: mpsc::Sender<Vec<(Arc<Txn>, Arc<TxnCtx>)>>,
     concurrency: Arc<Semaphore>,
+    monitor: TaskMonitor,
 ) {
     pf_info!(id; "txn dissemination stage starting...");
 
@@ -76,6 +78,7 @@ pub async fn txn_dissemination_thread(
     }
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
+    let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
@@ -143,6 +146,13 @@ pub async fn txn_dissemination_thread(
                 insert_delay_time = Instant::now() + insert_delay_interval;
             }
             _ = tokio::time::sleep_until(report_timeout) => {
+                let metrics = task_interval.next().unwrap();
+                let sched_count = metrics.total_scheduled_count;
+                let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();
+                let poll_count = metrics.total_poll_count;
+                let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
+                pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
+
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }

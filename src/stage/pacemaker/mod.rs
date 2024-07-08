@@ -3,6 +3,7 @@ use dummy::DummyPacemaker;
 
 mod avalanche;
 use avalanche::AvalanchePacemaker;
+use tokio_metrics::TaskMonitor;
 
 use crate::utils::{CopycatError, NodeId};
 use crate::{config::Config, peers::PeerMessenger};
@@ -45,6 +46,7 @@ pub async fn pacemaker_thread(
     mut pmaker_feedback_recv: mpsc::Receiver<Vec<u8>>,
     should_propose_send: mpsc::Sender<Vec<u8>>,
     concurrency: Arc<Semaphore>,
+    monitor: TaskMonitor,
 ) {
     pf_info!(id; "pacemaker starting...");
 
@@ -55,6 +57,7 @@ pub async fn pacemaker_thread(
     let mut pmaker = get_pacemaker(id, config, peer_messenger);
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
+    let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
@@ -147,6 +150,13 @@ pub async fn pacemaker_thread(
                 insert_delay_time = Instant::now() + insert_delay_interval;
             }
             _ = tokio::time::sleep_until(report_timeout) => {
+                let metrics = task_interval.next().unwrap();
+                let sched_count = metrics.total_scheduled_count;
+                let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();
+                let poll_count = metrics.total_poll_count;
+                let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
+                pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
+
                 // reset report time
                 report_timeout = Instant::now() + Duration::from_secs(60);
             }
