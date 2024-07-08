@@ -139,7 +139,7 @@ impl Node {
         )));
 
         let _decision_monitor = TaskMonitor::new();
-        let _decision_handle = tokio::spawn(decision_thread(
+        let _decision_handle = tokio::spawn(_decision_monitor.instrument(decision_thread(
             id,
             p2p_crypto,
             config.clone(),
@@ -150,7 +150,7 @@ impl Node {
             pmaker_feedback_send,
             concurrency.clone(),
             _decision_monitor.clone(),
-        ));
+        )));
 
         let _commit_monitor = TaskMonitor::new();
         let _commit_handle = tokio::spawn(_commit_monitor.instrument(commit_thread(

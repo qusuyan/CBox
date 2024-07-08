@@ -6,7 +6,7 @@ from subprocess import check_output
 import pandas as pd
 
 file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
-data_regex = "\(([0-9]+)\).*scheduled duration: ([0-9\.]+) ms, scheduled count: ([0-9]+)"
+data_regex = "\(([0-9]+)\).*sched_count: ([0-9.]+), mean_sched_dur: ([0-9.]+) s, poll_count: ([0-9.]+), mean_poll_dur: ([0-9.]+) s"
 
 stages = ["txn_validation", "txn_dissemination", "pacemaker", "block_management", "block_dissemination", "decide", "commit"]
 
@@ -21,22 +21,27 @@ for file_name in log_files:
 
     log_file = os.path.join(log_dir, file_name)
     for stage in stages:
-        try:
-            raw_metrics = check_output(f"cat {log_file} | grep '{stage}' | grep 'scheduled duration'", shell=True, encoding="utf-8")
-        except:
-            continue
+        # try:
+        raw_metrics = check_output(f"cat {log_file} | grep '{stage}' | grep 'sched_count'", shell=True, encoding="utf-8")
+        # except:
+        #     continue
 
         raw_lines = raw_metrics.split('\n')
         patterns = [re.search(data_regex, line) for line in raw_lines]
         patterns = filter(lambda x: x is not None, patterns)
         parsed_metrics = [pattern.groups() for pattern in patterns]
-        for (node, sched_duration, sched_count) in parsed_metrics:
-            metrics.append((node, stage, float(sched_duration), int(sched_count)))
+        for (node, sched_count, sched_duration, poll_count, poll_duration) in parsed_metrics:
+            metrics.append((node, stage, int(sched_count), float(sched_duration), int(poll_count), float(poll_duration)))
 
-df = pd.DataFrame(metrics, columns=["node", "stage", "sched_duration", "sched_count"])
+df = pd.DataFrame(metrics, columns=["node", "stage", "sched_count", "sched_duration", "poll_count", "poll_duration"])
 df = df.sort_values(["node", "stage"])
 # df = df[["sched_duration", "sched_count"]]
-df = df[["stage", "sched_duration", "sched_count"]]
-df = df.groupby(["stage"])
-df = df.mean()
-print(df.to_string())
+df_dur = df[["stage", "sched_duration", "poll_duration"]]
+df_dur = df_dur.groupby(["stage"])
+df_dur = df_dur.mean()
+print(df_dur.to_string())
+
+df_count = df[["stage", "sched_count", "poll_count"]]
+df_count = df_count.groupby(["stage"])
+df_count = df_count.sum()
+print(df_count.to_string())
