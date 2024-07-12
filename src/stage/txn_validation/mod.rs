@@ -32,6 +32,7 @@ impl TxnValidation {
     pub async fn validate(
         &mut self,
         txn_batch: Vec<(NodeId, Arc<Txn>)>,
+        concurrency: usize,
     ) -> Result<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>, CopycatError> {
         let mut correct_txns = vec![];
         let mut verification_time = 0f64;
@@ -56,9 +57,10 @@ impl TxnValidation {
             correct_txns.push((src, (txn, txn_ctx)));
         }
 
+        let concurrent_verify_time = verification_time / concurrency as f64;
         // 1ms
-        if verification_time > 0.001 {
-            tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
+        if concurrent_verify_time > 0.001 {
+            tokio::time::sleep(Duration::from_secs_f64(concurrent_verify_time)).await;
         }
 
         Ok(correct_txns)
@@ -116,7 +118,7 @@ pub async fn txn_validation_thread(
     loop {
         tokio::select! {
             new_txn = req_recv.recv(), if txn_buffer.len() < validation_batch_size => {
-                // let _ = match concurrency.acquire().await {
+                // let _permit = match concurrency.acquire().await {
                 //     Ok(permit) => permit,
                 //     Err(e) => {
                 //         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -158,7 +160,7 @@ pub async fn txn_validation_thread(
                 }
             },
             new_peer_txn = peer_txn_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -191,7 +193,7 @@ pub async fn txn_validation_thread(
             }
             _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time), if txn_batch_time.is_some() => {
 
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -205,7 +207,7 @@ pub async fn txn_validation_thread(
                 txn_batches_validated += 1;
                 txns_validated += num_txns_to_drain;
 
-                match txn_validation_stage.validate(txns_to_validate).await {
+                match txn_validation_stage.validate(txns_to_validate, 1).await {
                     Ok(txns) => {
                         if let Err(e) = validated_txn_send.send(txns).await {
                             pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
@@ -221,7 +223,7 @@ pub async fn txn_validation_thread(
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
-                    let _ = match concurrency.acquire().await {
+                    let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

@@ -51,7 +51,7 @@ pub async fn commit_thread(
     loop {
         tokio::select! {
             new_batch = commit_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -83,7 +83,7 @@ pub async fn commit_thread(
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
-                    let _ = match concurrency.acquire().await {
+                    let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

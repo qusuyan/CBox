@@ -125,7 +125,7 @@ pub async fn block_management_thread(
     loop {
         tokio::select! {
             new_txn = txn_ready_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -156,7 +156,7 @@ pub async fn block_management_thread(
             },
 
             _ = tokio::time::sleep_until(batch_prepare_time), if matches!(blk_state, CurBlockState::Working) => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -171,7 +171,7 @@ pub async fn block_management_thread(
             },
 
             wait_result = block_management_stage.wait_to_propose() => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -281,7 +281,7 @@ pub async fn block_management_thread(
             }
 
             peer_blk_with_ctx = pending_blk_recver.recv() => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -321,7 +321,7 @@ pub async fn block_management_thread(
             }
 
             pmaker_msg = pacemaker_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -344,7 +344,7 @@ pub async fn block_management_thread(
             }
 
             req = peer_blk_req_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -370,7 +370,7 @@ pub async fn block_management_thread(
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
-                    let _ = match concurrency.acquire().await {
+                    let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

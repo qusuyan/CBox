@@ -102,7 +102,7 @@ pub async fn decision_thread(
     loop {
         tokio::select! {
             new_tail = block_ready_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -129,7 +129,7 @@ pub async fn decision_thread(
                 }
             },
             commit_ready = decision_stage.commit_ready() => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -161,7 +161,7 @@ pub async fn decision_thread(
 
             },
             peer_msg = peer_consensus_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -185,7 +185,7 @@ pub async fn decision_thread(
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
-                    let _ = match concurrency.acquire().await {
+                    let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
