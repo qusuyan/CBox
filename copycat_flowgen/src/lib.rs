@@ -69,6 +69,7 @@ pub fn get_flow_gen(
             num_accounts, // TODO:
             max_inflight,
             frequency,
+            crypto,
         )),
     }
 }

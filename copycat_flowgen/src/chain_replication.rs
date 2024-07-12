@@ -1,8 +1,8 @@
 use super::{FlowGen, Stats};
 use crate::ClientId;
-use copycat::protocol::crypto::Hash;
+use copycat::protocol::crypto::{Hash, PubKey, Signature};
 use copycat::protocol::transaction::{DummyTxn, Txn};
-use copycat::{CopycatError, NodeId, TxnCtx};
+use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -21,14 +21,19 @@ struct LogInfo {
 }
 
 pub struct ChainReplicationFlowGen {
+    // fields to generate load
     max_inflight: usize,
     batch_frequency: usize,
     batch_size: usize,
     next_batch_time: Instant,
     client_list: Vec<ClientId>,
-    txn_size: usize,
     next_txn_id: Hash,
     in_flight: HashMap<Hash, Instant>,
+    // fields to create transactions
+    content: Vec<u8>, // for simplicity, all txns are the same
+    pub_key: PubKey,
+    signature: Signature,
+    // statistics
     stats: HashMap<NodeId, LogInfo>,
     total_time_sec: f64,
     num_completed_txns: u64,
@@ -41,6 +46,7 @@ impl ChainReplicationFlowGen {
         txn_size: usize,
         max_inflight: usize,
         frequency: usize,
+        crypto: CryptoScheme,
     ) -> Self {
         let (batch_size, batch_frequency) = if frequency == UNSET {
             (max_inflight, UNSET)
@@ -50,15 +56,21 @@ impl ChainReplicationFlowGen {
             (frequency / MAX_BATCH_FREQ, MAX_BATCH_FREQ)
         };
 
+        let txn_content = vec![0u8; txn_size];
+        let (pub_key, priv_key) = crypto.gen_key_pair(0);
+        let signature = crypto.sign(&priv_key, &txn_content).unwrap().0;
+
         Self {
             max_inflight,
             batch_frequency,
             batch_size,
             next_batch_time: Instant::now(),
             client_list,
-            txn_size,
             next_txn_id: Hash::zero(),
             in_flight: HashMap::new(),
+            content: txn_content,
+            pub_key,
+            signature,
             stats: HashMap::new(),
             total_time_sec: 0f64,
             num_completed_txns: 0,
@@ -99,11 +111,12 @@ impl FlowGen for ChainReplicationFlowGen {
 
         for _ in 0..batch_size {
             let client_id = self.client_list[rand::random::<usize>() % self.client_list.len()];
-            let txn_content = vec![0u8; self.txn_size];
             let txn = Arc::new(Txn::Dummy {
                 txn: DummyTxn {
                     id: self.next_txn_id,
-                    content: txn_content,
+                    content: self.content.clone(),
+                    pub_key: self.pub_key.clone(),
+                    signature: self.signature.clone(),
                 },
             });
             let txn_ctx = TxnCtx::from_txn(&txn)?;

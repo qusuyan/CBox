@@ -21,27 +21,34 @@ for file_name in log_files:
 
     log_file = os.path.join(log_dir, file_name)
     for stage in stages:
-        # try:
-        raw_metrics = check_output(f"cat {log_file} | grep '{stage}' | grep 'sched_count'", shell=True, encoding="utf-8")
-        # except:
-        #     continue
+        try:
+            raw_metrics = check_output(f"cat {log_file} | grep '{stage}' | grep 'sched_count'", shell=True, encoding="utf-8")
+        except:
+            print(f"skipping stage {stage} for {log_file}...")
+            continue
 
         raw_lines = raw_metrics.split('\n')
         patterns = [re.search(data_regex, line) for line in raw_lines]
         patterns = filter(lambda x: x is not None, patterns)
         parsed_metrics = [pattern.groups() for pattern in patterns]
+
+        # skip first minute
+        nodes_seen = set()
         for (node, sched_count, sched_duration, poll_count, poll_duration) in parsed_metrics:
-            metrics.append((node, stage, int(sched_count), float(sched_duration), int(poll_count), float(poll_duration)))
+            if node in nodes_seen:
+                metrics.append((node, stage, int(sched_count), float(sched_duration), int(poll_count), float(poll_duration)))
+            else:
+                nodes_seen.add(node)
 
 df = pd.DataFrame(metrics, columns=["node", "stage", "sched_count", "sched_duration", "poll_count", "poll_duration"])
 df = df.sort_values(["node", "stage"])
 # df = df[["sched_duration", "sched_count"]]
-df_dur = df[["stage", "sched_duration", "poll_duration"]]
-df_dur = df_dur.groupby(["stage"])
+df_dur = df[["sched_duration", "poll_duration"]]
+# df_dur = df_dur.groupby(["stage"])
 df_dur = df_dur.mean()
 print(df_dur.to_string())
 
-df_count = df[["stage", "sched_count", "poll_count"]]
-df_count = df_count.groupby(["stage"])
+df_count = df[["sched_count", "poll_count"]]
+# df_count = df_count.groupby(["stage"])
 df_count = df_count.sum()
 print(df_count.to_string())
