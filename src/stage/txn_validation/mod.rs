@@ -118,14 +118,6 @@ pub async fn txn_validation_thread(
     loop {
         tokio::select! {
             new_txn = req_recv.recv(), if txn_buffer.len() < validation_batch_size => {
-                // let _permit = match concurrency.acquire().await {
-                //     Ok(permit) => permit,
-                //     Err(e) => {
-                //         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                //         continue;
-                //     }
-                // };
-
                 let mut txn = match new_txn {
                     Some(txn) => txn,
                     None => {
@@ -160,14 +152,6 @@ pub async fn txn_validation_thread(
                 }
             },
             new_peer_txn = peer_txn_recv.recv() => {
-                let _permit = match concurrency.acquire().await {
-                    Ok(permit) => permit,
-                    Err(e) => {
-                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                        continue;
-                    }
-                };
-
                 let (src, txns) = match new_peer_txn {
                     Some((src, txn)) => {
                         if src == id {
@@ -192,7 +176,7 @@ pub async fn txn_validation_thread(
                 }
             }
             _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time), if txn_batch_time.is_some() => {
-
+                // batch validating txns
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -207,22 +191,26 @@ pub async fn txn_validation_thread(
                 txn_batches_validated += 1;
                 txns_validated += num_txns_to_drain;
 
-                match txn_validation_stage.validate(txns_to_validate, 1).await {
-                    Ok(txns) => {
-                        if let Err(e) = validated_txn_send.send(txns).await {
-                            pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
-                        }
-                    },
+                let txns = match txn_validation_stage.validate(txns_to_validate, 1).await {
+                    Ok(txns) => txns,
                     Err(e) => {
                         pf_error!(id; "error validating txns: {:?}", e);
+                        continue;
                     }
                 };
                 txn_batch_time = None;
+
+                drop(_permit);
+
+                if let Err(e) = validated_txn_send.send(txns).await {
+                    pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
+                }
             }
             _ = tokio::time::sleep_until(insert_delay_time) => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
+                    // doing skipped compute cost
                     let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {

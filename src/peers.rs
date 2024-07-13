@@ -193,6 +193,7 @@ impl PeerMessenger {
 
         loop {
             tokio::select! {
+                // TODO: hold semaphore to account for deserialization cost
                 msg_recv = transport_hub.recv() => {
                     match msg_recv {
                         Ok(msg) => {

@@ -64,8 +64,9 @@ pub async fn txn_dissemination_thread(
     let mut insert_delay_time = Instant::now() + insert_delay_interval;
 
     let txn_dissemination_stage = get_txn_dissemination(id, enabled, config, peer_messenger);
+    let txn_dissem_interval = Duration::from_millis(100);
     let mut batch = vec![];
-    let mut txn_dissem_time = Instant::now() + Duration::from_millis(100);
+    let mut txn_dissem_time = None;
 
     async fn wait_send_batch(batch: &Vec<(u64, (Arc<Txn>, Arc<TxnCtx>))>, timeout: Instant) {
         let notify = tokio::sync::Notify::new();
@@ -83,14 +84,6 @@ pub async fn txn_dissemination_thread(
     loop {
         tokio::select! {
             new_txn = validated_txn_recv.recv() => {
-                let _permit = match concurrency.acquire().await {
-                    Ok(permit) => permit,
-                    Err(e) => {
-                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                        continue;
-                    }
-                };
-
                 let mut txn_batch = match new_txn {
                     Some(txn) => txn,
                     None => {
@@ -101,9 +94,13 @@ pub async fn txn_dissemination_thread(
 
                 pf_trace!(id; "got new txn batch {:?}", txn_batch);
                 batch.append(&mut txn_batch);
+                if txn_dissem_time.is_none() {
+                    txn_dissem_time = Some(Instant::now() + txn_dissem_interval);
+                }
             }
 
-            _ = wait_send_batch(&batch, txn_dissem_time) => {
+            _ = wait_send_batch(&batch, txn_dissem_time.unwrap()), if txn_dissem_time.is_some() => {
+                // serializing the list of txns to be disseminated
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -120,17 +117,21 @@ pub async fn txn_dissemination_thread(
                 }
 
                 let batched_txns = send_batch.into_iter().map(|(_, txn_with_ctx)| txn_with_ctx).collect();
+                txn_dissem_time = None;
+
+                drop(_permit);
+
                 if let Err(e) = txn_ready_send.send(batched_txns).await {
                     pf_error!(id; "failed to send to txn_ready pipe: {:?}", e);
                     continue;
                 }
 
-                txn_dissem_time = Instant::now() + Duration::from_millis(100);
             }
             _ = tokio::time::sleep_until(insert_delay_time) => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
+                    // doing skipped compute cost
                     let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {

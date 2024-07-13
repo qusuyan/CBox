@@ -51,6 +51,7 @@ pub async fn commit_thread(
     loop {
         tokio::select! {
             new_batch = commit_recv.recv() => {
+                // commit transaction
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -74,6 +75,8 @@ pub async fn commit_thread(
                     continue;
                 }
 
+                drop(_permit);
+
                 if let Err(e) = executed_send.send((height, txn_batch)).await {
                     pf_error!(id; "failed to send committed txns: {:?}", e);
                     continue;
@@ -83,6 +86,7 @@ pub async fn commit_thread(
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
+                    // doing aggregated compute cost
                     let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {

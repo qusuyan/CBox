@@ -102,6 +102,7 @@ pub async fn decision_thread(
     loop {
         tokio::select! {
             new_tail = block_ready_recv.recv() => {
+                // handling new block to be voted
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -129,6 +130,7 @@ pub async fn decision_thread(
                 }
             },
             commit_ready = decision_stage.commit_ready() => {
+                // getting blocks to be committed and perform clean up as needed
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -154,6 +156,8 @@ pub async fn decision_thread(
                 blks_sent += 1;
                 txns_sent += block_to_commit.len();
 
+                drop(_permit);
+
                 if let Err(e) = commit_send.send((height, block_to_commit)).await {
                     pf_error!(id; "failed to send to commit pipe: {:?}", e);
                     continue;
@@ -161,6 +165,7 @@ pub async fn decision_thread(
 
             },
             peer_msg = peer_consensus_recv.recv() => {
+                // handling vote messages from peers
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -185,6 +190,7 @@ pub async fn decision_thread(
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
+                    // doing skipped compute cost
                     let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {

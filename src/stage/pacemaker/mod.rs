@@ -62,6 +62,7 @@ pub async fn pacemaker_thread(
     loop {
         tokio::select! {
             _ = pmaker.wait_to_propose() => {
+                // pmaker logic to decide if current node can propose new block
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -80,12 +81,15 @@ pub async fn pacemaker_thread(
 
                 pf_debug!(id; "sending propose msg {:?}", propose_msg);
 
+                drop(_permit);
+
                 if let Err(e) = should_propose_send.send(propose_msg).await {
                     pf_error!(id; "failed to send to should_propose pipe: {:?}", e);
                     continue;
                 }
             },
             feedback_msg = pmaker_feedback_recv.recv() => {
+                // getting feedback from decide stage and update internal states
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -109,6 +113,7 @@ pub async fn pacemaker_thread(
                 }
             }
             peer_msg = peer_pmaker_recv.recv() => {
+                // handle pmaker messages from peers
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -135,6 +140,7 @@ pub async fn pacemaker_thread(
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
+                    // doing skipped compute cost
                     let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {

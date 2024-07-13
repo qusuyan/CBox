@@ -125,6 +125,7 @@ pub async fn block_management_thread(
     loop {
         tokio::select! {
             new_txn = txn_ready_recv.recv() => {
+                // check if transaction is valid based on log history
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -156,6 +157,7 @@ pub async fn block_management_thread(
             },
 
             _ = tokio::time::sleep_until(batch_prepare_time), if matches!(blk_state, CurBlockState::Working) => {
+                // preparing for the block to be proposed
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -171,6 +173,7 @@ pub async fn block_management_thread(
             },
 
             wait_result = block_management_stage.wait_to_propose() => {
+                // packing prepared data into an actual block
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -183,32 +186,28 @@ pub async fn block_management_thread(
                     continue;
                 }
 
-                match block_management_stage.get_new_block().await {
-                    Ok((block, ctx)) => {
-                        pf_debug!(id; "proposing new block {:?}", block);
-                        blk_state = CurBlockState::Working;
-                        self_blks_sent += 1;
-                        self_txns_sent += block.txns.len();
-                        if let Err(e) = new_block_send.send((id, vec![(block, ctx)])).await {
-                            pf_error!(id; "failed to send to new_block pipe: {:?}", e);
-                            continue;
-                        }
-                    },
+                let (new_blk, new_blk_ctx) = match block_management_stage.get_new_block().await {
+                    Ok(blk_with_ctx) => blk_with_ctx,
                     Err(e) => {
                         pf_error!(id; "error creating new block: {:?}", e);
                         continue;
                     }
+                };
+
+                pf_debug!(id; "proposing new block {:?}", new_blk);
+                blk_state = CurBlockState::Working;
+                self_blks_sent += 1;
+                self_txns_sent += new_blk.txns.len();
+
+                drop(_permit);
+
+                if let Err(e) = new_block_send.send((id, vec![(new_blk, new_blk_ctx)])).await {
+                    pf_error!(id; "failed to send to new_block pipe: {:?}", e);
+                    continue;
                 }
             },
 
             peer_blk = peer_blk_recv.recv() => {
-                let permit = match concurrency.acquire().await {
-                    Ok(permit) => permit,
-                    Err(e) => {
-                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                        continue;
-                    }
-                };
                 let (src, new_block) = match peer_blk {
                     Some((src, blk)) => {
                         if src == id {
@@ -228,9 +227,9 @@ pub async fn block_management_thread(
                 let blk_sender = pending_blk_sender.clone();
                 let txns_validated = txns_validated.clone();
                 let sem = concurrency.clone();
-                drop(permit);
                 tokio::task::spawn(async move {
-                    let permit = match sem.acquire().await {
+                    // validating txns in peer blocks
+                    let _permit = match sem.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -272,7 +271,8 @@ pub async fn block_management_thread(
                     }
 
                     tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
-                    drop(permit);
+
+                    drop(_permit);
 
                     if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
                         pf_error!(id; "failed to send blk_context: {:?}", e);
@@ -281,6 +281,7 @@ pub async fn block_management_thread(
             }
 
             peer_blk_with_ctx = pending_blk_recver.recv() => {
+                // validating new block from peer
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -299,28 +300,35 @@ pub async fn block_management_thread(
                 peer_blks_recv += 1;
                 peer_txns_recv += peer_blk.txns.len();
                 pf_debug!(id; "Validating block ({:?}, {:?})", peer_blk, peer_blk_ctx);
-                match block_management_stage.validate_block(peer_blk, peer_blk_ctx).await {
-                        Ok(new_tail) => {
-                            if !new_tail.is_empty() {
-                                blk_state = CurBlockState::Working;
-                                for (blk, _) in new_tail.iter() {
-                                    peer_blks_sent += 1;
-                                    peer_txns_sent += blk.txns.len();
-                                }
-                                if let Err(e) = new_block_send.send((src, new_tail)).await {
-                                    pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
-                                    continue;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            pf_error!(id; "failed to validate block: {:?}", e);
-                            continue;
-                        }
+                let new_tail = match block_management_stage.validate_block(peer_blk, peer_blk_ctx).await {
+                    Ok(new_tail) => new_tail,
+                    Err(e) => {
+                        pf_error!(id; "failed to validate block: {:?}", e);
+                        continue;
                     }
+                };
+
+                if new_tail.is_empty() {
+                    // don't need to change anything
+                    continue;
+                }
+
+                blk_state = CurBlockState::Working;
+                for (blk, _) in new_tail.iter() {
+                    peer_blks_sent += 1;
+                    peer_txns_sent += blk.txns.len();
+                }
+
+                drop(_permit);
+
+                if let Err(e) = new_block_send.send((src, new_tail)).await {
+                    pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
+                    continue;
+                }
             }
 
             pmaker_msg = pacemaker_recv.recv() => {
+                // handling pmaker message
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -344,6 +352,7 @@ pub async fn block_management_thread(
             }
 
             req = peer_blk_req_recv.recv() => {
+                // handling block requests from peers
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -370,6 +379,7 @@ pub async fn block_management_thread(
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
+                    // doing skipped compute cost
                     let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {

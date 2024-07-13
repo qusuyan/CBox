@@ -73,6 +73,7 @@ pub async fn block_dissemination_thread(
     loop {
         tokio::select! {
             new_blk = new_block_recv.recv() => {
+                // for serializing blocks sent
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
@@ -102,6 +103,8 @@ pub async fn block_dissemination_thread(
                     continue;
                 }
 
+                drop(_permit);
+
                 if let Err(e) = block_ready_send.send((src, new_tail)).await {
                     pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
                     continue;
@@ -111,6 +114,7 @@ pub async fn block_dissemination_thread(
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
+                    // doing skipped compute cost
                     let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
