@@ -68,14 +68,17 @@ pub async fn txn_dissemination_thread(
     let mut batch = vec![];
     let mut txn_dissem_time = None;
 
-    async fn wait_send_batch(batch: &Vec<(u64, (Arc<Txn>, Arc<TxnCtx>))>, timeout: Instant) {
+    async fn wait_send_batch(
+        batch: &Vec<(u64, (Arc<Txn>, Arc<TxnCtx>))>,
+        timeout: Option<Instant>,
+    ) {
         let notify = tokio::sync::Notify::new();
-        if batch.len() == 0 {
+        if batch.len() == 0 || timeout.is_none() {
             notify.notified().await;
         } else if batch.len() > 2000 {
             return;
         }
-        tokio::time::sleep_until(timeout).await;
+        tokio::time::sleep_until(timeout.unwrap()).await;
     }
 
     let mut report_timeout = Instant::now() + Duration::from_secs(60);
@@ -99,7 +102,7 @@ pub async fn txn_dissemination_thread(
                 }
             }
 
-            _ = wait_send_batch(&batch, txn_dissem_time.unwrap()), if txn_dissem_time.is_some() => {
+            _ = wait_send_batch(&batch, txn_dissem_time), if txn_dissem_time.is_some() => {
                 // serializing the list of txns to be disseminated
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
