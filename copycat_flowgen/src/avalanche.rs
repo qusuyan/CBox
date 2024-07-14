@@ -52,20 +52,21 @@ impl AvalancheFlowGen {
             num_accounts / client_list.len()
         };
 
+        assert!(accounts_per_node > 1);
+
         let mut i = 0u64;
         let mut accounts = HashMap::new();
         let mut utxos = HashMap::new();
         for client in client_list.iter() {
+            let mut client_local_accounts = vec![];
             for _ in 0..accounts_per_node as u64 {
                 let seed = (id << 32) | i;
                 i += 1;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
                 utxos.entry(*client).or_insert(vec![]);
-                accounts
-                    .entry(*client)
-                    .or_insert(vec![])
-                    .push((pubkey, privkey));
+                client_local_accounts.push((pubkey, privkey));
             }
+            accounts.insert(*client, client_local_accounts);
         }
 
         let (batch_size, batch_frequency) = if frequency == UNSET {
@@ -153,6 +154,7 @@ impl FlowGen for AvalancheFlowGen {
             let (sender_idx, in_utxo_raw, in_utxo_amount) = utxos.remove(send_utxo_idx);
             let (sender_pk, sender_sk) = &accounts[sender_idx];
 
+            assert!(accounts.len() > 1);
             let mut recver_idx = rand::random::<usize>() % (accounts.len() - 1);
             if recver_idx >= sender_idx {
                 recver_idx += 1; // avoid sending to self

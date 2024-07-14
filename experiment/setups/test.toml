@@ -4,7 +4,7 @@ num_iterations = 1
 [parameters]
 chain-type = "avalanche"
 cluster-threads = 32
-config = "blk_len=40+max_inflight_blk=40"
+config = "blk_len=40+max_inflight_blk=20"
 conn_multiply = 1
 crypto = "dummy-ecdsa"
 exp-time = 310
@@ -16,4 +16,4 @@ num-clients = 10
 num-machines = 1
 num-nodes = [20, 30, 40, 50, 60, 70, 80]
 per-node-concurrency = 2
-txn-span = 3
+txn-span = 5
