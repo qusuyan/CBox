@@ -187,8 +187,8 @@ impl PeerMessenger {
     ) {
         pf_info!(id; "peer receiver thread started");
 
-        let report_interval = Duration::from_secs(60);
-        let mut report_time = Instant::now() + report_interval;
+        const REPORT_INTERVAL: Duration = Duration::from_secs(60);
+        let mut report_time = Instant::now() + REPORT_INTERVAL;
         let mut msgs_recv = 0;
 
         loop {
@@ -241,7 +241,7 @@ impl PeerMessenger {
                     let num_msgs_sent = msgs_sent.swap(0, Ordering::Relaxed);
                     pf_info!(id; "In the last minute: {} msgs sent and {} msgs recved", num_msgs_sent, msgs_recv);
                     msgs_recv = 0;
-                    report_time += report_interval;
+                    report_time += REPORT_INTERVAL;
                 }
             }
         }

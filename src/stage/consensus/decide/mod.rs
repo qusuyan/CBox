@@ -79,9 +79,9 @@ pub async fn decision_thread(
 ) {
     pf_info!(id; "decision stage starting...");
 
+    const INSERT_DELAY_INTERVAL: Duration = Duration::from_millis(50);
     let delay = Arc::new(AtomicF64::new(0f64));
-    let insert_delay_interval = Duration::from_millis(50);
-    let mut insert_delay_time = Instant::now() + insert_delay_interval;
+    let mut insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
 
     let mut decision_stage = get_decision(
         id,
@@ -92,7 +92,8 @@ pub async fn decision_thread(
         delay.clone(),
     );
 
-    let mut report_timeout = Instant::now() + Duration::from_secs(60);
+    const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(60);
+    let mut report_timeout = Instant::now() + REPORT_TIME_INTERVAL;
     let mut blks_sent = 0;
     let mut txns_sent = 0;
     let mut blks_recv = 0;
@@ -203,7 +204,7 @@ pub async fn decision_thread(
                 } else {
                     tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + insert_delay_interval;
+                insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
             }
             _ = tokio::time::sleep_until(report_timeout) => {
                 // report basic statistics
@@ -222,7 +223,7 @@ pub async fn decision_thread(
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
 
                 // reset report time
-                report_timeout = Instant::now() + Duration::from_secs(60);
+                report_timeout = Instant::now() + REPORT_TIME_INTERVAL;
             }
         }
     }

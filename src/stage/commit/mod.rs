@@ -39,13 +39,14 @@ pub async fn commit_thread(
 ) {
     pf_info!(id; "commit stage starting...");
 
+    const INSERT_DELAY_INTERVAL: Duration = Duration::from_millis(50);
     let delay = Arc::new(AtomicF64::new(0f64));
-    let insert_delay_interval = Duration::from_millis(50);
-    let mut insert_delay_time = Instant::now() + insert_delay_interval;
+    let mut insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
 
     let commit_stage = get_commit(id, config);
 
-    let mut report_timeout = Instant::now() + Duration::from_secs(60);
+    const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(60);
+    let mut report_timeout = Instant::now() + REPORT_TIME_INTERVAL;
     let mut task_interval = monitor.intervals();
 
     loop {
@@ -99,7 +100,7 @@ pub async fn commit_thread(
                 } else {
                     tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + insert_delay_interval;
+                insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
             }
             _ = tokio::time::sleep_until(report_timeout) => {
                 let metrics = task_interval.next().unwrap();
@@ -109,7 +110,7 @@ pub async fn commit_thread(
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
                 // reset report time
-                report_timeout = Instant::now() + Duration::from_secs(60);
+                report_timeout = Instant::now() + REPORT_TIME_INTERVAL;
             }
         }
     }

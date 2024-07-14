@@ -83,32 +83,33 @@ pub async fn txn_validation_thread(
 ) {
     pf_info!(id; "txn validation stage starting...");
 
-    let validation_batch_size = 100usize;
+    const VALIDATION_BATCH_SIZE: usize = 100usize;
 
+    const INSERT_DELAY_INTERVAL: Duration = Duration::from_millis(50);
     let delay: Arc<AtomicF64> = Arc::new(AtomicF64::new(0f64));
-    let insert_delay_interval = Duration::from_millis(50);
-    let mut insert_delay_time = Instant::now() + insert_delay_interval;
+    let mut insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
 
-    let txn_batch_interval = Duration::from_millis(100);
+    const TXN_BATCH_INTERVAL: Duration = Duration::from_millis(100);
     let mut txn_validation_stage = get_txn_validation(crypto_scheme);
     let mut txn_buffer = vec![];
     let mut txn_batch_time = None;
 
     async fn wait_validation_batch(
-        batch: &Vec<(u64, Arc<Txn>)>,
+        batch_len: usize,
         max_batch_size: usize,
         timeout: Option<Instant>,
     ) {
         let notify = tokio::sync::Notify::new();
-        if batch.len() == 0 || timeout.is_none() {
+        if batch_len == 0 || timeout.is_none() {
             notify.notified().await;
-        } else if batch.len() >= max_batch_size {
+        } else if batch_len >= max_batch_size {
             return;
         }
         tokio::time::sleep_until(timeout.unwrap()).await;
     }
 
-    let mut report_time = Instant::now() + Duration::from_secs(60);
+    const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(60);
+    let mut report_time = Instant::now() + REPORT_TIME_INTERVAL;
     let mut self_txns_recved = 0;
     let mut peer_txns_recved = 0;
     let mut txn_batches_validated = 0;
@@ -117,7 +118,7 @@ pub async fn txn_validation_thread(
 
     loop {
         tokio::select! {
-            new_txn = req_recv.recv(), if txn_buffer.len() < validation_batch_size => {
+            new_txn = req_recv.recv(), if txn_buffer.len() < VALIDATION_BATCH_SIZE => {
                 let mut txn = match new_txn {
                     Some(txn) => txn,
                     None => {
@@ -131,7 +132,7 @@ pub async fn txn_validation_thread(
                     self_txns_recved += 1;
                     txn_buffer.push((id, txn));
 
-                    if txn_buffer.len() >= validation_batch_size {
+                    if txn_buffer.len() >= VALIDATION_BATCH_SIZE {
                         break;
                     }
 
@@ -148,7 +149,7 @@ pub async fn txn_validation_thread(
                 }
 
                 if txn_batch_time.is_none() {
-                    txn_batch_time = Some(Instant::now() + txn_batch_interval);
+                    txn_batch_time = Some(Instant::now() + TXN_BATCH_INTERVAL);
                 }
             },
             new_peer_txn = peer_txn_recv.recv() => {
@@ -172,10 +173,10 @@ pub async fn txn_validation_thread(
                 txn_buffer.extend(txn_batch);
 
                 if txn_batch_time.is_none() {
-                    txn_batch_time = Some(Instant::now() + txn_batch_interval);
+                    txn_batch_time = Some(Instant::now() + TXN_BATCH_INTERVAL);
                 }
             }
-            _ = wait_validation_batch(&txn_buffer, validation_batch_size, txn_batch_time), if txn_batch_time.is_some() => {
+            _ = wait_validation_batch(txn_buffer.len(), VALIDATION_BATCH_SIZE, txn_batch_time), if txn_batch_time.is_some() => {
                 // batch validating txns
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
@@ -185,7 +186,7 @@ pub async fn txn_validation_thread(
                     }
                 };
 
-                let num_txns_to_drain = std::cmp::min(validation_batch_size, txn_buffer.len());
+                let num_txns_to_drain = std::cmp::min(VALIDATION_BATCH_SIZE, txn_buffer.len());
                 let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain).collect();
 
                 txn_batches_validated += 1;
@@ -198,7 +199,10 @@ pub async fn txn_validation_thread(
                         continue;
                     }
                 };
-                txn_batch_time = None;
+
+                if txn_buffer.len() == 0 {
+                    txn_batch_time = None;
+                }
 
                 drop(_permit);
 
@@ -223,7 +227,7 @@ pub async fn txn_validation_thread(
                 } else {
                     tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + insert_delay_interval;
+                insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
             }
             _ = tokio::time::sleep_until(report_time) => {
                 // report basic statistics
@@ -243,7 +247,7 @@ pub async fn txn_validation_thread(
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
 
                 // reset report time
-                report_time = Instant::now() + Duration::from_secs(60);
+                report_time = Instant::now() + REPORT_TIME_INTERVAL;
             }
         }
     }

@@ -28,7 +28,7 @@ struct ConflictSet {
     pub count: u64,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct VoteMsg {
     pub round: (NodeId, u64),
     pub votes: Vec<bool>,
