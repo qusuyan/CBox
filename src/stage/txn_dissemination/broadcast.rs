@@ -23,10 +23,10 @@ impl BroadcastTxnDissemination {
 impl TxnDissemination for BroadcastTxnDissemination {
     async fn disseminate(&self, txn_batch: &Vec<(NodeId, Arc<Txn>)>) -> Result<(), CopycatError> {
         // only the node that receives the txn first needs to broadcast
-        let txn_to_dissem: Vec<Txn> = txn_batch
+        let txn_to_dissem: Vec<Arc<Txn>> = txn_batch
             .iter()
             .filter(|(src, _)| *src == self.me)
-            .map(|(_, txn)| txn.as_ref().clone())
+            .map(|(_, txn)| txn.clone())
             .collect();
         if txn_to_dissem.len() > 0 {
             self.transport

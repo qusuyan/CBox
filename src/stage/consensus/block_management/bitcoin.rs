@@ -723,12 +723,7 @@ impl BlockManagement for BitcoinBlockManagement {
         if let Some((blk, _, _)) = self.block_pool.get(&blk_id) {
             // return the req if the block is known
             self.peer_messenger
-                .send(
-                    peer,
-                    MsgType::NewBlock {
-                        blk: blk.as_ref().clone(),
-                    },
-                )
+                .send(peer, MsgType::NewBlock { blk: blk.clone() })
                 .await?
         } else {
             // otherwise gossip to other neighbors

@@ -29,7 +29,7 @@ use std::sync::atomic::Ordering;
 
 #[async_trait]
 trait BlockDissemination: Sync + Send {
-    async fn disseminate(&self, src: NodeId, block: &Block) -> Result<(), CopycatError>;
+    async fn disseminate(&self, src: NodeId, block: Arc<Block>) -> Result<(), CopycatError>;
 }
 
 fn get_block_dissemination(
@@ -98,7 +98,7 @@ pub async fn block_dissemination_thread(
 
                 pf_debug!(id; "got new block {:?}", new_blk);
 
-                if let Err(e) = block_dissemination_stage.disseminate(src, &new_blk).await {
+                if let Err(e) = block_dissemination_stage.disseminate(src, new_blk.clone()).await {
                     pf_error!(id; "failed to disseminate new block: {:?}", e);
                     continue;
                 }

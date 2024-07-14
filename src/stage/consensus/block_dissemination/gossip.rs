@@ -21,12 +21,9 @@ impl GossipBlockDissemination {
 
 #[async_trait]
 impl BlockDissemination for GossipBlockDissemination {
-    async fn disseminate(&self, src: NodeId, blk: &Block) -> Result<(), CopycatError> {
+    async fn disseminate(&self, src: NodeId, blk: Arc<Block>) -> Result<(), CopycatError> {
         self.peer_messenger
-            .gossip(
-                MsgType::NewBlock { blk: blk.clone() },
-                HashSet::from([src, self.me]),
-            )
+            .gossip(MsgType::NewBlock { blk }, HashSet::from([src, self.me]))
             .await
     }
 }

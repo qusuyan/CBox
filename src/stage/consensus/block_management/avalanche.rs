@@ -568,10 +568,10 @@ impl BlockManagement for AvalancheBlockManagement {
             depth: depth + 1,
         };
 
-        let blk = Block {
+        let blk = Arc::new(Block {
             header: blk_header,
             txns,
-        };
+        });
 
         self.peer_messenger
             .send(peer, crate::protocol::MsgType::NewBlock { blk })

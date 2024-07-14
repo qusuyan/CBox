@@ -201,13 +201,12 @@ impl PeerMessenger {
                             let (src, content) = msg;
                             match content {
                                 MsgType::NewTxn { txn_batch } => {
-                                    let txns = txn_batch.into_iter().map(|txn| Arc::new(txn)).collect();
-                                    if let Err(e) = rx_txn_send.send((src, txns)).await {
+                                    if let Err(e) = rx_txn_send.send((src, txn_batch)).await {
                                         pf_error!(id; "rx_txn_send failed: {:?}", e)
                                     }
                                 }
                                 MsgType::NewBlock { blk } => {
-                                    if let Err(e) = rx_blk_send.send((src, Arc::new(blk))).await {
+                                    if let Err(e) = rx_blk_send.send((src, blk)).await {
                                         pf_error!(id; "rx_blk_send failed: {:?}", e)
                                     }
                                 }

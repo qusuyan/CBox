@@ -27,7 +27,7 @@ impl TxnDissemination for GossipTxnDissemination {
         let mut txn_batches_by_sender = HashMap::new();
         for (src, txn) in txn_batch {
             let dst_batch = txn_batches_by_sender.entry(src).or_insert(vec![]);
-            dst_batch.push(txn.as_ref().clone());
+            dst_batch.push(txn.clone());
         }
 
         for (src, txn_batch) in txn_batches_by_sender {
