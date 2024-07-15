@@ -263,6 +263,8 @@ impl BlockManagement for AvalancheBlockManagement {
         //TODO: add noop txns to drive consensus as needed
         assert!(self.blk_quota > 0);
         let txn_hashs: Vec<Hash> = self.curr_batch.drain(0..).collect();
+        // let mut txn_hashs = vec![];
+        // std::mem::swap(&mut txn_hashs, &mut self.curr_batch);
         let txns_with_ctx = txn_hashs
             .iter()
             .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone());

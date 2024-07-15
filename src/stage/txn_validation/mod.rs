@@ -5,7 +5,7 @@ use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -31,10 +31,11 @@ impl TxnValidation {
 
     pub async fn validate(
         &mut self,
-        txn_batch: Vec<(NodeId, Arc<Txn>)>,
+        txn_batch: VecDeque<(NodeId, Arc<Txn>)>,
         concurrency: usize,
     ) -> Result<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>, CopycatError> {
         let mut correct_txns = vec![];
+        correct_txns.reserve(txn_batch.len());
         let mut verification_time = 0f64;
 
         for (src, txn) in txn_batch.into_iter() {
@@ -91,7 +92,7 @@ pub async fn txn_validation_thread(
 
     const TXN_BATCH_INTERVAL: Duration = Duration::from_millis(100);
     let mut txn_validation_stage = get_txn_validation(crypto_scheme);
-    let mut txn_buffer = vec![];
+    let mut txn_buffer = VecDeque::new();
     let mut txn_batch_time = None;
 
     async fn wait_validation_batch(
@@ -130,7 +131,7 @@ pub async fn txn_validation_thread(
                 loop {
                     pf_trace!(id; "got from self new txn {:?}", txn);
                     self_txns_recved += 1;
-                    txn_buffer.push((id, txn));
+                    txn_buffer.push_back((id, txn));
 
                     if txn_buffer.len() >= VALIDATION_BATCH_SIZE {
                         break;
@@ -187,7 +188,9 @@ pub async fn txn_validation_thread(
                 };
 
                 let num_txns_to_drain = std::cmp::min(VALIDATION_BATCH_SIZE, txn_buffer.len());
-                let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain).collect();
+                let txns_to_retain = txn_buffer.split_off(num_txns_to_drain);
+                let txns_to_validate = txn_buffer;
+                txn_buffer = txns_to_retain;
 
                 txn_batches_validated += 1;
                 txns_validated += num_txns_to_drain;

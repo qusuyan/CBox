@@ -95,7 +95,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         cluster.copy_to(addr, "bench_topo.json", f'{cluster.workdir}/bench_topo.json')
 
     # compute 
-    num_flow_gen = 1 if params["disable-txn-dissem"] else params["num-clients"]
+    num_flow_gen = params["num-machines"]
     num_accounts = int(params["num-accounts"] / num_flow_gen)
     max_inflight = int(params["max-inflight-txns"] / num_flow_gen)
     frequency = int(params["frequency"] / num_flow_gen)
