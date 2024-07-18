@@ -4,19 +4,20 @@ import json, time, sys, signal, os
 from datetime import datetime
 
 import pandas as pd
+import math
 
 from dist_make import Cluster, Configuration, Experiment
 from dist_make.logging import MetaLogger
 from dist_make.benchmark import benchmark_main
 
 from gen_topo import gen_topo
+from msg_delay import parse_msg_delay
+from sched_stats import parse_sched_stats
 
 ENGINE = "home-runner"
 
 def benchmark(params: dict[str, any], collect_statistics: bool,
               result_printer, verbose=False):
-
-    datetime_str = datetime.now().strftime("%Y%m%d%H%M%S")
 
     tasks = []
     def cleanup():
@@ -147,13 +148,41 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     print(files)
 
     stats = { "peak_tput": 0 }
-    cumulative_tput = 0
+    cumulative = {"tput": 0, "cpu_util": 0, 
+                  "arrive_late_chance": 0, "arrive_late_dur_ms": 0, "deliver_late_chance": 0, "deliver_late_dur_ms": 0, 
+                  "wakeup_count": 0, "sched_dur_ms": 0, "poll_dur_ms": 0}
     for (addr, stats_file) in files:
         cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
         df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
+        first_nonzero = df["Avg Latency (s)"].ne(0).idxmax()
+        first_latency = df["Avg Latency (s)"][first_nonzero]
+        first_stable = math.ceil(first_latency / 60)
+        df = df.iloc[first_stable:]
         stats["peak_tput"] = max(stats["peak_tput"], df.loc[:, 'Throughput (txn/s)'].max())
-        cumulative_tput += df.loc[1:, 'Throughput (txn/s)'].mean()
-    stats["avg_tput"] = cumulative_tput / len(files)
+        cumulative["tput"] += df['Throughput (txn/s)'].mean()
+        cumulative["cpu_util"] += df['Avg CPU Usage'].mean()
+
+        log_dir = f"./logs/{exp_name}"
+        msg_delay = parse_msg_delay(log_dir)
+        cumulative["arrive_late_chance"] += msg_delay["arrive_late_chance"]
+        cumulative["arrive_late_dur_ms"] += msg_delay["arrive_late_ms"]
+        cumulative["deliver_late_chance"] += msg_delay["deliver_late_chance"]
+        cumulative["deliver_late_dur_ms"] += msg_delay["deliver_late_ms"]
+
+        sched_stats = parse_sched_stats(log_dir)
+        cumulative["wakeup_count"] += sched_stats["sched_count"]
+        cumulative["sched_dur_ms"] += sched_stats["sched_dur_ms"]
+        cumulative["poll_dur_ms"] += sched_stats["poll_dur_ms"]
+
+    stats["avg_tput"] = cumulative["tput"] / len(files)
+    stats["avg_cpu"] = cumulative["cpu_util"] / len(files)
+    stats["arrive_late_chance"] = cumulative["arrive_late_chance"] / len(files)
+    stats["arrive_late_dur_ms"] = cumulative["arrive_late_dur_ms"] / len(files)
+    stats["deliver_late_chance"] = cumulative["deliver_late_chance"] / len(files)
+    stats["deliver_late_dur_ms"] = cumulative["deliver_late_dur_ms"] / len(files)
+    stats["wakeup_count"] = cumulative["wakeup_count"] / len(files)
+    stats["sched_dur_ms"] = cumulative["sched_dur_ms"] / len(files)
+    stats["poll_dur_ms"] = cumulative["poll_dur_ms"] / len(files)
 
     with open(f"./results/{exp_name}/stats.json", "w") as f:
         json.dump(stats, f, indent=2)
