@@ -13,6 +13,7 @@ use tokio_metrics::TaskMonitor;
 
 use crate::context::BlkCtx;
 use crate::protocol::block::Block;
+use crate::stage::pass;
 use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
 use crate::CryptoScheme;
@@ -187,7 +188,7 @@ pub async fn decision_thread(
                     continue;
                 }
             },
-            _ = tokio::time::sleep_until(insert_delay_time) => {
+            _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {

@@ -5,6 +5,7 @@ use tokio_metrics::TaskMonitor;
 use crate::config::Config;
 use crate::protocol::transaction::Txn;
 use crate::{CopycatError, NodeId};
+use crate::stage::pass;
 
 use async_trait::async_trait;
 
@@ -83,7 +84,7 @@ pub async fn commit_thread(
                     continue;
                 }
             },
-            _ = tokio::time::sleep_until(insert_delay_time) => {
+            _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {

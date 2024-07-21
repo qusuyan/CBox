@@ -18,7 +18,6 @@ use crate::stage::consensus::decide::decision_thread;
 use crate::stage::pacemaker::pacemaker_thread;
 use crate::stage::txn_dissemination::txn_dissemination_thread;
 use crate::stage::txn_validation::txn_validation_thread;
-// use crate::state::ChainState;
 
 pub struct Node {
     id: NodeId,

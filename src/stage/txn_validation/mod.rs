@@ -3,6 +3,7 @@ use crate::context::TxnCtx;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
+use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
 
 use std::collections::{HashSet, VecDeque};
@@ -210,7 +211,7 @@ pub async fn txn_validation_thread(
                     pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
                 }
             }
-            _ = tokio::time::sleep_until(insert_delay_time) => {
+            _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {

@@ -1,5 +1,5 @@
 [experiment]
-num_iterations = 1
+num_iterations = 3
 
 [parameters]
 chain-type = "chain-replication"
@@ -11,10 +11,10 @@ exp-time = 430
 frequency = 8000
 mailbox_workers = 8
 max-inflight-txns = 0
-network-delay = 60
+network-delay = 30
 num-accounts = 1000
 num-clients = 1
 num-machines = 1
-num-nodes = [750, 760, 770, 780, 790, 800, 810, 820, 830, 840, 850]
+num-nodes = [780, 790, 800, 810]
 per-node-concurrency = 2
 txn-span = 1

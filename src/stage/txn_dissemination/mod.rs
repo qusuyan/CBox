@@ -11,6 +11,7 @@ use tokio_metrics::TaskMonitor;
 use crate::context::TxnCtx;
 use crate::protocol::transaction::Txn;
 use crate::protocol::DissemPattern;
+use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
 use crate::{config::Config, peers::PeerMessenger};
 
@@ -133,7 +134,7 @@ pub async fn txn_dissemination_thread(
                 }
 
             }
-            _ = tokio::time::sleep_until(insert_delay_time) => {
+            _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {

@@ -18,6 +18,7 @@ use crate::protocol::block::Block;
 use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
 use crate::utils::{CopycatError, NodeId};
+use crate::stage::pass;
 
 use async_trait::async_trait;
 
@@ -103,9 +104,6 @@ pub async fn block_management_thread(
     let mut insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
 
     let mut block_management_stage = get_blk_creation(id, config, peer_messenger);
-
-    const BATCH_PREPARE_TIMEOUT: Duration = Duration::from_millis(1);
-    let mut batch_prepare_time = Instant::now() + BATCH_PREPARE_TIMEOUT;
     let mut blk_state = CurBlockState::Working;
 
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
@@ -157,7 +155,7 @@ pub async fn block_management_thread(
                 }
             },
 
-            _ = tokio::time::sleep_until(batch_prepare_time), if matches!(blk_state, CurBlockState::Working) => {
+            _ = pass(), if matches!(blk_state, CurBlockState::Working) => {
                 // preparing for the block to be proposed
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
@@ -170,7 +168,6 @@ pub async fn block_management_thread(
                     Ok(blk_full) => blk_state = blk_full,
                     Err(e) => pf_error!(id; "failed to prepare new block: {:?}", e),
                 }
-                batch_prepare_time = Instant::now() + BATCH_PREPARE_TIMEOUT;
             },
 
             wait_result = block_management_stage.wait_to_propose() => {
@@ -376,7 +373,7 @@ pub async fn block_management_thread(
                 }
             }
 
-            _ = tokio::time::sleep_until(insert_delay_time) => {
+            _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
