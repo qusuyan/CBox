@@ -4,7 +4,7 @@ use tokio::sync::watch::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration, Instant};
 
-const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(60);
+const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(10);
 
 lazy_static! {
     static ref CHANNEL: (Sender<Duration>, Receiver<Duration>) =
@@ -18,6 +18,7 @@ pub async fn start_report_timer() {
         static ref TIMER_TASK: JoinHandle<()> = tokio::spawn(async {
             let sender = &CHANNEL.0;
             let mut timer = interval(REPORT_TIME_INTERVAL);
+            timer.tick().await; // first tick occurs immediately
             let start_time = Instant::now();
             loop {
                 timer.tick().await;
@@ -28,6 +29,9 @@ pub async fn start_report_timer() {
             }
         });
     }
+
+    // assert here to ensure the task is not optimized
+    assert!(!TIMER_TASK.is_finished());
 }
 
 pub fn get_report_timer() -> Receiver<Duration> {
