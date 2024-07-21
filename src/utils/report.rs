@@ -38,6 +38,9 @@ pub async fn start_report_timer() {
             });
 
             if let Err(e) = TIMER_TASK.set(task) {
+                // a concurrent call has already started the timer thread
+                // abort the one we just started
+                log::warn!("Report timer has already started");
                 e.abort();
             }
         }
