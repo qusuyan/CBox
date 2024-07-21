@@ -13,12 +13,13 @@ use tokio_metrics::TaskMonitor;
 
 use crate::config::Config;
 use crate::context::{BlkCtx, TxnCtx};
+use crate::get_report_timer;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
-use crate::utils::{CopycatError, NodeId};
 use crate::stage::pass;
+use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
@@ -110,8 +111,7 @@ pub async fn block_management_thread(
 
     let txns_validated = Arc::new(DashSet::new());
 
-    const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(60);
-    let mut report_timeout = Instant::now() + REPORT_TIME_INTERVAL;
+    let mut report_timer = get_report_timer();
     let mut self_txns_sent = 0;
     let mut self_blks_sent = 0;
     let mut peer_txns_sent = 0;
@@ -393,7 +393,10 @@ pub async fn block_management_thread(
                 insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
             }
 
-            _ = tokio::time::sleep_until(report_timeout) => {
+            report_val = report_timer.changed() => {
+                if let Err(e) = report_val {
+                    pf_error!(id; "Waiting for report timeout failed: {}", e);
+                }
                 // report basic statistics
                 pf_info!(id; "In the last minute: txns_recv: {}, peer_blks_recv: {}, peer_txns_recv: {}", txns_recv, peer_blks_recv, peer_txns_recv);
                 pf_info!(id; "In the last minute: self_blks_sent: {}, self_txns_sent: {}, peer_blks_sent: {}, peer_txns_sent: {}", self_blks_sent, self_txns_sent, peer_blks_sent, peer_txns_sent);
@@ -412,9 +415,6 @@ pub async fn block_management_thread(
                 let poll_count = metrics.total_poll_count;
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
-
-                // reset report time
-                report_timeout = Instant::now() + REPORT_TIME_INTERVAL;
             }
         }
     }

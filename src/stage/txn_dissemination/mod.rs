@@ -9,6 +9,7 @@ use passthrough::PassthroughTxnDissemination;
 use tokio_metrics::TaskMonitor;
 
 use crate::context::TxnCtx;
+use crate::get_report_timer;
 use crate::protocol::transaction::Txn;
 use crate::protocol::DissemPattern;
 use crate::stage::pass;
@@ -81,8 +82,7 @@ pub async fn txn_dissemination_thread(
         tokio::time::sleep_until(timeout.unwrap()).await;
     }
 
-    const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(60);
-    let mut report_timeout = Instant::now() + REPORT_TIME_INTERVAL;
+    let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();
 
     loop {
@@ -134,6 +134,7 @@ pub async fn txn_dissemination_thread(
                 }
 
             }
+
             _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
@@ -153,16 +154,18 @@ pub async fn txn_dissemination_thread(
                 }
                 insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
             }
-            _ = tokio::time::sleep_until(report_timeout) => {
+
+            report_val = report_timer.changed() => {
+                if let Err(e) = report_val {
+                    pf_error!(id; "Waiting for report timeout failed: {}", e);
+                }
+
                 let metrics = task_interval.next().unwrap();
                 let sched_count = metrics.total_scheduled_count;
                 let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();
                 let poll_count = metrics.total_poll_count;
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
-
-                // reset report time
-                report_timeout = Instant::now() + REPORT_TIME_INTERVAL;
             }
         }
     }

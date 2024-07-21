@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::context::TxnCtx;
+use crate::get_report_timer;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
@@ -109,8 +110,7 @@ pub async fn txn_validation_thread(
         tokio::time::sleep_until(timeout.unwrap()).await;
     }
 
-    const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(60);
-    let mut report_time = Instant::now() + REPORT_TIME_INTERVAL;
+    let mut report_timer = get_report_timer();
     let mut self_txns_recved = 0;
     let mut peer_txns_recved = 0;
     let mut txn_batches_validated = 0;
@@ -153,6 +153,7 @@ pub async fn txn_validation_thread(
                     txn_batch_time = Some(Instant::now() + TXN_BATCH_INTERVAL);
                 }
             },
+
             new_peer_txn = peer_txn_recv.recv() => {
                 let (src, txns) = match new_peer_txn {
                     Some((src, txn)) => {
@@ -177,6 +178,7 @@ pub async fn txn_validation_thread(
                     txn_batch_time = Some(Instant::now() + TXN_BATCH_INTERVAL);
                 }
             }
+
             _ = wait_validation_batch(txn_buffer.len(), VALIDATION_BATCH_SIZE, txn_batch_time), if txn_batch_time.is_some() => {
                 // batch validating txns
                 let _permit = match concurrency.acquire().await {
@@ -211,6 +213,7 @@ pub async fn txn_validation_thread(
                     pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
                 }
             }
+
             _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
@@ -230,7 +233,12 @@ pub async fn txn_validation_thread(
                 }
                 insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
             }
-            _ = tokio::time::sleep_until(report_time) => {
+
+            report_val = report_timer.changed() => {
+                if let Err(e) = report_val {
+                    pf_error!(id; "Waiting for report timeout failed: {}", e);
+                }
+
                 // report basic statistics
                 pf_info!(id; "In the last minute: self_txns_recved: {}, peer_txns_recved: {}", self_txns_recved, peer_txns_recved);
                 pf_info!(id; "In the last minute: txn_batches_validated: {}, txns_validated: {}", txn_batches_validated, txns_validated);
@@ -246,9 +254,6 @@ pub async fn txn_validation_thread(
                 let poll_count = metrics.total_poll_count;
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
-
-                // reset report time
-                report_time = Instant::now() + REPORT_TIME_INTERVAL;
             }
         }
     }

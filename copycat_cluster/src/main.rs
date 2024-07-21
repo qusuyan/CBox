@@ -1,7 +1,7 @@
 use mailbox::Mailbox;
 
 use copycat::log::colored_level;
-use copycat::Node;
+use copycat::{get_report_timer, get_timer_interval, start_report_timer, Node};
 use copycat::{fully_connected_topology, get_topology};
 use copycat::{ChainType, Config, CryptoScheme};
 use copycat::protocol::MsgType;
@@ -12,7 +12,7 @@ use std::io::Write;
 
 use tokio::runtime::{Builder, Handle};
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 
 use clap::Parser;
 use sysinfo::System;
@@ -334,9 +334,9 @@ fn main() {
         }
 
         log::info!("setup txns sent");
-        let start_time = Instant::now();
-        let report_interval = 60f64;
-        let mut report_time = start_time + Duration::from_secs_f64(report_interval);
+        let mut report_timer = get_report_timer();
+        let report_interval = get_timer_interval().as_secs_f64();
+        start_report_timer().await;
         // wait when setup txns are propogated over the network
         tokio::time::sleep(Duration::from_secs(10)).await;
         log::info!("flow generation starts");
@@ -390,9 +390,12 @@ fn main() {
                     }
                 }
 
-                _ = tokio::time::sleep_until(report_time) => {
+                report_val = report_timer.changed() => {
+                    if let Err(e) = report_val {
+                        log::error!("Waiting for report timeout failed: {}", e);
+                    }
                     let stats = flow_gen.get_stats();
-                    let run_time =  (report_time - start_time).as_secs_f64();
+                    let run_time = report_timer.borrow().as_secs_f64();
                     let newly_committed = stats.num_committed - prev_committed;
                     let tput = newly_committed as f64 / report_interval;
 
@@ -427,7 +430,6 @@ fn main() {
                     log::info!("Cumulatively: active tasks: {} avg queue depth: {}, avg poll count: {}, avg overflow count: {}, avg steal count: {}", active_tasks, avg_queue_depth, avg_poll_count, avg_overflow_count, avg_steal_count);
                     txns_sent = 0;
                     prev_committed = stats.num_committed;
-                    report_time += Duration::from_secs_f64(report_interval);
                 }
             }
         }

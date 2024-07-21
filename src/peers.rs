@@ -1,3 +1,4 @@
+use crate::get_report_timer;
 use crate::protocol::{block::Block, transaction::Txn, MsgType};
 use crate::utils::{CopycatError, NodeId};
 use mailbox_client::{ClientStubRecvHalf, ClientStubSendHalf};
@@ -5,7 +6,7 @@ use mailbox_client::{ClientStubRecvHalf, ClientStubSendHalf};
 use rand::seq::IteratorRandom;
 use serde::{Deserialize, Serialize};
 
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use std::collections::HashSet;
@@ -187,8 +188,7 @@ impl PeerMessenger {
     ) {
         pf_info!(id; "peer receiver thread started");
 
-        const REPORT_INTERVAL: Duration = Duration::from_secs(60);
-        let mut report_time = Instant::now() + REPORT_INTERVAL;
+        let mut report_timer = get_report_timer();
         let mut msgs_recv = 0;
 
         loop {
@@ -237,11 +237,15 @@ impl PeerMessenger {
                         }
                     }
                 },
-                _ = tokio::time::sleep_until(report_time) => {
+
+                report_val = report_timer.changed() => {
+                    if let Err(e) = report_val {
+                        pf_error!(id; "Waiting for report timeout failed: {}", e);
+                    }
+
                     let num_msgs_sent = msgs_sent.swap(0, Ordering::Relaxed);
                     pf_info!(id; "In the last minute: {} msgs sent and {} msgs recved", num_msgs_sent, msgs_recv);
                     msgs_recv = 0;
-                    report_time += REPORT_INTERVAL;
                 }
             }
         }
