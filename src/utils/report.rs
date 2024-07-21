@@ -1,10 +1,12 @@
+use std::sync::OnceLock;
+
 use lazy_static::lazy_static;
 
 use tokio::sync::watch::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration, Instant};
 
-const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(60);
+const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(10);
 
 lazy_static! {
     static ref CHANNEL: (Sender<Duration>, Receiver<Duration>) =
@@ -14,24 +16,32 @@ lazy_static! {
 // async to ensure it is invoked in a runtime
 pub async fn start_report_timer() {
     // initialize timer task once only
-    lazy_static! {
-        static ref TIMER_TASK: JoinHandle<()> = tokio::spawn(async {
-            let sender = &CHANNEL.0;
-            let mut timer = interval(REPORT_TIME_INTERVAL);
-            timer.tick().await; // first tick occurs immediately
-            let start_time = Instant::now();
-            loop {
-                timer.tick().await;
-                let elapsed = start_time.elapsed();
-                if let Err(e) = sender.send(elapsed) {
-                    log::error!("Report timer failed unexpectedly: {e}");
-                }
-            }
-        });
-    }
+    static TIMER_TASK: OnceLock<JoinHandle<()>> = OnceLock::new();
 
-    // assert here to ensure the task is not optimized
-    assert!(!TIMER_TASK.is_finished());
+    match TIMER_TASK.get() {
+        Some(_) => {
+            log::warn!("Report timer has already started");
+        }
+        None => {
+            let task = tokio::spawn(async {
+                let sender = &CHANNEL.0;
+                let mut timer = interval(REPORT_TIME_INTERVAL);
+                timer.tick().await; // first tick occurs immediately
+                let start_time = Instant::now();
+                loop {
+                    timer.tick().await;
+                    let elapsed = start_time.elapsed();
+                    if let Err(e) = sender.send(elapsed) {
+                        log::error!("Report timer failed unexpectedly: {e}");
+                    }
+                }
+            });
+
+            if let Err(e) = TIMER_TASK.set(task) {
+                e.abort();
+            }
+        }
+    }
 }
 
 pub fn get_report_timer() -> Receiver<Duration> {
