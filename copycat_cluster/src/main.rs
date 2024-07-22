@@ -395,7 +395,7 @@ fn main() {
                         log::error!("Waiting for report timeout failed: {}", e);
                     }
                     let stats = flow_gen.get_stats();
-                    let run_time = report_timer.borrow().as_secs_f64();
+                    let run_time = report_timer.borrow().as_secs_f64().round() as usize;
                     let newly_committed = stats.num_committed - prev_committed;
                     let tput = newly_committed as f64 / report_interval;
 
