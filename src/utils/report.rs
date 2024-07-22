@@ -6,7 +6,7 @@ use tokio::sync::watch::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration, Instant};
 
-const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(10);
+const REPORT_TIME_INTERVAL: Duration = Duration::from_secs(60);
 
 lazy_static! {
     static ref CHANNEL: (Sender<Duration>, Receiver<Duration>) =

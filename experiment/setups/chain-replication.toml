@@ -1,5 +1,5 @@
 [experiment]
-num_iterations = 1
+num_iterations = 3
 
 [parameters]
 chain-type = "chain-replication"
@@ -8,13 +8,13 @@ config = "blk_size=500000+order=[0]"
 conn_multiply = 1
 crypto = "dummy-ecdsa"
 exp-time = 430
-frequency = [3000, 5000, 7000]
+frequency = 1500
 mailbox_workers = 8
 max-inflight-txns = 0
 network-delay = 30
 num-accounts = 1000
 num-clients = 1
 num-machines = 1
-num-nodes = [720, 760, 800]
+num-nodes = [720, 760, 800, 840, 880, 920, 960, 1000]
 per-node-concurrency = 2
 txn-span = 1
