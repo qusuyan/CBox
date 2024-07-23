@@ -152,9 +152,8 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     for (addr, stats_file) in files:
         cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
         df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
-        first_nonzero = df["Avg Latency (s)"].ne(0).idxmax()
-        first_latency = df["Avg Latency (s)"][first_nonzero]
-        first_stable = math.ceil(first_latency / 60)
+        avg_latency = df["Avg Latency (s)"].mean()
+        first_stable = math.ceil(avg_latency / 60)
         df = df.iloc[first_stable:]
         stats["peak_tput"] = max(stats["peak_tput"], df.loc[:, 'Throughput (txn/s)'].max())
         cumulative["tput"] += df['Throughput (txn/s)'].mean()
