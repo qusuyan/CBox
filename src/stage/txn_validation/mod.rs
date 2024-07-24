@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::consts::{TXN_BATCH_DELAY_INTERVAL, TXN_BATCH_INTERVAL};
 use crate::context::TxnCtx;
 use crate::get_report_timer;
 use crate::protocol::crypto::Hash;
@@ -87,11 +88,9 @@ pub async fn txn_validation_thread(
 
     const VALIDATION_BATCH_SIZE: usize = 100usize;
 
-    const INSERT_DELAY_INTERVAL: Duration = Duration::from_millis(50);
     let delay: Arc<AtomicF64> = Arc::new(AtomicF64::new(0f64));
-    let mut insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+    let mut insert_delay_time = Instant::now() + TXN_BATCH_DELAY_INTERVAL;
 
-    const TXN_BATCH_INTERVAL: Duration = Duration::from_millis(100);
     let mut txn_validation_stage = get_txn_validation(crypto_scheme);
     let mut txn_buffer = VecDeque::new();
     let mut txn_batch_time = None;
@@ -231,7 +230,7 @@ pub async fn txn_validation_thread(
                 } else {
                     tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+                insert_delay_time = Instant::now() + TXN_BATCH_DELAY_INTERVAL;
             }
 
             report_val = report_timer.changed() => {

@@ -8,6 +8,7 @@ mod passthrough;
 use passthrough::PassthroughTxnDissemination;
 use tokio_metrics::TaskMonitor;
 
+use crate::consts::{TXM_DISSEM_DELAY_INTERVAL, TXN_DISSEM_INTERVAL};
 use crate::context::TxnCtx;
 use crate::get_report_timer;
 use crate::protocol::transaction::Txn;
@@ -63,11 +64,9 @@ pub async fn txn_dissemination_thread(
 
     const DISSEM_BATCH_SIZE: usize = 2000usize;
 
-    const INSERT_DELAY_INTERVAL: Duration = Duration::from_millis(50);
     let delay = Arc::new(AtomicF64::new(0f64));
-    let mut insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+    let mut insert_delay_time = Instant::now() + TXM_DISSEM_DELAY_INTERVAL;
 
-    const TXN_DISSEM_INTERVAL: Duration = Duration::from_millis(100);
     let txn_dissemination_stage = get_txn_dissemination(id, enabled, config, peer_messenger);
     let mut batch = vec![];
     let mut txn_dissem_time = None;
@@ -152,7 +151,7 @@ pub async fn txn_dissemination_thread(
                 } else {
                     tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+                insert_delay_time = Instant::now() + TXM_DISSEM_DELAY_INTERVAL;
             }
 
             report_val = report_timer.changed() => {

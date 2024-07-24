@@ -12,6 +12,7 @@ use chain_replication::ChainReplicationBlockManagement;
 use tokio_metrics::TaskMonitor;
 
 use crate::config::Config;
+use crate::consts::BLK_MNG_DELAY_INTERVAL;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::get_report_timer;
 use crate::peers::PeerMessenger;
@@ -100,9 +101,8 @@ pub async fn block_management_thread(
 ) {
     pf_info!(id; "block management stage starting...");
 
-    const INSERT_DELAY_INTERVAL: Duration = Duration::from_millis(50);
     let delay = Arc::new(AtomicF64::new(0f64));
-    let mut insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+    let mut insert_delay_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
 
     let mut block_management_stage = get_blk_creation(id, config, peer_messenger);
     let mut blk_state = CurBlockState::Working;
@@ -390,7 +390,7 @@ pub async fn block_management_thread(
                 } else {
                     tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+                insert_delay_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
             }
 
             report_val = report_timer.changed() => {
