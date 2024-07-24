@@ -11,6 +11,7 @@ mod stage;
 pub use config::Config;
 pub use context::TxnCtx;
 pub use node::Node;
+pub use node::NodeChannels;
 pub use protocol::transaction;
 pub use protocol::{ChainType, CryptoScheme, DissemPattern};
 pub use utils::{

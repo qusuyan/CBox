@@ -1,7 +1,7 @@
 use mailbox::Mailbox;
 
 use copycat::log::colored_level;
-use copycat::{get_report_timer, get_timer_interval, start_report_timer, Node};
+use copycat::{get_report_timer, get_timer_interval, start_report_timer, Node, NodeChannels};
 use copycat::{fully_connected_topology, get_topology};
 use copycat::{ChainType, Config, CryptoScheme};
 use copycat::protocol::MsgType;
@@ -9,6 +9,7 @@ use copycat_flowgen::get_flow_gen;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use std::thread;
 
 use tokio::runtime::{Builder, Handle};
 use tokio::sync::mpsc;
@@ -240,11 +241,10 @@ fn main() {
 
     // console_subscriber::init();
 
-    let runtime = Builder::new_multi_thread()
+    let runtime = Builder::new_current_thread()
         .enable_all()
         .disable_lifo_slot()
-        .worker_threads(args.num_threads as usize)
-        .thread_name("copycat-cluster-thread")
+        .thread_name("copycat-cluster-main-thread")
         .build()
         .expect("Creating new runtime failed");
 
@@ -263,38 +263,61 @@ fn main() {
         let mut node_map = HashMap::new();
         // let mut node_rt = HashMap::new();
         let mut redirect_handles = HashMap::new();
+        let mut thread_handles = vec![];
+
         for node_id in local_nodes.clone() {
-            // let rt = Builder::new_multi_thread()
-            //     .enable_all()
-            //     .worker_threads(2)
-            //     .thread_name(format!("copycat-node-{node_id}-thread"))
-            //     .build()
-            //     .expect("Creating new runtime failed");
-            let result = Node::init(
-                node_id,
-                args.num_mailbox_workers,
-                args.chain,
-                txn_crypto,
-                p2p_crypto,
-                node_config.clone(),
-                !args.disable_txn_dissem,
-                topology.remove(&node_id).unwrap_or(HashSet::new()),
-                args.per_node_concurrency,
-            ).await;
-            let (node, mut executed): (Node, _) = match result {
-                Ok(node) => node,
-                Err(e) => {
-                    log::error!("failed to start node: {e:?}");
-                    return;
-                }
-            };
-            node_map.insert(node_id, node);
-            // node_rt.insert(node_id, rt);
+            let mut channels = NodeChannels::new();
+
+            let local_node_config = node_config.clone();
+            let neighbors = topology.remove(&node_id).unwrap_or(HashSet::new());
+            let thread_handle = thread::spawn(move || {
+                let runtime = Builder::new_current_thread()
+                    .enable_all()
+                    .disable_lifo_slot()
+                    .thread_name(format!("copycat-cluster-node-{}", node_id))
+                    .build()
+                    .expect("Creating new runtime failed");
+
+                runtime.block_on(async {
+                    let node = Node::init(
+                        node_id,
+                        channels.internals,
+                        args.num_mailbox_workers,
+                        args.chain,
+                        txn_crypto,
+                        p2p_crypto,
+                        local_node_config,
+                        !args.disable_txn_dissem,
+                        neighbors,
+                        args.per_node_concurrency,
+                    ).await;
+
+                    let node = match node {
+                        Ok(node) => node,
+                        Err(e) => {
+                            log::error!("Node {id} initialization failed: {e:?}");
+                            return;
+                        }
+                    };
+
+                    match node.wait_completion().await {
+                        Ok(_) => {
+                            log::info!("Node {id} finished");
+                        }
+                        Err(e) => {
+                            log::error!("Node {id} failed: {e:?}");
+                        }
+                    }
+                });
+            });
+            thread_handles.push(thread_handle);
+            
+            node_map.insert(node_id, channels.send);
 
             let tx = combine_tx.clone();
             let redirect_handle = tokio::spawn(async move {
                 loop {
-                    match executed.recv().await {
+                    match channels.recv.recv().await {
                         Some(msg) => {
                             if let Err(e) = tx.send((node_id, msg)).await {
                                 log::error!("Node {id} redirecting executed pipe failed: {e:?}")
@@ -326,7 +349,7 @@ fn main() {
             let receiving_node_ids = req_dsts.get(&client_id).unwrap();
             let receiving_nodes = receiving_node_ids.iter().map(|node_id| (node_id, node_map.get(node_id).unwrap()));
             for (id, node) in receiving_nodes {
-                if let Err(e) = node.send_req(txn.clone()).await {
+                if let Err(e) = node.send(txn.clone()).await {
                     log::error!("failed to send setup txns to node {id}: {e}");
                     return;
                 }
@@ -367,7 +390,7 @@ fn main() {
                         let receiving_node_ids = req_dsts.get(&client_id).unwrap();
                         let receiving_nodes = receiving_node_ids.iter().map(|node_id| (node_id, node_map.get(node_id).unwrap()));
                         for (id, node) in receiving_nodes {
-                            if let Err(e) = node.send_req(next_req.clone()).await {
+                            if let Err(e) = node.send(next_req.clone()).await {
                                 log::error!("sending next request to node {id} failed: {e:?}");
                                 return;
                             }
