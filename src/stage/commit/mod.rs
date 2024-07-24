@@ -3,6 +3,7 @@ use dummy::DummyCommit;
 use tokio_metrics::TaskMonitor;
 
 use crate::config::Config;
+use crate::consts::COMMIT_DELAY_INTERVAL;
 use crate::protocol::transaction::Txn;
 use crate::stage::pass;
 use crate::{get_report_timer, CopycatError, NodeId};
@@ -40,9 +41,8 @@ pub async fn commit_thread(
 ) {
     pf_info!(id; "commit stage starting...");
 
-    const INSERT_DELAY_INTERVAL: Duration = Duration::from_millis(50);
     let delay = Arc::new(AtomicF64::new(0f64));
-    let mut insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+    let mut insert_delay_time = Instant::now() + COMMIT_DELAY_INTERVAL;
 
     let commit_stage = get_commit(id, config);
 
@@ -101,7 +101,7 @@ pub async fn commit_thread(
                 } else {
                     tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+                insert_delay_time = Instant::now() + COMMIT_DELAY_INTERVAL;
             }
 
             report_val = report_timer.changed() => {

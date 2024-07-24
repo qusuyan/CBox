@@ -11,6 +11,7 @@ mod chain_replication;
 use chain_replication::ChainReplicationDecision;
 use tokio_metrics::TaskMonitor;
 
+use crate::consts::DECIDE_DELAY_INTERVAL;
 use crate::context::BlkCtx;
 use crate::protocol::block::Block;
 use crate::stage::pass;
@@ -80,9 +81,8 @@ pub async fn decision_thread(
 ) {
     pf_info!(id; "decision stage starting...");
 
-    const INSERT_DELAY_INTERVAL: Duration = Duration::from_millis(50);
     let delay = Arc::new(AtomicF64::new(0f64));
-    let mut insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+    let mut insert_delay_time = Instant::now() + DECIDE_DELAY_INTERVAL;
 
     let mut decision_stage = get_decision(
         id,
@@ -207,7 +207,7 @@ pub async fn decision_thread(
                 } else {
                     tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+                insert_delay_time = Instant::now() + DECIDE_DELAY_INTERVAL;
             }
 
             report_val = report_timer.changed() => {
