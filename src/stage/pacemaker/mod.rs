@@ -5,6 +5,7 @@ mod avalanche;
 use avalanche::AvalanchePacemaker;
 use tokio_metrics::TaskMonitor;
 
+use crate::consts::PACE_DELAY_INTERVAL;
 use crate::get_report_timer;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
@@ -52,9 +53,8 @@ pub async fn pacemaker_thread(
 ) {
     pf_info!(id; "pacemaker starting...");
 
-    const INSERT_DELAY_INTERVAL: Duration = Duration::from_millis(50);
     let delay = Arc::new(AtomicF64::new(0f64));
-    let mut insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+    let mut insert_delay_time = Instant::now() + PACE_DELAY_INTERVAL;
 
     let mut pmaker = get_pacemaker(id, config, peer_messenger);
 
@@ -158,7 +158,7 @@ pub async fn pacemaker_thread(
                 } else {
                     tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + INSERT_DELAY_INTERVAL;
+                insert_delay_time = Instant::now() + PACE_DELAY_INTERVAL;
             }
 
             report_val = report_timer.changed() => {
