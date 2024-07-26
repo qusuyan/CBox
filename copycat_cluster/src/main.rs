@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 use tokio::time::Duration;
 
 use clap::Parser;
-use sysinfo::System;
+use sysinfo::{MemoryRefreshKind, System};
 
 
 // TODO: add parameters to config individual node configs
@@ -231,6 +231,7 @@ fn main() {
     // collect system information
     let mut sys = System::new();
     sys.refresh_cpu_usage();
+    sys.refresh_memory_specifics(MemoryRefreshKind::new().with_ram());
 
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
@@ -400,6 +401,7 @@ fn main() {
                     let tput = newly_committed as f64 / report_interval;
 
                     sys.refresh_cpu_usage();
+                    sys.refresh_memory_specifics(MemoryRefreshKind::new().with_ram());
                     let (cpu_usage, cpu_count) = sys.cpus()
                         .into_iter()
                         .map(|cpu| (cpu.cpu_usage(), 1))
