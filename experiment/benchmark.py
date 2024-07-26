@@ -154,6 +154,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
         avg_latency = df["Avg Latency (s)"].mean()
         df = df.loc[df["Runtime (s)"] > avg_latency]
+        df = df.loc[df["Available Memory"] > 1e8]  # 100 MB
         stats["peak_tput"] = max(stats["peak_tput"], df.loc[:, 'Throughput (txn/s)'].max())
         cumulative["tput"] += df['Throughput (txn/s)'].mean()
         cumulative["cpu_util"] += df['Avg CPU Usage'].mean()
