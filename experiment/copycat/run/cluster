@@ -5,6 +5,7 @@ echo $@
 
 export RUST_LOG=info
 export RUST_BACKTRACE=full
+export REPORT_PERIOD=10
 
 BUILDTYPE=$1
 ID=$2

@@ -152,6 +152,8 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     for (addr, stats_file) in files:
         cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
         df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
+        first_commit = df["Avg Latency (s)"].ne(0).idxmax()
+        df = df.iloc[first_commit:]
         avg_latency = df["Avg Latency (s)"].mean()
         df = df.loc[df["Runtime (s)"] > avg_latency]
         df = df.loc[df["Available Memory"] > 1e8]  # 100 MB
@@ -162,6 +164,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     stats["avg_tput"] = cumulative["tput"] / len(files)
     stats["avg_cpu"] = cumulative["cpu_util"] / len(files)
     
+    # TODO: parse only logs corresponding to specific range of experiment time
     log_dir = f"./logs/{exp_name}"
     msg_delay = parse_msg_delay(log_dir)
     stats["arrive_late_chance"] = msg_delay["arrive_late_chance"]
