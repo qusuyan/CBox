@@ -30,7 +30,7 @@ pub struct ChainReplicationFlowGen {
     next_txn_id: Hash,
     in_flight: HashMap<Hash, Instant>,
     // fields to create transactions
-    content: Vec<u8>, // for simplicity, all txns are the same
+    content: Arc<Vec<u8>>, // for simplicity, all txns are the same
     pub_key: PubKey,
     signature: Signature,
     // statistics
@@ -56,7 +56,7 @@ impl ChainReplicationFlowGen {
             (frequency / MAX_BATCH_FREQ, MAX_BATCH_FREQ)
         };
 
-        let txn_content = vec![0u8; txn_size];
+        let txn_content = Arc::new(vec![0u8; txn_size]);
         let (pub_key, priv_key) = crypto.gen_key_pair(0);
         let signature = crypto.sign(&priv_key, &txn_content).unwrap().0;
 

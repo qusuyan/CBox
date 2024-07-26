@@ -1,13 +1,13 @@
-use crate::{
-    protocol::crypto::{Hash, PubKey, Signature},
-    CopycatError, CryptoScheme,
-};
+use crate::protocol::crypto::{Hash, PubKey, Signature};
+use crate::{CopycatError, CryptoScheme};
+
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DummyTxn {
     pub id: Hash,
-    pub content: Vec<u8>,
+    pub content: Arc<Vec<u8>>,
     pub pub_key: PubKey,
     pub signature: Signature,
 }

@@ -1,20 +1,20 @@
 [experiment]
-num_iterations = 3
+num_iterations = 1
 
 [parameters]
 chain-type = "chain-replication"
 cluster-threads = 32
 config = "blk_size=500000+order=[0]"
 conn_multiply = 1
-crypto = "dummy-ecdsa"
-exp-time = 610
-frequency = 1500
+crypto = "dummy"
+exp-time = 310
+frequency = 0
 mailbox_workers = 8
-max-inflight-txns = 0
+max-inflight-txns = 2000000
 network-delay = 30
 num-accounts = 1000
 num-clients = 1
 num-machines = 1
-num-nodes = [950, 960, 970, 980, 990, 1000, 1010, 1020]
+num-nodes = [100, 120, 140, 160, 180, 200]
 per-node-concurrency = 2
 txn-span = 1
