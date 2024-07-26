@@ -15,6 +15,6 @@ network-delay = 30
 num-accounts = 1000
 num-clients = 1
 num-machines = 1
-num-nodes = [100, 120, 140, 160, 180, 200]
+num-nodes = [120, 140, 160, 180, 200]
 per-node-concurrency = 2
 txn-span = 1

@@ -235,7 +235,7 @@ fn main() {
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
-        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence,Avg CPU Usage\n")
+        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence,Avg CPU Usage,Available Memory\n")
         .expect("write stats failed");
 
     // console_subscriber::init();
@@ -406,6 +406,7 @@ fn main() {
                         .reduce(|(usage1, count1), (usage2, count2)| (usage1 + usage2, count1 + count2))
                         .expect("no CPU returned");
                     let avg_cpu_usage = cpu_usage / cpu_count as f32;
+                    let mem_available = sys.available_memory();
 
                     let rt_metrics = rt_handle.metrics();
                     let active_tasks = rt_metrics.active_tasks_count();
@@ -415,16 +416,17 @@ fn main() {
                     let avg_steal_count = (0..rt_metrics.num_workers()).map(|id| rt_metrics.worker_steal_count(id)).sum::<u64>() / rt_metrics.num_workers() as u64;
 
                     log::info!(
-                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit confidence: {}, CPU Usage: {}",
+                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit Confidence: {}, CPU Usage: {}, Memory Available: {}",
                         run_time,
                         tput,
                         stats.latency,
                         stats.chain_length,
                         stats.commit_confidence,
                         avg_cpu_usage,
+                        mem_available,
                     );
                     stats_file
-                        .write_fmt(format_args!("{},{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence, avg_cpu_usage))
+                        .write_fmt(format_args!("{},{},{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence, avg_cpu_usage, mem_available))
                         .expect("write stats failed");
                     log::info!("In the last minute: txns_sent: {}, inflight_txns: {}", txns_sent, stats.inflight_txns);
                     log::info!("Cumulatively: active tasks: {} avg queue depth: {}, avg poll count: {}, avg overflow count: {}, avg steal count: {}", active_tasks, avg_queue_depth, avg_poll_count, avg_overflow_count, avg_steal_count);
