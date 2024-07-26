@@ -25,7 +25,7 @@ pub async fn start_report_timer() {
         None => {
             let task = tokio::spawn(async {
                 let sender = &CHANNEL.0;
-                let mut timer = interval(REPORT_TIME_INTERVAL);
+                let mut timer = interval(*REPORT_TIME_INTERVAL);
                 timer.tick().await; // first tick occurs immediately
                 let start_time = Instant::now();
                 loop {
@@ -52,5 +52,5 @@ pub fn get_report_timer() -> Receiver<Duration> {
 }
 
 pub fn get_timer_interval() -> Duration {
-    REPORT_TIME_INTERVAL
+    *REPORT_TIME_INTERVAL
 }
