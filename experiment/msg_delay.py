@@ -12,7 +12,7 @@ arrive_regex = "Messenger ([\d]+)->([\d]+): message arrived later than it should
 msgs_sent_recv_regex = "copycat::peers: \(([\d]+)\) In the last minute: ([\d]+) msgs sent and ([\d]+) msgs recved"
 
 
-def parse_msg_delay(log_dir):
+def parse_msg_delay(log_dir, line_ranges = {}):
     log_files = os.listdir(log_dir)
 
     arrive_late_metrics = []
@@ -37,10 +37,23 @@ def parse_msg_delay(log_dir):
             continue
 
         log_file = os.path.join(log_dir, file_name)
-        
+
+        (start_line, end_line) = line_ranges.get(log_file, (None, None))
+        print_command = f"cat {log_file}"
+        if start_line is None:
+            pass
+        else:
+            print_command += f" | tail -n +{start_line}"
+
+        if end_line is None:
+            pass
+        else:
+            line_count = end_line if start_line is None else end_line - start_line
+            print_command += f" | head -n {line_count}"
+
         # number of msgs sent and recved in total
         try:
-            msgs_sent_recv = check_output(f"cat {log_file} | grep 'copycat::peers:'", shell=True, encoding="utf-8")
+            msgs_sent_recv = check_output(f"{print_command} | grep 'copycat::peers:'", shell=True, encoding="utf-8")
             msgs_sent_recv = msgs_sent_recv.split('\n')
         except:
             msgs_sent_recv = []
@@ -53,7 +66,7 @@ def parse_msg_delay(log_dir):
             msgs_recv[node] = msgs_recv.get(node, 0) + int(recv)
 
         try:
-            arrive_late = check_output(f"cat {log_file} | grep 'message arrived later than it should'", shell=True, encoding="utf-8")
+            arrive_late = check_output(f"{print_command} | grep 'message arrived later than it should'", shell=True, encoding="utf-8")
             arrive_late = arrive_late.split('\n')
         except:
             arrive_late = []
@@ -66,7 +79,7 @@ def parse_msg_delay(log_dir):
             arrive_late_metrics.append((file_name, src, dst, late_secs))
         
         try:
-            deliver_late = check_output(f"cat {log_file} | grep 'message get delivered later than it should'", shell=True, encoding="utf-8")
+            deliver_late = check_output(f"{print_command} | grep 'message get delivered later than it should'", shell=True, encoding="utf-8")
             deliver_late = deliver_late.split('\n')
         except:
             deliver_late = []

@@ -11,7 +11,7 @@ data_regex = "\(([0-9]+)\).*sched_count: ([0-9.]+), mean_sched_dur: ([0-9.]+) s,
 
 stages = ["txn_validation", "txn_dissemination", "pacemaker", "block_management", "block_dissemination", "decide", "commit"]
 
-def parse_sched_stats(log_dir):
+def parse_sched_stats(log_dir, line_ranges = {}):
     log_files = os.listdir(log_dir)
 
     metrics = []
@@ -21,9 +21,23 @@ def parse_sched_stats(log_dir):
             continue
 
         log_file = os.path.join(log_dir, file_name)
+
+        (start_line, end_line) = line_ranges.get(log_file, (None, None))
+        print_command = f"cat {log_file}"
+        if start_line is None:
+            pass
+        else:
+            print_command += f" | tail -n +{start_line}"
+
+        if end_line is None:
+            pass
+        else:
+            line_count = end_line if start_line is None else end_line - start_line
+            print_command += f" | head -n {line_count}"
+
         for stage in stages:
             try:
-                raw_metrics = check_output(f"cat {log_file} | grep '{stage}' | grep 'sched_count'", shell=True, encoding="utf-8")
+                raw_metrics = check_output(f"{print_command} | grep '{stage}' | grep 'sched_count'", shell=True, encoding="utf-8")
             except:
                 print(f"skipping stage {stage} for {log_file}...")
                 continue
@@ -42,18 +56,17 @@ def parse_sched_stats(log_dir):
                     nodes_seen.add(node)
 
     df = pd.DataFrame(metrics, columns=["node", "stage", "sched_count", "sched_duration", "poll_count", "poll_duration"])
-    df = df.sort_values(["node", "stage"])
-    # df = df[["sched_duration", "sched_count"]]
-    df_dur = df[["sched_duration", "poll_duration"]]
-    # df_dur = df_dur.groupby(["stage"])
-    df_dur = df_dur.mean()
+    # df = df.sort_values(["node", "stage"])
 
-    df_count = df[["sched_count", "poll_count"]]
-    # df_count = df_count.groupby(["stage"])
-    df_count = df_count.sum()
+    df = df[["sched_duration", "poll_duration", "sched_count", "poll_count"]]
+    df["total_sched"] = df["sched_duration"] * df["sched_count"]
+    df["total_poll"] = df["poll_duration"] * df["poll_count"]
+    df = df.sum()
+    df["sched_dur"] = df["total_sched"] / df["sched_count"]
+    df["poll_dur"] = df["total_poll"] / df["poll_count"]
 
-    return {"sched_dur_ms": df_dur["sched_duration"] * 1000, "poll_dur_ms": df_dur["poll_duration"] * 1000, # to ms
-            "sched_count": int(df_count["sched_count"]), "poll_count": int(df_count["poll_count"])}
+    return {"sched_dur_ms": df["sched_dur"] * 1000, "poll_dur_ms": df["poll_dur"] * 1000, # to ms
+            "sched_count": int(df["sched_count"]), "poll_count": int(df["poll_count"])}
 
 
 if __name__ == "__main__":
