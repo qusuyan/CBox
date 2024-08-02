@@ -44,5 +44,8 @@ interprocess = ["mailbox_client/interprocess"]
 mailbox = {path = "../mailbox"}
 mailbox_client = {path = "../mailbox/mailbox_client"}
 
+# [patch.crates-io]
+# tokio = {path = "../tokio/tokio"}
+
 [profile.release]
 debug = "line-tables-only"

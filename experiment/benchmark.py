@@ -187,6 +187,15 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     stats["sched_dur_ms"] = sched_stats["sched_dur_ms"]
     stats["poll_dur_ms"] = sched_stats["poll_dur_ms"]
 
+    logger.print(
+f'''
+msg delay stats:
+{json.dumps(msg_delay, indent=2)}
+
+sched stats:
+{json.dumps(sched_stats, indent=2)}
+''')
+
     with open(f"./results/{exp_name}/stats.json", "w") as f:
         json.dump(stats, f, indent=2)
 

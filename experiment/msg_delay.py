@@ -7,8 +7,8 @@ import pandas as pd
 import json
 
 file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
-deliver_regex = "mailbox::msg_queue: message get delivered later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
-arrive_regex = "Messenger ([\d]+)->([\d]+): message arrived later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
+deliver_regex = "Worker (\d) \(([\d]+)->([\d]+)\): message get delivered later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
+arrive_regex = "Worker (\d) \(([\d]+)->([\d]+)\): message arrived later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
 msgs_sent_recv_regex = "copycat::peers: \(([\d]+)\) In the last minute: ([\d]+) msgs sent and ([\d]+) msgs recved"
 
 
@@ -74,9 +74,9 @@ def parse_msg_delay(log_dir, line_ranges = {}):
         arrive_late_pattern = [re.search(arrive_regex, line) for line in arrive_late]
         arrive_late_pattern = filter(lambda x: x is not None, arrive_late_pattern)
         arrive_late_parsed = [pattern.groups() for pattern in arrive_late_pattern]
-        for (src, dst, late, unit) in arrive_late_parsed:
+        for (worker, src, dst, late, unit) in arrive_late_parsed:
             late_secs = to_secs(float(late), unit)
-            arrive_late_metrics.append((file_name, src, dst, late_secs))
+            arrive_late_metrics.append((file_name, worker, src, dst, late_secs))
         
         try:
             deliver_late = check_output(f"{print_command} | grep 'message get delivered later than it should'", shell=True, encoding="utf-8")
@@ -87,12 +87,12 @@ def parse_msg_delay(log_dir, line_ranges = {}):
         deliver_late_pattern = [re.search(deliver_regex, line) for line in deliver_late]
         deliver_late_pattern = filter(lambda x: x is not None, deliver_late_pattern)
         deliver_late_parsed = [pattern.groups() for pattern in deliver_late_pattern]
-        for (late, unit) in deliver_late_parsed:
+        for (worker, src, dst, late, unit) in deliver_late_parsed:
             late_secs = to_secs(float(late), unit)
-            deliver_late_metrics.append((file_name, late_secs))
+            deliver_late_metrics.append((file_name, worker, src, dst, late_secs))
 
-    arrive_late_df = pd.DataFrame(arrive_late_metrics, columns=["log", "src", "dst", "late_secs"])
-    deliver_late_df = pd.DataFrame(deliver_late_metrics, columns=["log", "late_secs"])
+    arrive_late_df = pd.DataFrame(arrive_late_metrics, columns=["log", "worker", "src", "dst", "late_secs"])
+    deliver_late_df = pd.DataFrame(deliver_late_metrics, columns=["log", "worker", "src", "dst", "late_secs"])
 
     arrive_late_secs = arrive_late_df[["late_secs"]]
     arrive_late_count = arrive_late_secs.shape[0]
