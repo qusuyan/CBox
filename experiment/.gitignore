@@ -1,4 +1,7 @@
 cluster.toml
-results/
-logs/
+results/*
+logs/*
 __pycache__/
+
+!logs/.gitkeep
+!results/.gitkeep
