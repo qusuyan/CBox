@@ -8,35 +8,34 @@ use crate::protocol::CryptoScheme;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{Duration, Instant};
-use tokio_metrics::TaskMonitor;
 
 use atomic_float::AtomicF64;
-use dashmap::DashSet;
+use tokio_metrics::TaskMonitor;
 
-#[derive(Clone)]
 struct TxnValidation {
-    txns_validated: Arc<DashSet<Hash>>,
+    txn_seen: HashSet<Hash>,
     crypto_scheme: CryptoScheme,
 }
 
 impl TxnValidation {
-    pub fn new(crypto_scheme: CryptoScheme, txns_validated: Arc<DashSet<Hash>>) -> Self {
+    pub fn new(crypto_scheme: CryptoScheme) -> Self {
         Self {
-            txns_validated,
+            txn_seen: HashSet::new(),
             crypto_scheme,
         }
     }
 
     pub async fn validate(
         &mut self,
-        txn_batch: Vec<(NodeId, Arc<Txn>)>,
+        txn_batch: std::collections::vec_deque::Drain<'_, (u64, Arc<Txn>)>,
+        concurrency: usize,
     ) -> Result<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>, CopycatError> {
         let mut correct_txns = vec![];
         let mut verification_time = 0f64;
@@ -46,10 +45,10 @@ impl TxnValidation {
             let hash = &txn_ctx.id;
 
             // ignore duplicates
-            if self.txns_validated.contains(hash) {
+            if self.txn_seen.contains(hash) {
                 continue;
             }
-            self.txns_validated.insert(*hash);
+            self.txn_seen.insert(*hash);
 
             // ignore invalid txns
             let (valid, vtime) = txn.validate(self.crypto_scheme)?;
@@ -61,20 +60,18 @@ impl TxnValidation {
             correct_txns.push((src, (txn, txn_ctx)));
         }
 
+        let concurrent_verify_time = verification_time / concurrency as f64;
         // 1ms
-        if verification_time > 0.001 {
-            tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
+        if concurrent_verify_time > 0.001 {
+            tokio::time::sleep(Duration::from_secs_f64(concurrent_verify_time)).await;
         }
 
         Ok(correct_txns)
     }
 }
 
-fn get_txn_validation(
-    crypto_scheme: CryptoScheme,
-    txns_validated: Arc<DashSet<Hash>>,
-) -> TxnValidation {
-    TxnValidation::new(crypto_scheme, txns_validated)
+fn get_txn_validation(crypto_scheme: CryptoScheme) -> TxnValidation {
+    TxnValidation::new(crypto_scheme)
 }
 
 pub async fn txn_validation_thread(
@@ -84,7 +81,6 @@ pub async fn txn_validation_thread(
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
     validated_txn_send: mpsc::Sender<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
-    txns_validated: Arc<DashSet<Hash>>,
     concurrency: Arc<Semaphore>,
     monitor: TaskMonitor,
 ) {
@@ -95,7 +91,7 @@ pub async fn txn_validation_thread(
     let delay: Arc<AtomicF64> = Arc::new(AtomicF64::new(0f64));
     let mut insert_delay_time = Instant::now() + TXN_BATCH_DELAY_INTERVAL;
 
-    let txn_validation_stage = get_txn_validation(crypto_scheme, txns_validated);
+    let mut txn_validation_stage = get_txn_validation(crypto_scheme);
     let mut txn_buffer = VecDeque::new();
     let mut txn_batch_time = None;
 
@@ -184,43 +180,37 @@ pub async fn txn_validation_thread(
 
             _ = wait_validation_batch(txn_buffer.len(), VALIDATION_BATCH_SIZE, txn_batch_time), if txn_batch_time.is_some() => {
                 // batch validating txns
+                let _permit = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
+
                 let num_txns_to_drain = std::cmp::min(VALIDATION_BATCH_SIZE, txn_buffer.len());
-                let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain).collect();
+                let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain);
+
+                txn_batches_validated += 1;
+                txns_validated += num_txns_to_drain;
+
+                let txns = match txn_validation_stage.validate(txns_to_validate, 1).await {
+                    Ok(txns) => txns,
+                    Err(e) => {
+                        pf_error!(id; "error validating txns: {:?}", e);
+                        continue;
+                    }
+                };
 
                 if txn_buffer.len() == 0 {
                     txn_batch_time = None;
                 }
 
-                txn_batches_validated += 1;
-                txns_validated += num_txns_to_drain;
+                drop(_permit);
 
-                let validated_send = validated_txn_send.clone();
-                let sem = concurrency.clone();
-                let mut txn_validator = txn_validation_stage.clone();
-                tokio::spawn(async move {
-                    let _permit = match sem.acquire().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            return;
-                        }
-                    };
-
-                    let txns = match txn_validator.validate(txns_to_validate).await {
-                        Ok(txns) => txns,
-                        Err(e) => {
-                            pf_error!(id; "error validating txns: {:?}", e);
-                            return;
-                        }
-                    };
-
-
-                    drop(_permit);
-
-                    if let Err(e) = validated_send.send(txns).await {
-                        pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
-                    }
-                });
+                if let Err(e) = validated_txn_send.send(txns).await {
+                    pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
+                }
             }
 
             _ = pass(), if Instant::now() > insert_delay_time => {

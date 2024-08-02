@@ -17,7 +17,6 @@ use crate::context::{BlkCtx, TxnCtx};
 use crate::get_report_timer;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
-use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
 use crate::stage::pass;
@@ -97,7 +96,6 @@ pub async fn block_management_thread(
     mut txn_ready_recv: mpsc::Receiver<Vec<(Arc<Txn>, Arc<TxnCtx>)>>,
     mut pacemaker_recv: mpsc::Receiver<Vec<u8>>,
     new_block_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
-    txns_validated: Arc<DashSet<Hash>>,
     concurrency: Arc<Semaphore>,
     monitor: TaskMonitor,
 ) {
@@ -110,6 +108,8 @@ pub async fn block_management_thread(
     let mut blk_state = CurBlockState::Working;
 
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
+
+    let txns_validated = Arc::new(DashSet::new());
 
     let mut report_timer = get_report_timer();
     let mut self_txns_sent = 0;
@@ -242,7 +242,6 @@ pub async fn block_management_thread(
                         }
                     };
 
-                    let mut blk_valid = true;
                     let mut verification_time = 0f64;
                     for idx in 0..new_block.txns.len() {
                         let txn = &new_block.txns[idx];
@@ -264,8 +263,8 @@ pub async fn block_management_thread(
                             txns_validated.insert(txn_ctx.id);
                         } else {
                             // invalid block
-                            blk_valid = false;
-                            break;
+                            tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
+                            return;
                         }
                     }
 
@@ -273,10 +272,8 @@ pub async fn block_management_thread(
 
                     drop(_permit);
 
-                    if blk_valid {
-                        if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
-                            pf_error!(id; "failed to send blk_context: {:?}", e);
-                        }
+                    if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
+                        pf_error!(id; "failed to send blk_context: {:?}", e);
                     }
                 });
             }
