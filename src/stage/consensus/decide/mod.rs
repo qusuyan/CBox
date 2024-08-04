@@ -111,6 +111,7 @@ pub async fn decision_thread(
                         continue;
                     }
                 };
+
                 let (src, new_tail) = match new_tail {
                     Some(tail) => tail,
                     None => {
@@ -140,6 +141,7 @@ pub async fn decision_thread(
                         continue;
                     }
                 };
+
                 if let Err(e) = commit_ready {
                     pf_error!(id; "waiting for commit ready block failed: {:?}", e);
                     continue;
@@ -176,6 +178,7 @@ pub async fn decision_thread(
                         continue;
                     }
                 };
+
                 let (src, msg) =  match peer_msg {
                     Some(msg) => msg,
                     None => {
@@ -202,6 +205,7 @@ pub async fn decision_thread(
                             continue;
                         }
                     };
+
                     tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
                     delay.store(0f64, Ordering::Relaxed);
                 } else {

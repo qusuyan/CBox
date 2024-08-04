@@ -24,7 +24,7 @@ use crate::utils::{CopycatError, NodeId};
 use async_trait::async_trait;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
@@ -57,7 +57,11 @@ pub async fn block_dissemination_thread(
     id: NodeId,
     config: Config,
     peer_messenger: Arc<PeerMessenger>,
-    mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
+    mut new_block_recv: mpsc::Receiver<(
+        NodeId,
+        Vec<(Arc<Block>, Arc<BlkCtx>)>,
+        OwnedSemaphorePermit,
+    )>,
     block_ready_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     concurrency: Arc<Semaphore>,
     monitor: TaskMonitor,
@@ -72,19 +76,12 @@ pub async fn block_dissemination_thread(
     let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();
 
+    // TODO: avoid possible deadlock on semaphore
     loop {
         tokio::select! {
             new_blk = new_block_recv.recv() => {
                 // for serializing blocks sent
-                let _permit = match concurrency.acquire().await {
-                    Ok(permit) => permit,
-                    Err(e) => {
-                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                        continue;
-                    }
-                };
-
-                let (src, new_tail) = match new_blk {
+                let (src, new_tail, _permit) = match new_blk {
                     Some(blk) => blk,
                     None => {
                         pf_error!(id; "new_block pipe closed unexpectedly");
