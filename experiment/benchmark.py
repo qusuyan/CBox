@@ -162,6 +162,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         df = df.iloc[first_commit:last_record]
         avg_latency = df["Avg Latency (s)"].mean()
         df = df.loc[df["Runtime (s)"] > avg_latency + SETUP_TIME]
+        df = df.iloc[1::]   # skip the first record
         start = int(df.iloc[0]["Runtime (s)"])
         end = int(df.iloc[-1]["Runtime (s)"])
         start_rt = start if start_rt is None else max(start_rt, start)
