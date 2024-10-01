@@ -1,3 +1,9 @@
+mod dummy;
+use dummy::DummyTxnValidation;
+
+mod avalanche;
+use avalanche::AvalancheTxnValidation;
+
 use crate::config::Config;
 use crate::consts::{TXN_BATCH_DELAY_INTERVAL, TXN_BATCH_INTERVAL};
 use crate::context::TxnCtx;
@@ -7,6 +13,8 @@ use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
+
+use async_trait::async_trait;
 
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
@@ -20,61 +28,27 @@ use tokio::time::{Duration, Instant};
 use atomic_float::AtomicF64;
 use tokio_metrics::TaskMonitor;
 
-#[derive(Clone)]
-struct TxnValidation {
-    txn_seen: Arc<DashMap<Hash, bool>>,
-    crypto_scheme: CryptoScheme,
+#[async_trait]
+trait TxnValidation: Send + Sync {
+    async fn validate(
+        &mut self,
+        txn_batch: Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>,
+    ) -> Result<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>, CopycatError>;
 }
 
-impl TxnValidation {
-    pub fn new(crypto_scheme: CryptoScheme, txn_seen: Arc<DashMap<Hash, bool>>) -> Self {
-        Self {
-            txn_seen,
-            crypto_scheme,
+fn get_txn_validation(id: NodeId, config: Config) -> Box<dyn TxnValidation> {
+    match config {
+        Config::Dummy { .. } | Config::ChainReplication { .. } => {
+            Box::new(DummyTxnValidation::new(id))
         }
-    }
-
-    pub async fn validate(
-        &self,
-        txn_batch: Vec<(NodeId, Arc<Txn>)>,
-        concurrency: usize,
-    ) -> Result<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>, CopycatError> {
-        let mut correct_txns = vec![];
-        let mut verification_time = 0f64;
-
-        for (src, txn) in txn_batch.into_iter() {
-            let txn_ctx = Arc::new(TxnCtx::from_txn(&txn)?);
-            let hash = &txn_ctx.id;
-
-            // ignore duplicates
-            if self.txn_seen.contains_key(hash) {
-                continue;
-            }
-            // ignore invalid txns
-            let (valid, vtime) = txn.validate(self.crypto_scheme)?;
-            verification_time += vtime;
-            self.txn_seen.insert(*hash, valid);
-
-            if !valid {
-                continue;
-            }
-
-            correct_txns.push((src, (txn, txn_ctx)));
-        }
-
-        let concurrent_verify_time = verification_time / concurrency as f64;
-        // 1ms
-        if concurrent_verify_time > 0.001 {
-            tokio::time::sleep(Duration::from_secs_f64(concurrent_verify_time)).await;
-        }
-
-        Ok(correct_txns)
+        Config::Bitcoin { .. } => todo!(),
+        Config::Avalanche { config } => Box::new(AvalancheTxnValidation::new(id, config)),
     }
 }
 
 pub async fn txn_validation_thread(
     id: NodeId,
-    _config: Config,
+    config: Config,
     crypto_scheme: CryptoScheme,
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
@@ -90,9 +64,12 @@ pub async fn txn_validation_thread(
     let delay: Arc<AtomicF64> = Arc::new(AtomicF64::new(0f64));
     let mut insert_delay_time = Instant::now() + TXN_BATCH_DELAY_INTERVAL;
 
-    let txn_validation_stage = TxnValidation::new(crypto_scheme, txns_seen);
     let mut txn_buffer = VecDeque::new();
     let mut txn_batch_time = None;
+
+    let (pending_txns_sender, mut pending_txns_recver) = mpsc::channel(0x100000);
+
+    let mut txn_validation = get_txn_validation(id, config);
 
     async fn wait_validation_batch(
         batch_len: usize,
@@ -179,17 +156,14 @@ pub async fn txn_validation_thread(
 
             _ = wait_validation_batch(txn_buffer.len(), VALIDATION_BATCH_SIZE, txn_batch_time), if txn_batch_time.is_some() => {
                 let num_txns_to_drain = std::cmp::min(VALIDATION_BATCH_SIZE, txn_buffer.len());
-                let txns_to_validate = txn_buffer.drain(0..num_txns_to_drain).collect();
+                let txns_to_validate: Vec<_> = txn_buffer.drain(0..num_txns_to_drain).collect();
 
                 if txn_buffer.len() == 0 {
                     txn_batch_time = None;
                 }
 
-                txn_batches_validated += 1;
-                txns_validated += num_txns_to_drain;
-
-                let txn_validator = txn_validation_stage.clone();
-                let txn_sender = validated_txn_send.clone();
+                let txn_seen = txns_seen.clone();
+                let txn_sender = pending_txns_sender.clone();
                 let sem = concurrency.clone();
 
                 tokio::spawn(async move {
@@ -202,20 +176,81 @@ pub async fn txn_validation_thread(
                         }
                     };
 
-                    let txns = match txn_validator.validate(txns_to_validate, 1).await {
-                        Ok(txns) => txns,
-                        Err(e) => {
-                            pf_error!(id; "error validating txns: {:?}", e);
-                            return;
+                    let mut correct_txns = vec![];
+                    let mut verification_time = 0f64;
+
+                    for (src, txn) in txns_to_validate.into_iter() {
+                        let txn_ctx = match TxnCtx::from_txn(&txn) {
+                            Ok(ctx) => Arc::new(ctx),
+                            Err(_) => continue,
+                        };
+                        let hash = &txn_ctx.id;
+
+                        // ignore duplicates
+                        if txn_seen.contains_key(hash) {
+                            continue;
                         }
-                    };
+                        // ignore invalid txns
+                        let (valid, vtime) = match txn.validate(crypto_scheme) {
+                            Ok(validity) => validity,
+                            Err(_) => continue,
+                        };
+                        verification_time += vtime;
+                        txn_seen.insert(*hash, valid);
+
+                        if !valid {
+                            continue;
+                        }
+
+                        correct_txns.push((src, (txn, txn_ctx)));
+                    }
+
+                    // 1ms
+                    if verification_time > 0.001 {
+                        tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
+                    }
 
                     drop(_permit);
 
-                    if let Err(e) = txn_sender.send(txns).await {
-                        pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
+                    if let Err(e) = txn_sender.send(correct_txns).await {
+                        pf_error!(id; "failed to send to pending_txns pipe: {:?}", e);
                     }
                 });
+            }
+
+            txns_with_ctx = pending_txns_recver.recv() => {
+                let txns_with_ctx = match txns_with_ctx {
+                    Some(batch) => batch,
+                    None => {
+                        pf_error!(id; "pending_txns closed");
+                        continue;
+                    }
+                };
+
+                let _permit = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        return;
+                    }
+                };
+
+                let correct_txns = match txn_validation.validate(txns_with_ctx).await {
+                    Ok(txns) => txns,
+                    Err(e) => {
+                        pf_error!(id; "failed to validate txn batch: {:?}", e);
+                        continue;
+                    }
+                };
+
+                drop(_permit);
+
+                txn_batches_validated += 1;
+                txns_validated += correct_txns.len();
+
+                if let Err(e) = validated_txn_send.send(correct_txns).await {
+                    pf_error!(id; "failed to send to validated_txn pipe: {:?}", e);
+                }
             }
 
             _ = pass(), if Instant::now() > insert_delay_time => {
