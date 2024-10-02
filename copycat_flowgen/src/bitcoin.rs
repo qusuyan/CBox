@@ -252,7 +252,7 @@ impl FlowGen for BitcoinFlowGen {
         Ok(())
     }
 
-    fn get_stats(&self) -> Stats {
+    fn get_stats(&mut self) -> Stats {
         let latency = if self.num_completed_txns == 0 {
             0f64
         } else {

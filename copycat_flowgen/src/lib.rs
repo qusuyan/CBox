@@ -34,7 +34,7 @@ pub trait FlowGen {
         txns: Vec<Arc<Txn>>,
         blk_height: u64,
     ) -> Result<(), CopycatError>;
-    fn get_stats(&self) -> Stats;
+    fn get_stats(&mut self) -> Stats;
 }
 
 pub fn get_flow_gen(

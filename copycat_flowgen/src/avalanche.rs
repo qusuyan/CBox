@@ -7,7 +7,7 @@ use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
 use async_trait::async_trait;
 use rand::Rng;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
@@ -35,6 +35,7 @@ pub struct AvalancheFlowGen {
     dag_info: HashMap<NodeId, DagInfo>,
     total_time_sec: f64,
     _notify: Notify,
+    inflight_snapshot: HashSet<Hash>,
 }
 
 impl AvalancheFlowGen {
@@ -91,6 +92,7 @@ impl AvalancheFlowGen {
             total_time_sec: 0.0,
             dag_info: HashMap::new(),
             _notify: Notify::new(),
+            inflight_snapshot: HashSet::new(),
         }
     }
 }
@@ -244,7 +246,7 @@ impl FlowGen for AvalancheFlowGen {
         Ok(())
     }
 
-    fn get_stats(&self) -> Stats {
+    fn get_stats(&mut self) -> Stats {
         let latency = if self.num_completed_txns == 0 {
             0f64
         } else {
@@ -276,6 +278,17 @@ impl FlowGen for AvalancheFlowGen {
         } else {
             acc_commit_confidence / self.dag_info.len() as f64
         };
+
+        if cfg!(debug_assertions) {
+            let inflight_snapshot: HashSet<_> = self.in_flight.keys().cloned().collect();
+            let diff: Vec<_> = self
+                .inflight_snapshot
+                .intersection(&inflight_snapshot)
+                .collect();
+            log::info!("txns still inflight since last report: {:?}", diff);
+            self.inflight_snapshot = inflight_snapshot;
+        }
+
         Stats {
             latency,
             num_committed,

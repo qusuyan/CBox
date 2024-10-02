@@ -48,6 +48,8 @@ pub struct AvalancheBlockManagement {
     blk_quota: usize,
     // for reporting data and debugging
     blk_quota_recved: usize,
+    blk_queries_sent: usize,
+    txns_queried: usize,
 }
 
 impl AvalancheBlockManagement {
@@ -68,6 +70,8 @@ impl AvalancheBlockManagement {
             pending_blks: HashMap::new(),
             blk_quota: 0,
             blk_quota_recved: 0,
+            blk_queries_sent: 0,
+            txns_queried: 0,
         }
     }
 }
@@ -415,6 +419,10 @@ impl BlockManagement for AvalancheBlockManagement {
             while let Some(txn) = pending_frontier.pop() {
                 self.dag_frontier.push_front(txn);
             }
+
+            self.blk_queries_sent += 1;
+            self.txns_queried += blk_missing_deps.len();
+
             let peer_req = PeerReq {
                 proposer,
                 blk_id,
@@ -579,5 +587,9 @@ impl BlockManagement for AvalancheBlockManagement {
 
     fn report(&mut self) {
         pf_info!(self.id; "blk_quota_recved: {}, blk_quota: {}", self.blk_quota_recved, self.blk_quota);
+        pf_info!(self.id; "blk_queries_sent: {}, txns_queried: {}", self.blk_queries_sent, self.txns_queried);
+        self.blk_quota_recved = 0;
+        self.blk_queries_sent = 0;
+        self.txns_queried = 0;
     }
 }
