@@ -24,7 +24,7 @@ pub enum Txn {
 impl Txn {
     pub fn validate(&self, crypto: CryptoScheme) -> Result<(bool, f64), CopycatError> {
         match self {
-            Txn::Dummy { .. } => Ok((true, 0f64)),
+            Txn::Dummy { txn } => txn.validate(crypto),
             Txn::Bitcoin { txn } => txn.validate(crypto),
             Txn::Avalanche { txn } => txn.validate(crypto),
         }

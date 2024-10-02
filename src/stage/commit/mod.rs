@@ -1,9 +1,12 @@
 mod dummy;
 use dummy::DummyCommit;
+use tokio_metrics::TaskMonitor;
 
 use crate::config::Config;
+use crate::consts::COMMIT_DELAY_INTERVAL;
 use crate::protocol::transaction::Txn;
-use crate::{CopycatError, NodeId};
+use crate::stage::pass;
+use crate::{get_report_timer, CopycatError, NodeId};
 
 use async_trait::async_trait;
 
@@ -15,11 +18,11 @@ use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 
 #[async_trait]
-pub trait Commit: Sync + Send {
+trait Commit: Sync + Send {
     async fn commit(&self, block: &Vec<Arc<Txn>>) -> Result<(), CopycatError>;
 }
 
-pub fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
+fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
     match config {
         Config::Dummy { .. } => Box::new(DummyCommit::new()),
         Config::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:
@@ -34,21 +37,23 @@ pub async fn commit_thread(
     mut commit_recv: mpsc::Receiver<(u64, Vec<Arc<Txn>>)>,
     executed_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
     concurrency: Arc<Semaphore>,
+    monitor: TaskMonitor,
 ) {
     pf_info!(id; "commit stage starting...");
 
     let delay = Arc::new(AtomicF64::new(0f64));
-    let insert_delay_interval = Duration::from_millis(50);
-    let mut insert_delay_time = Instant::now() + insert_delay_interval;
+    let mut insert_delay_time = Instant::now() + COMMIT_DELAY_INTERVAL;
 
     let commit_stage = get_commit(id, config);
 
-    let mut report_timeout = Instant::now() + Duration::from_secs(60);
+    let mut report_timer = get_report_timer();
+    let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
             new_batch = commit_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                // commit transaction
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -71,16 +76,20 @@ pub async fn commit_thread(
                     continue;
                 }
 
+                drop(_permit);
+
                 if let Err(e) = executed_send.send((height, txn_batch)).await {
                     pf_error!(id; "failed to send committed txns: {:?}", e);
                     continue;
                 }
             },
-            _ = tokio::time::sleep_until(insert_delay_time) => {
+
+            _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
-                    let _ = match concurrency.acquire().await {
+                    // doing aggregated compute cost
+                    let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -89,12 +98,23 @@ pub async fn commit_thread(
                     };
                     tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
                     delay.store(0f64, Ordering::Relaxed);
+                } else {
+                    tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + insert_delay_interval;
+                insert_delay_time = Instant::now() + COMMIT_DELAY_INTERVAL;
             }
-            _ = tokio::time::sleep_until(report_timeout) => {
-                // reset report time
-                report_timeout = Instant::now() + Duration::from_secs(60);
+
+            report_val = report_timer.changed() => {
+                if let Err(e) = report_val {
+                    pf_error!(id; "Waiting for report timeout failed: {}", e);
+                }
+
+                let metrics = task_interval.next().unwrap();
+                let sched_count = metrics.total_scheduled_count;
+                let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();
+                let poll_count = metrics.total_poll_count;
+                let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
+                pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
         }
     }

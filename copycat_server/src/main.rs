@@ -1,5 +1,5 @@
-use copycat::get_neighbors;
 use copycat::log::colored_level;
+use copycat::{get_neighbors, get_report_timer, start_report_timer};
 use copycat::{ChainType, Config, CryptoScheme, Node};
 use copycat_flowgen::get_flow_gen;
 
@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::io::Write;
 
 use tokio::runtime::Builder;
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 
 use clap::Parser;
 
@@ -25,6 +25,10 @@ struct CliArgs {
     /// Number of executor threads
     #[arg(long, short = 't', default_value = "8")]
     num_threads: usize,
+
+    /// Number of mailbox workers
+    #[clap(long, short = 'w', default_value_t = 8)]
+    num_mailbox_workers: usize,
 
     /// Cryptography scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
@@ -127,14 +131,25 @@ pub fn main() {
         .expect("write stats failed");
 
     runtime.block_on(async {
-        let (node, mut executed): (Node, _) =
-            match Node::init(id, args.chain, args.crypto, args.crypto, config, !args.disable_txn_dissem, neighbors, None).await {
-                Ok(node) => node,
-                Err(e) => {
-                    log::error!("failed to start node: {e:?}");
-                    return;
-                }
-            };
+        let (node, mut executed): (Node, _) = match Node::init(
+            id,
+            args.num_mailbox_workers,
+            args.chain,
+            args.crypto,
+            args.crypto,
+            config,
+            !args.disable_txn_dissem,
+            neighbors,
+            None,
+        )
+        .await
+        {
+            Ok(node) => node,
+            Err(e) => {
+                log::error!("failed to start node: {e:?}");
+                return;
+            }
+        };
 
         let mut flow_gen = get_flow_gen(
             id,
@@ -153,8 +168,8 @@ pub fn main() {
             }
         }
         log::info!("setup txns sent");
-        let start_time = Instant::now();
-        let mut report_time = start_time + Duration::from_secs(60);
+        let mut report_timer = get_report_timer();
+        start_report_timer().await;
         // wait when setup txns are propogated over the network
         tokio::time::sleep(Duration::from_secs(10)).await;
         log::info!("flow generation starts");
@@ -198,9 +213,13 @@ pub fn main() {
                     }
                 }
 
-                _ = tokio::time::sleep_until(report_time) => {
+                report_val = report_timer.changed() => {
+                    if let Err(e) = report_val {
+                        log::error!("Waiting for report timeout failed: {}", e);
+                    }
+
                     let stats = flow_gen.get_stats();
-                    let tput = stats.num_committed as f64 / (report_time - start_time).as_secs_f64();
+                    let tput = stats.num_committed as f64 / report_timer.borrow().as_secs_f64();
                     log::info!(
                         "Throughput: {} txn/s, Average Latency: {} s",
                         tput,
@@ -209,7 +228,6 @@ pub fn main() {
                     stats_file
                         .write_fmt(format_args!("{},{}\n", tput, stats.latency))
                         .expect("write stats failed");
-                    report_time += Duration::from_secs(60);
                 }
             }
         }

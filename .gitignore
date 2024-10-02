@@ -1,6 +1,7 @@
 /target/
 /tmp/
 *.json
+.idea
 
 # perf data
 *.data
@@ -10,3 +11,5 @@
 *.html
 *.pl
 *.data.old
+*.png
+.DS_Store

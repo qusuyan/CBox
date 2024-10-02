@@ -369,6 +369,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-metrics",
  "toml",
 ]
 
@@ -404,6 +405,7 @@ name = "copycat_mailbox"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "copycat",
  "env_logger",
  "log",
  "mailbox",
@@ -1805,6 +1807,29 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.55",
+]
+
+[[package]]
+name = "tokio-metrics"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eace09241d62c98b7eeb1107d4c5c64ca3bd7da92e8c218c153ab3a78f9be112"
+dependencies = [
+ "futures-util",
+ "pin-project-lite",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "267ac89e0bec6e691e5813911606935d77c476ff49024f98abcea3e7b15e37af"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]

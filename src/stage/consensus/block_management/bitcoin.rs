@@ -1,4 +1,4 @@
-use super::BlockManagement;
+use super::{BlockManagement, CurBlockState};
 use crate::config::BitcoinConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
@@ -215,7 +215,7 @@ impl BlockManagement for BitcoinBlockManagement {
         Ok(true)
     }
 
-    async fn prepare_new_block(&mut self) -> Result<bool, CopycatError> {
+    async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError> {
         let start_time = Instant::now();
 
         let mut modified = false;
@@ -225,12 +225,12 @@ impl BlockManagement for BitcoinBlockManagement {
         let blk_full = loop {
             // block is large enough
             if self.block_size > 0x100000 {
-                break true;
+                break CurBlockState::Full;
             }
 
             let txn_hash = match self.pending_txns.pop_front() {
                 Some(hash) => hash,
-                None => break false, // no pending transactions
+                None => break CurBlockState::EmptyMempool, // no pending transactions
             };
 
             // check for double spending
@@ -723,12 +723,7 @@ impl BlockManagement for BitcoinBlockManagement {
         if let Some((blk, _, _)) = self.block_pool.get(&blk_id) {
             // return the req if the block is known
             self.peer_messenger
-                .send(
-                    peer,
-                    MsgType::NewBlock {
-                        blk: blk.as_ref().clone(),
-                    },
-                )
+                .send(peer, MsgType::NewBlock { blk: blk.clone() })
                 .await?
         } else {
             // otherwise gossip to other neighbors

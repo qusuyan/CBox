@@ -31,10 +31,10 @@ impl SamplingBlockDissemination {
 
 #[async_trait]
 impl BlockDissemination for SamplingBlockDissemination {
-    async fn disseminate(&self, src: NodeId, blk: &Block) -> Result<(), CopycatError> {
+    async fn disseminate(&self, src: NodeId, blk: Arc<Block>) -> Result<(), CopycatError> {
         if src == self.me {
             self.peer_messenger
-                .sample(MsgType::NewBlock { blk: blk.clone() }, self.neighbors)
+                .sample(MsgType::NewBlock { blk }, self.neighbors)
                 .await?;
         }
         Ok(())

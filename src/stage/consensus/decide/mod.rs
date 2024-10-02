@@ -9,13 +9,16 @@ use avalanche::AvalancheDecision;
 
 mod chain_replication;
 use chain_replication::ChainReplicationDecision;
+use tokio_metrics::TaskMonitor;
 
+use crate::consts::DECIDE_DELAY_INTERVAL;
 use crate::context::BlkCtx;
 use crate::protocol::block::Block;
+use crate::stage::pass;
 use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
-use crate::CryptoScheme;
 use crate::{config::Config, peers::PeerMessenger};
+use crate::{get_report_timer, CryptoScheme};
 
 use async_trait::async_trait;
 
@@ -27,7 +30,7 @@ use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 
 #[async_trait]
-pub trait Decision: Sync + Send {
+trait Decision: Sync + Send {
     async fn new_tail(
         &mut self,
         src: NodeId,
@@ -74,12 +77,12 @@ pub async fn decision_thread(
     commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
     concurrency: Arc<Semaphore>,
+    monitor: TaskMonitor,
 ) {
     pf_info!(id; "decision stage starting...");
 
     let delay = Arc::new(AtomicF64::new(0f64));
-    let insert_delay_interval = Duration::from_millis(50);
-    let mut insert_delay_time = Instant::now() + insert_delay_interval;
+    let mut insert_delay_time = Instant::now() + DECIDE_DELAY_INTERVAL;
 
     let mut decision_stage = get_decision(
         id,
@@ -90,22 +93,25 @@ pub async fn decision_thread(
         delay.clone(),
     );
 
-    let mut report_timeout = Instant::now() + Duration::from_secs(60);
+    let mut report_timer = get_report_timer();
     let mut blks_sent = 0;
     let mut txns_sent = 0;
     let mut blks_recv = 0;
     let mut txns_recv = 0;
+    let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
             new_tail = block_ready_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                // handling new block to be voted
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
                         continue;
                     }
                 };
+
                 let (src, new_tail) = match new_tail {
                     Some(tail) => tail,
                     None => {
@@ -125,14 +131,17 @@ pub async fn decision_thread(
                     continue;
                 }
             },
+
             commit_ready = decision_stage.commit_ready() => {
-                let _ = match concurrency.acquire().await {
+                // getting blocks to be committed and perform clean up as needed
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
                         continue;
                     }
                 };
+
                 if let Err(e) = commit_ready {
                     pf_error!(id; "waiting for commit ready block failed: {:?}", e);
                     continue;
@@ -151,20 +160,25 @@ pub async fn decision_thread(
                 blks_sent += 1;
                 txns_sent += block_to_commit.len();
 
+                drop(_permit);
+
                 if let Err(e) = commit_send.send((height, block_to_commit)).await {
                     pf_error!(id; "failed to send to commit pipe: {:?}", e);
                     continue;
                 }
 
             },
+
             peer_msg = peer_consensus_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                // handling vote messages from peers
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
                         continue;
                     }
                 };
+
                 let (src, msg) =  match peer_msg {
                     Some(msg) => msg,
                     None => {
@@ -178,23 +192,32 @@ pub async fn decision_thread(
                     continue;
                 }
             },
-            _ = tokio::time::sleep_until(insert_delay_time) => {
+
+            _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
-                    let _ = match concurrency.acquire().await {
+                    // doing skipped compute cost
+                    let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
                             continue;
                         }
                     };
+
                     tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
                     delay.store(0f64, Ordering::Relaxed);
+                } else {
+                    tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + insert_delay_interval;
+                insert_delay_time = Instant::now() + DECIDE_DELAY_INTERVAL;
             }
-            _ = tokio::time::sleep_until(report_timeout) => {
+
+            report_val = report_timer.changed() => {
+                if let Err(e) = report_val {
+                    pf_error!(id; "Waiting for report timeout failed: {}", e);
+                }
                 // report basic statistics
                 pf_info!(id; "In the last minute: blks_recv: {}, txns_recv: {}, blks_sent: {}, txns_sent: {}", blks_recv, txns_recv, blks_sent, txns_sent);
                 decision_stage.report();
@@ -202,8 +225,13 @@ pub async fn decision_thread(
                 txns_recv = 0;
                 blks_sent = 0;
                 txns_sent = 0;
-                // reset report time
-                report_timeout = Instant::now() + Duration::from_secs(60);
+
+                let metrics = task_interval.next().unwrap();
+                let sched_count = metrics.total_scheduled_count;
+                let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();
+                let poll_count = metrics.total_poll_count;
+                let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
+                pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
         }
     }

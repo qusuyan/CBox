@@ -3,3 +3,5 @@ pub mod consensus;
 pub mod pacemaker;
 pub mod txn_dissemination;
 pub mod txn_validation;
+
+async fn pass() {}

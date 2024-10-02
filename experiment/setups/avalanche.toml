@@ -1,0 +1,19 @@
+[experiment]
+num_iterations = 1
+
+[parameters]
+chain-type = "avalanche"
+cluster-threads = 32
+config = "blk_len=40+max_inflight_blk=20"
+conn_multiply = 1
+crypto = "dummy-ecdsa"
+exp-time = 310
+mailbox_workers = 8
+max-inflight-txns = 4000
+network-delay = 30
+num-accounts = 160
+num-clients = 10
+num-machines = 1
+num-nodes = [20, 40, 60, 80, 100, 120]
+per-node-concurrency = 2
+txn-span = 5

@@ -3,7 +3,11 @@ use dummy::DummyPacemaker;
 
 mod avalanche;
 use avalanche::AvalanchePacemaker;
+use tokio_metrics::TaskMonitor;
 
+use crate::consts::PACE_DELAY_INTERVAL;
+use crate::get_report_timer;
+use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
 use crate::{config::Config, peers::PeerMessenger};
 
@@ -17,7 +21,7 @@ use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 
 #[async_trait]
-pub trait Pacemaker: Sync + Send {
+trait Pacemaker: Sync + Send {
     async fn wait_to_propose(&self);
     async fn get_propose_msg(&mut self) -> Result<Vec<u8>, CopycatError>;
     async fn handle_feedback(&mut self, feedback: Vec<u8>) -> Result<(), CopycatError>;
@@ -45,21 +49,23 @@ pub async fn pacemaker_thread(
     mut pmaker_feedback_recv: mpsc::Receiver<Vec<u8>>,
     should_propose_send: mpsc::Sender<Vec<u8>>,
     concurrency: Arc<Semaphore>,
+    monitor: TaskMonitor,
 ) {
     pf_info!(id; "pacemaker starting...");
 
     let delay = Arc::new(AtomicF64::new(0f64));
-    let insert_delay_interval = Duration::from_millis(50);
-    let mut insert_delay_time = Instant::now() + insert_delay_interval;
+    let mut insert_delay_time = Instant::now() + PACE_DELAY_INTERVAL;
 
     let mut pmaker = get_pacemaker(id, config, peer_messenger);
 
-    let mut report_timeout = Instant::now() + Duration::from_secs(60);
+    let mut report_timer = get_report_timer();
+    let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
             _ = pmaker.wait_to_propose() => {
-                let _ = match concurrency.acquire().await {
+                // pmaker logic to decide if current node can propose new block
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -77,13 +83,17 @@ pub async fn pacemaker_thread(
 
                 pf_debug!(id; "sending propose msg {:?}", propose_msg);
 
+                drop(_permit);
+
                 if let Err(e) = should_propose_send.send(propose_msg).await {
                     pf_error!(id; "failed to send to should_propose pipe: {:?}", e);
                     continue;
                 }
             },
+
             feedback_msg = pmaker_feedback_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                // getting feedback from decide stage and update internal states
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -105,8 +115,10 @@ pub async fn pacemaker_thread(
                     continue;
                 }
             }
+
             peer_msg = peer_pmaker_recv.recv() => {
-                let _ = match concurrency.acquire().await {
+                // handle pmaker messages from peers
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -128,11 +140,13 @@ pub async fn pacemaker_thread(
                     continue;
                 }
             }
-            _ = tokio::time::sleep_until(insert_delay_time) => {
+
+            _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
-                    let _ = match concurrency.acquire().await {
+                    // doing skipped compute cost
+                    let _permit = match concurrency.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -141,20 +155,23 @@ pub async fn pacemaker_thread(
                     };
                     tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
                     delay.store(0f64, Ordering::Relaxed);
+                } else {
+                    tokio::task::yield_now().await;
                 }
-                insert_delay_time = Instant::now() + insert_delay_interval;
+                insert_delay_time = Instant::now() + PACE_DELAY_INTERVAL;
             }
-            _ = tokio::time::sleep_until(report_timeout) => {
-                // reset report time
-                report_timeout = Instant::now() + Duration::from_secs(60);
-            }
-        }
 
-        // insert delay as appropriate
-        let sleep_time = delay.load(Ordering::Relaxed);
-        if sleep_time > 0.05 {
-            tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-            delay.store(0f64, Ordering::Relaxed);
+            report_val = report_timer.changed() => {
+                if let Err(e) = report_val {
+                    pf_error!(id; "Waiting for report timeout failed: {}", e);
+                }
+                let metrics = task_interval.next().unwrap();
+                let sched_count = metrics.total_scheduled_count;
+                let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();
+                let poll_count = metrics.total_poll_count;
+                let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
+                pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
+            }
         }
     }
 }

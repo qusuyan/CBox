@@ -51,12 +51,12 @@ impl LinearBlockDissemination {
 
 #[async_trait]
 impl BlockDissemination for LinearBlockDissemination {
-    async fn disseminate(&self, src: NodeId, blk: &Block) -> Result<(), CopycatError> {
+    async fn disseminate(&self, src: NodeId, blk: Arc<Block>) -> Result<(), CopycatError> {
         assert!(src == self.prev);
         match self.next {
             Some(next) => {
                 self.peer_messenger
-                    .send(next, MsgType::NewBlock { blk: blk.clone() })
+                    .send(next, MsgType::NewBlock { blk })
                     .await?
             }
             None => {}
