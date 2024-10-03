@@ -6,13 +6,13 @@ use crate::{CopycatError, NodeId, TxnCtx};
 
 use async_trait::async_trait;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub struct AvalancheTxnValidation {
     _id: NodeId,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
-    pending_txns: HashMap<Hash, HashMap<Hash, ((Arc<Txn>, Arc<TxnCtx>), HashSet<NodeId>)>>,
+    pending_txns: HashMap<Hash, HashMap<Hash, ((Arc<Txn>, Arc<TxnCtx>), NodeId)>>,
 }
 
 impl AvalancheTxnValidation {
@@ -26,7 +26,7 @@ impl AvalancheTxnValidation {
 
     fn validate_inner(
         &mut self,
-        srcs: HashSet<NodeId>,
+        src: NodeId,
         txn: Arc<Txn>,
         ctx: Arc<TxnCtx>,
     ) -> Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))> {
@@ -54,10 +54,9 @@ impl AvalancheTxnValidation {
                         .pending_txns
                         .entry(missing_dep)
                         .or_insert(HashMap::new());
-                    let dissem_instances = siblings.entry(txn_hash);
-                    dissem_instances
-                        .and_modify(|(_, set)| set.extend(srcs.iter()))
-                        .or_insert(((txn.clone(), ctx.clone()), srcs.clone()));
+                    siblings
+                        .entry(txn_hash)
+                        .or_insert(((txn.clone(), ctx.clone()), src));
                 }
 
                 // Do not enqueue the txn yet since it might be invalid
@@ -70,10 +69,7 @@ impl AvalancheTxnValidation {
 
         // add txn to returned vector
         let mut valid_offsprings = vec![];
-        valid_offsprings.extend(
-            srcs.into_iter()
-                .map(|src| (src, (txn.clone(), ctx.clone()))),
-        );
+        valid_offsprings.push((src, (txn.clone(), ctx.clone())));
 
         // add any pending childrens
         if let Some(children) = self.pending_txns.remove(&txn_hash) {
@@ -173,9 +169,7 @@ impl TxnValidation for AvalancheTxnValidation {
         let mut correct_txns = vec![];
 
         for (src, (txn, ctx)) in txn_batch {
-            let mut srcs = HashSet::new();
-            srcs.insert(src);
-            correct_txns.extend(self.validate_inner(srcs, txn, ctx));
+            correct_txns.extend(self.validate_inner(src, txn, ctx));
         }
 
         Ok(correct_txns)
