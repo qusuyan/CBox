@@ -25,13 +25,13 @@ use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
-use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{Duration, Instant};
 
 use dashmap::DashMap;
 
 use atomic_float::AtomicF64;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 enum CurBlockState {
@@ -96,9 +96,8 @@ pub async fn block_management_thread(
     peer_messenger: Arc<PeerMessenger>,
     mut txn_ready_recv: mpsc::Receiver<Vec<(Arc<Txn>, Arc<TxnCtx>)>>,
     mut pacemaker_recv: mpsc::Receiver<Vec<u8>>,
-    new_block_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>, OwnedSemaphorePermit)>,
+    new_block_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     concurrency: Arc<Semaphore>,
-    max_concurrency: usize,
     txns_seen: Arc<DashMap<Hash, bool>>,
     monitor: TaskMonitor,
 ) {
@@ -112,8 +111,6 @@ pub async fn block_management_thread(
 
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
 
-    let permits_on_hold = Arc::new(AtomicU64::new(0));
-
     let mut report_timer = get_report_timer();
     let mut self_txns_sent = 0;
     let mut self_blks_sent = 0;
@@ -126,7 +123,7 @@ pub async fn block_management_thread(
 
     loop {
         tokio::select! {
-            new_txn = txn_ready_recv.recv(), if permits_on_hold.load(Ordering::Relaxed) < max_concurrency as u64 => {
+            new_txn = txn_ready_recv.recv() => {
                 // check if transaction is valid based on log history
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
@@ -158,7 +155,7 @@ pub async fn block_management_thread(
                 }
             },
 
-            _ = pass(), if matches!(blk_state, CurBlockState::Working) && permits_on_hold.load(Ordering::Relaxed) < max_concurrency as u64 => {
+            _ = pass(), if matches!(blk_state, CurBlockState::Working) => {
                 // preparing for the block to be proposed
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
@@ -174,14 +171,14 @@ pub async fn block_management_thread(
                 }
             },
 
-            wait_result = block_management_stage.wait_to_propose(), if permits_on_hold.load(Ordering::Relaxed) < max_concurrency as u64  => {
+            wait_result = block_management_stage.wait_to_propose() => {
                 if let Err(e) = wait_result {
                     pf_error!(id; "wait to propose failed: {:?}", e);
                     continue;
                 }
 
                 // packing prepared data into an actual block
-                let _permit = match concurrency.clone().acquire_owned().await {
+                let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -197,18 +194,20 @@ pub async fn block_management_thread(
                     }
                 };
 
+                drop(_permit);
+
                 pf_debug!(id; "proposing new block {:?}", new_blk);
                 blk_state = CurBlockState::Working;
                 self_blks_sent += 1;
                 self_txns_sent += new_blk.txns.len();
 
-                if let Err(e) = new_block_send.send((id, vec![(new_blk, new_blk_ctx)], _permit)).await {
+                if let Err(e) = new_block_send.send((id, vec![(new_blk, new_blk_ctx)])).await {
                     pf_error!(id; "failed to send to new_block pipe: {:?}", e);
                     continue;
                 }
             },
 
-            peer_blk = peer_blk_recv.recv(), if permits_on_hold.load(Ordering::Relaxed) < max_concurrency as u64  => {
+            peer_blk = peer_blk_recv.recv() => {
                 let (src, new_block) = match peer_blk {
                     Some((src, blk)) => {
                         if src == id {
@@ -224,19 +223,17 @@ pub async fn block_management_thread(
                 };
 
                 pf_debug!(id; "got from {} new block {:?}, computing its context...", src, new_block);
-                permits_on_hold.fetch_add(1, Ordering::Relaxed);
 
                 let blk_sender = pending_blk_sender.clone();
                 let txns_validated = txns_seen.clone();
                 let sem = concurrency.clone();
-                let sem_permits = permits_on_hold.clone();
+
                 tokio::task::spawn(async move {
                     // validating txns in peer blocks
-                    let _permit = match sem.acquire_owned().await {
+                    let _permit = match sem.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            sem_permits.fetch_sub(1, Ordering::Relaxed);
                             return;
                         }
                     };
@@ -245,7 +242,6 @@ pub async fn block_management_thread(
                         Ok(ctx) => ctx,
                         Err(e) => {
                             pf_error!(id; "failed to compute blk_context: {:?}", e);
-                            sem_permits.fetch_sub(1, Ordering::Relaxed);
                             return;
                         }
                     };
@@ -281,11 +277,12 @@ pub async fn block_management_thread(
                     tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
 
                     if !blk_valid {
-                        sem_permits.fetch_sub(1, Ordering::Relaxed);
                         return;
                     }
 
-                    if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx), _permit)).await {
+                    drop(_permit);
+
+                    if let Err(e) = blk_sender.send((src, new_block, Arc::new(blk_ctx))).await {
                         pf_error!(id; "failed to send blk_context: {:?}", e);
                     }
                 });
@@ -293,7 +290,7 @@ pub async fn block_management_thread(
 
             peer_blk_with_ctx = pending_blk_recver.recv() => {
                 // validating new block from peer
-                let (src, peer_blk, peer_blk_ctx, _permit) = match peer_blk_with_ctx {
+                let (src, peer_blk, peer_blk_ctx) = match peer_blk_with_ctx {
                     Some(data) => data,
                     None => {
                         pf_error!(id; "pending_blk pipe closed unexpectedly");
@@ -301,7 +298,14 @@ pub async fn block_management_thread(
                     }
                 };
 
-                permits_on_hold.fetch_sub(1, Ordering::Relaxed);
+                let _permit = match concurrency.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        return;
+                    }
+                };
+
                 peer_blks_recv += 1;
                 peer_txns_recv += peer_blk.txns.len();
                 pf_debug!(id; "Validating block ({:?}, {:?})", peer_blk, peer_blk_ctx);
@@ -324,13 +328,13 @@ pub async fn block_management_thread(
                     peer_txns_sent += blk.txns.len();
                 }
 
-                if let Err(e) = new_block_send.send((src, new_tail, _permit)).await {
+                if let Err(e) = new_block_send.send((src, new_tail)).await {
                     pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
                     continue;
                 }
             }
 
-            pmaker_msg = pacemaker_recv.recv(), if permits_on_hold.load(Ordering::Relaxed) < max_concurrency as u64  => {
+            pmaker_msg = pacemaker_recv.recv() => {
                 // handling pmaker message
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
@@ -355,7 +359,7 @@ pub async fn block_management_thread(
                 }
             }
 
-            req = peer_blk_req_recv.recv(), if permits_on_hold.load(Ordering::Relaxed) < max_concurrency as u64 => {
+            req = peer_blk_req_recv.recv() => {
                 // handling block requests from peers
                 let _permit = match concurrency.acquire().await {
                     Ok(permit) => permit,
@@ -380,7 +384,7 @@ pub async fn block_management_thread(
                 }
             }
 
-            _ = pass(), if Instant::now() > insert_delay_time && permits_on_hold.load(Ordering::Relaxed) < max_concurrency as u64 => {
+            _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {

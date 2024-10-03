@@ -129,7 +129,6 @@ impl Node {
                 pacemaker_recv,
                 new_block_send,
                 concurrency.clone(),
-                max_concurrency,
                 txns_seen.clone(),
                 _block_management_monitor.clone(),
             ),
