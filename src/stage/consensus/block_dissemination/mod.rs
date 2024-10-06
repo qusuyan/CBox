@@ -11,15 +11,14 @@ mod linear;
 use linear::LinearBlockDissemination;
 use tokio_metrics::TaskMonitor;
 
-use crate::config::Config;
 use crate::consts::BLK_DISS_DELAY_INTERVAL;
 use crate::context::BlkCtx;
-use crate::get_report_timer;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::DissemPattern;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
+use crate::{get_report_timer, ChainConfig};
 
 use async_trait::async_trait;
 
@@ -37,17 +36,19 @@ trait BlockDissemination: Sync + Send {
 
 fn get_block_dissemination(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockDissemination> {
     match config.get_blk_dissem() {
         DissemPattern::Broadcast => Box::new(BroadcastBlockDissemination::new(id, peer_messenger)),
         DissemPattern::Gossip => Box::new(GossipBlockDissemination::new(id, peer_messenger)),
-        DissemPattern::Sample => {
-            Box::new(SamplingBlockDissemination::new(id, peer_messenger, config))
-        }
-        DissemPattern::Linear => {
-            Box::new(LinearBlockDissemination::new(id, peer_messenger, config))
+        DissemPattern::Sample { sample_size } => Box::new(SamplingBlockDissemination::new(
+            id,
+            peer_messenger,
+            sample_size,
+        )),
+        DissemPattern::Linear { order } => {
+            Box::new(LinearBlockDissemination::new(id, peer_messenger, order))
         }
         DissemPattern::Passthrough => unimplemented!(),
     }
@@ -55,7 +56,7 @@ fn get_block_dissemination(
 
 pub async fn block_dissemination_thread(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     block_ready_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,

@@ -1,5 +1,5 @@
 use super::{BlockManagement, CurBlockState};
-use crate::config::AvalancheConfig;
+use crate::config::AvalancheCorrectConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
@@ -53,7 +53,11 @@ pub struct AvalancheBlockManagement {
 }
 
 impl AvalancheBlockManagement {
-    pub fn new(id: NodeId, config: AvalancheConfig, peer_messenger: Arc<PeerMessenger>) -> Self {
+    pub fn new(
+        id: NodeId,
+        config: AvalancheCorrectConfig,
+        peer_messenger: Arc<PeerMessenger>,
+    ) -> Self {
         let proposal_timeout = Duration::from_secs_f64(config.proposal_timeout_secs);
         Self {
             id,

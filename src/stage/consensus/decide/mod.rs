@@ -5,7 +5,6 @@ mod bitcoin;
 use bitcoin::BitcoinDecision;
 
 mod avalanche;
-use avalanche::AvalancheDecision;
 
 mod chain_replication;
 use chain_replication::ChainReplicationDecision;
@@ -17,7 +16,7 @@ use crate::protocol::block::Block;
 use crate::stage::pass;
 use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
-use crate::{config::Config, peers::PeerMessenger};
+use crate::{config::ChainConfig, peers::PeerMessenger};
 use crate::{get_report_timer, CryptoScheme};
 
 use async_trait::async_trait;
@@ -45,23 +44,23 @@ trait Decision: Sync + Send {
 fn get_decision(
     id: NodeId,
     crypto_scheme: CryptoScheme,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
     delay: Arc<AtomicF64>,
 ) -> Box<dyn Decision> {
     match config {
-        Config::Dummy { .. } => Box::new(DummyDecision::new()),
-        Config::Bitcoin { config } => Box::new(BitcoinDecision::new(id, config)),
-        Config::Avalanche { config } => Box::new(AvalancheDecision::new(
+        ChainConfig::Dummy { .. } => Box::new(DummyDecision::new()),
+        ChainConfig::Bitcoin { config } => Box::new(BitcoinDecision::new(id, config)),
+        ChainConfig::Avalanche { config } => avalanche::new(
             id,
             crypto_scheme,
             config,
             peer_messenger,
             pmaker_feedback_send,
             delay,
-        )),
-        Config::ChainReplication { .. } => {
+        ),
+        ChainConfig::ChainReplication { .. } => {
             Box::new(ChainReplicationDecision::new(id, config, peer_messenger))
         }
     }
@@ -70,7 +69,7 @@ fn get_decision(
 pub async fn decision_thread(
     id: NodeId,
     crypto_scheme: CryptoScheme,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     mut peer_consensus_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,

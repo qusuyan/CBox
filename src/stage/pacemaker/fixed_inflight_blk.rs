@@ -1,27 +1,26 @@
 use super::Pacemaker;
-use crate::config::AvalancheConfig;
 use crate::utils::CopycatError;
 use crate::NodeId;
 
 use async_trait::async_trait;
 use tokio::sync::Notify;
 
-pub struct AvalanchePacemaker {
+pub struct FixedInflightBlkPaceMaker {
     quota: usize,
     _notify: Notify,
 }
 
-impl AvalanchePacemaker {
-    pub fn new(config: AvalancheConfig) -> Self {
+impl FixedInflightBlkPaceMaker {
+    pub fn new(max_inflight_blk: usize) -> Self {
         Self {
-            quota: config.max_inflight_blk,
+            quota: max_inflight_blk,
             _notify: Notify::new(),
         }
     }
 }
 
 #[async_trait]
-impl Pacemaker for AvalanchePacemaker {
+impl Pacemaker for FixedInflightBlkPaceMaker {
     async fn wait_to_propose(&self) {
         if self.quota == 0 {
             self._notify.notified().await;

@@ -1,9 +1,9 @@
 use mailbox::Mailbox;
 
 use copycat::log::colored_level;
-use copycat::{get_report_timer, get_timer_interval, start_report_timer, Node};
+use copycat::{get_report_timer, get_timer_interval, parse_config_file, start_report_timer, Node};
 use copycat::{fully_connected_topology, get_topology};
-use copycat::{ChainType, Config, CryptoScheme};
+use copycat::{ChainType, CryptoScheme};
 use copycat::protocol::MsgType;
 use copycat_flowgen::get_flow_gen;
 
@@ -34,6 +34,10 @@ struct CliArgs {
     #[clap(long, short = 'n')]
     network_config: String,
 
+    /// Path to the config file that contains the configuration of all nodes
+    #[arg(long)]
+    config: String,
+
     /// Number of threads
     #[clap(long, short = 't', default_value_t = 8)]
     num_threads: u64,
@@ -41,10 +45,6 @@ struct CliArgs {
     /// Number of mailbox workers
     #[clap(long, short = 'w', default_value_t = 8)]
     num_mailbox_workers: usize,
-
-    /// Max allowed per node concurrency
-    #[clap(long, short = 'r')]
-    per_node_concurrency: Option<usize>,
 
     /// Number of concurrent TCP streams between each pair of peers
     #[clap(long, short = 'o', default_value_t = 1)]
@@ -77,10 +77,6 @@ struct CliArgs {
     /// Number of nodes receiving a transaction, 0 means sending to all nodes
     #[arg(long, short = 's', default_value_t = 1)]
     txn_span: usize,
-
-    /// Blockchain specific configuration string in TOML format
-    #[arg(long, default_value_t = String::from(""))]
-    config: String,
 
     /// Network topology
     #[arg(long, default_value_t = String::from(""))]
@@ -159,7 +155,7 @@ fn main() {
     };
     let local_nodes = machine_list[&id].node_list.clone();
 
-    let nodes = machine_list
+    let nodes: HashSet<u64> = machine_list
         .iter()
         .flat_map(|(_, mailbox::config::Machine { addr: _, node_list })| node_list.clone())
         .collect();
@@ -188,21 +184,12 @@ fn main() {
     };
     log::info!("topology: {topology:?}");
 
-    let mut node_config = if args.config.is_empty() {
-        Config::from_str(args.chain, None).unwrap()
-    } else {
-        args.config = args.config.replace('+', "\n");
-        match Config::from_str(args.chain, Some(&args.config)) {
-            Ok(config) => config,
-            Err(e) => {
-                log::warn!("Invalid config string ({e:?}), fall back to default");
-                Config::from_str(args.chain, None).unwrap()
-            }
-        }
+    let mut node_config_map = parse_config_file(&args.config, args.chain).unwrap();
+    for id in local_nodes.iter() {
+        let node_config = node_config_map.get_mut(id).unwrap();
+        node_config.validate(topology.get(id).unwrap(), &nodes);
     };
-    
-    node_config.validate(&topology);
-    log::info!("Node config: {:?}", node_config);
+    log::info!("Node configs: {:?}", node_config_map);
 
     // get flow generation metrics
     let txn_span = args.txn_span;
@@ -271,16 +258,17 @@ fn main() {
             //     .thread_name(format!("copycat-node-{node_id}-thread"))
             //     .build()
             //     .expect("Creating new runtime failed");
+            let node_config = node_config_map.remove(&node_id).unwrap();
             let result = Node::init(
                 node_id,
                 args.num_mailbox_workers,
                 args.chain,
                 txn_crypto,
                 p2p_crypto,
-                node_config.clone(),
+                node_config.chain_config,
                 !args.disable_txn_dissem,
                 topology.remove(&node_id).unwrap_or(HashSet::new()),
-                args.per_node_concurrency,
+                node_config.max_concurrency,
             ).await;
             let (node, mut executed): (Node, _) = match result {
                 Ok(node) => node,

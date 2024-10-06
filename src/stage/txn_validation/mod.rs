@@ -2,9 +2,8 @@ mod dummy;
 use dummy::DummyTxnValidation;
 
 mod avalanche;
-use avalanche::AvalancheTxnValidation;
 
-use crate::config::Config;
+use crate::config::ChainConfig;
 use crate::consts::{TXN_BATCH_DELAY_INTERVAL, TXN_BATCH_INTERVAL};
 use crate::context::TxnCtx;
 use crate::get_report_timer;
@@ -36,19 +35,19 @@ trait TxnValidation: Send + Sync {
     ) -> Result<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>, CopycatError>;
 }
 
-fn get_txn_validation(id: NodeId, config: Config) -> Box<dyn TxnValidation> {
+fn get_txn_validation(id: NodeId, config: ChainConfig) -> Box<dyn TxnValidation> {
     match config {
-        Config::Dummy { .. } | Config::ChainReplication { .. } => {
+        ChainConfig::Dummy { .. } | ChainConfig::ChainReplication { .. } => {
             Box::new(DummyTxnValidation::new(id))
         }
-        Config::Bitcoin { .. } => todo!(),
-        Config::Avalanche { config } => Box::new(AvalancheTxnValidation::new(id, config)),
+        ChainConfig::Bitcoin { .. } => todo!(),
+        ChainConfig::Avalanche { config } => avalanche::new(id, config),
     }
 }
 
 pub async fn txn_validation_thread(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     crypto_scheme: CryptoScheme,
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,

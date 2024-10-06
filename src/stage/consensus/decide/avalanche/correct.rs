@@ -1,38 +1,30 @@
-use super::Decision;
-use crate::config::AvalancheConfig;
+use super::{Decision, VoteMsg};
+use crate::config::AvalancheCorrectConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::{Hash, PrivKey, PubKey, Signature};
+use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::MsgType;
 use crate::transaction::{AvalancheTxn, Txn};
-use crate::utils::CopycatError;
-use crate::{CryptoScheme, NodeId};
+use crate::{CopycatError, CryptoScheme, NodeId};
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
+
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
 
 use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
 
 struct ConflictSet {
     pub has_conflicts: bool,
     pub pref: Hash,
     pub count: u64,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct VoteMsg {
-    pub round: (NodeId, u64),
-    pub votes: Vec<bool>,
-    pub signature: Signature,
 }
 
 struct DagNode {
@@ -77,7 +69,7 @@ impl AvalancheDecision {
     pub fn new(
         id: NodeId,
         crypto_scheme: CryptoScheme,
-        config: AvalancheConfig,
+        config: AvalancheCorrectConfig,
         peer_messenger: Arc<PeerMessenger>,
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
         delay: Arc<AtomicF64>,
@@ -565,7 +557,7 @@ impl Decision for AvalancheDecision {
                     MsgType::ConsensusMsg {
                         msg: bincode::serialize(&vote_msg)?,
                     },
-                    Duration::from_secs_f64(delay),
+                    Duration::from_secs_f64(delay + stime),
                 )
                 .await?;
         }

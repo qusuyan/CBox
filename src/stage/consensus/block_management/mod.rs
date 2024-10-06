@@ -5,13 +5,12 @@ mod bitcoin;
 use bitcoin::BitcoinBlockManagement;
 
 mod avalanche;
-use avalanche::AvalancheBlockManagement;
 
 mod chain_replication;
 use chain_replication::ChainReplicationBlockManagement;
 use tokio_metrics::TaskMonitor;
 
-use crate::config::Config;
+use crate::config::ChainConfig;
 use crate::consts::BLK_MNG_DELAY_INTERVAL;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::get_report_timer;
@@ -69,18 +68,16 @@ trait BlockManagement: Sync + Send {
 
 fn get_blk_creation(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
     match config {
-        Config::Dummy { .. } => Box::new(DummyBlockManagement::new()),
-        Config::Bitcoin { config } => {
+        ChainConfig::Dummy { .. } => Box::new(DummyBlockManagement::new()),
+        ChainConfig::Bitcoin { config } => {
             Box::new(BitcoinBlockManagement::new(id, config, peer_messenger))
         }
-        Config::Avalanche { config } => {
-            Box::new(AvalancheBlockManagement::new(id, config, peer_messenger))
-        }
-        Config::ChainReplication { config } => {
+        ChainConfig::Avalanche { config } => avalanche::new(id, config, peer_messenger),
+        ChainConfig::ChainReplication { config } => {
             Box::new(ChainReplicationBlockManagement::new(id, config))
         }
     }
@@ -88,7 +85,7 @@ fn get_blk_creation(
 
 pub async fn block_management_thread(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     crypto_scheme: CryptoScheme,
     mut peer_blk_recv: mpsc::Receiver<(NodeId, Arc<Block>)>,
     mut peer_blk_req_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,

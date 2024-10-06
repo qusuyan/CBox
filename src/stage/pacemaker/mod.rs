@@ -1,15 +1,16 @@
 mod dummy;
 use dummy::DummyPacemaker;
 
-mod avalanche;
-use avalanche::AvalanchePacemaker;
+mod fixed_inflight_blk;
+use fixed_inflight_blk::FixedInflightBlkPaceMaker;
 use tokio_metrics::TaskMonitor;
 
+use crate::config::AvalancheConfig;
 use crate::consts::PACE_DELAY_INTERVAL;
 use crate::get_report_timer;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
-use crate::{config::Config, peers::PeerMessenger};
+use crate::{config::ChainConfig, peers::PeerMessenger};
 
 use async_trait::async_trait;
 
@@ -30,20 +31,25 @@ trait Pacemaker: Sync + Send {
 
 fn get_pacemaker(
     _id: NodeId,
-    config: Config,
-    peer_messenger: Arc<PeerMessenger>,
+    config: ChainConfig,
+    _peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn Pacemaker> {
     match config {
-        Config::Dummy { .. } => Box::new(DummyPacemaker::new()),
-        Config::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO
-        Config::Avalanche { config } => Box::new(AvalanchePacemaker::new(config)),
-        Config::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,
+        ChainConfig::Dummy { .. } => Box::new(DummyPacemaker::new()),
+        ChainConfig::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO
+        ChainConfig::Avalanche { config } => match config {
+            AvalancheConfig::Correct { config } => {
+                Box::new(FixedInflightBlkPaceMaker::new(config.max_inflight_blk))
+            }
+            AvalancheConfig::VoteNo { .. } => Box::new(DummyPacemaker::new()),
+        },
+        ChainConfig::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,
     }
 }
 
 pub async fn pacemaker_thread(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut pmaker_feedback_recv: mpsc::Receiver<Vec<u8>>,

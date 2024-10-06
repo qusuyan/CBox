@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::config::Config;
+use crate::config::ChainConfig;
 use crate::peers::PeerMessenger;
 use crate::protocol::transaction::Txn;
 use crate::protocol::{ChainType, CryptoScheme};
@@ -41,7 +41,7 @@ impl Node {
         chain_type: ChainType,
         txn_crpyto: CryptoScheme,
         p2p_crypto: CryptoScheme,
-        config: Config,
+        config: ChainConfig,
         dissem_txns: bool,
         neighbors: HashSet<NodeId>,
         max_concurrency: Option<usize>,

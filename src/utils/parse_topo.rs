@@ -48,7 +48,7 @@ pub fn get_topology(
 
 pub fn fully_connected_topology(
     local_nodes: &Vec<NodeId>,
-    all_nodes: &Vec<NodeId>,
+    all_nodes: &HashSet<NodeId>,
 ) -> HashMap<NodeId, HashSet<NodeId>> {
     let mut neighbor_map = HashMap::new();
     for node in local_nodes {

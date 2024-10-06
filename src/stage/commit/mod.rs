@@ -2,7 +2,7 @@ mod dummy;
 use dummy::DummyCommit;
 use tokio_metrics::TaskMonitor;
 
-use crate::config::Config;
+use crate::config::ChainConfig;
 use crate::consts::COMMIT_DELAY_INTERVAL;
 use crate::protocol::transaction::Txn;
 use crate::stage::pass;
@@ -22,18 +22,18 @@ trait Commit: Sync + Send {
     async fn commit(&self, block: &Vec<Arc<Txn>>) -> Result<(), CopycatError>;
 }
 
-fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
+fn get_commit(_id: NodeId, config: ChainConfig) -> Box<dyn Commit> {
     match config {
-        Config::Dummy { .. } => Box::new(DummyCommit::new()),
-        Config::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:
-        Config::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
-        Config::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:
+        ChainConfig::Dummy { .. } => Box::new(DummyCommit::new()),
+        ChainConfig::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:
+        ChainConfig::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
+        ChainConfig::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:
     }
 }
 
 pub async fn commit_thread(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     mut commit_recv: mpsc::Receiver<(u64, Vec<Arc<Txn>>)>,
     executed_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
     concurrency: Arc<Semaphore>,
