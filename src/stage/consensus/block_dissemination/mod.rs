@@ -9,7 +9,9 @@ use sampling::SamplingBlockDissemination;
 
 mod linear;
 use linear::LinearBlockDissemination;
-use tokio_metrics::TaskMonitor;
+
+mod passthrough;
+use passthrough::PassthroughBlockDissemination;
 
 use crate::consts::BLK_DISS_DELAY_INTERVAL;
 use crate::context::BlkCtx;
@@ -22,12 +24,13 @@ use crate::{get_report_timer, ChainConfig};
 
 use async_trait::async_trait;
 
-use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
-use tokio::time::{Duration, Instant};
-
 use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
+use tokio::sync::{mpsc, Semaphore};
+use tokio::time::{Duration, Instant};
+use tokio_metrics::TaskMonitor;
 
 #[async_trait]
 trait BlockDissemination: Sync + Send {
@@ -50,7 +53,9 @@ fn get_block_dissemination(
         DissemPattern::Linear { order } => {
             Box::new(LinearBlockDissemination::new(id, peer_messenger, order))
         }
-        DissemPattern::Passthrough => unimplemented!(),
+        DissemPattern::Passthrough => {
+            Box::new(PassthroughBlockDissemination::new(id, peer_messenger))
+        }
     }
 }
 

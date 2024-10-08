@@ -88,7 +88,8 @@ impl Decision for AvalancheVoteNoDecision {
                 Duration::from_secs_f64(delay + stime),
             )
             .await?;
-        todo!()
+
+        Ok(())
     }
 
     async fn commit_ready(&self) -> Result<(), CopycatError> {
