@@ -356,6 +356,7 @@ dependencies = [
  "bincode",
  "clap",
  "dashmap",
+ "default_fields",
  "env_logger",
  "get-size",
  "k256",
@@ -512,6 +513,16 @@ dependencies = [
  "lock_api",
  "once_cell",
  "parking_lot_core",
+]
+
+[[package]]
+name = "default_fields"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "342dbe39aeb7f6367bb114e78ea780113c1daa9264ec45bad0d6a5e7f3dfd8f9"
+dependencies = [
+ "quote",
+ "syn 2.0.55",
 ]
 
 [[package]]
@@ -1197,9 +1208,9 @@ dependencies = [
 
 [[package]]
 name = "paste"
-version = "1.0.14"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
+checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pin-project"

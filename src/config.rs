@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 
+use default_fields::DefaultFields;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -22,9 +23,11 @@ pub struct NodeConfig {
     pub max_concurrency: Option<usize>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
 pub struct DummyConfig {
+    #[serde(default = "DummyConfig::get_default_txn_dissem")]
     pub txn_dissem: DissemPattern,
+    #[serde(default = "DummyConfig::get_default_blk_dissem")]
     pub blk_dissem: DissemPattern,
 }
 
@@ -37,12 +40,17 @@ impl Default for DummyConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
 pub struct BitcoinConfig {
+    #[serde(default = "BitcoinConfig::get_default_difficulty")]
     pub difficulty: u8,
+    #[serde(default = "BitcoinConfig::get_default_compute_power")]
     pub compute_power: f64,
+    #[serde(default = "BitcoinConfig::get_default_commit_depth")]
     pub commit_depth: u8,
+    #[serde(default = "BitcoinConfig::get_default_txn_dissem")]
     pub txn_dissem: DissemPattern,
+    #[serde(default = "BitcoinConfig::get_default_blk_dissem")]
     pub blk_dissem: DissemPattern,
 }
 
@@ -64,15 +72,23 @@ pub enum AvalancheConfig {
     VoteNo { config: AvalancheVoteNoConfig },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
 pub struct AvalancheCorrectConfig {
+    #[serde(default = "AvalancheCorrectConfig::get_default_blk_len")]
     pub blk_len: usize,
+    #[serde(default = "AvalancheCorrectConfig::get_default_k")]
     pub k: usize,
+    #[serde(default = "AvalancheCorrectConfig::get_default_alpha")]
     pub alpha: f64,
+    #[serde(default = "AvalancheCorrectConfig::get_default_beta1")]
     pub beta1: u64,
+    #[serde(default = "AvalancheCorrectConfig::get_default_beta2")]
     pub beta2: u64,
+    #[serde(default = "AvalancheCorrectConfig::get_default_proposal_timeout_secs")]
     pub proposal_timeout_secs: f64,
+    #[serde(default = "AvalancheCorrectConfig::get_default_max_inflight_blk")]
     pub max_inflight_blk: usize,
+    #[serde(default = "AvalancheCorrectConfig::get_default_txn_dissem")]
     pub txn_dissem: DissemPattern,
 }
 
@@ -95,9 +111,11 @@ impl Default for AvalancheCorrectConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AvalancheVoteNoConfig {}
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
 pub struct ChainReplicationConfig {
+    #[serde(default = "ChainReplicationConfig::get_default_order")]
     pub order: Vec<NodeId>,
+    #[serde(default = "ChainReplicationConfig::get_default_blk_size")]
     pub blk_size: usize,
 }
 
@@ -211,25 +229,27 @@ pub fn parse_config_file(
 
     let mut config_map = HashMap::new();
     for config_item in config_json {
+        println!(":?",);
+        let config = match chain_type {
+            ChainType::Dummy => ChainConfig::Dummy {
+                config: serde_json::from_value(config_item.config.clone())?,
+            },
+            ChainType::Bitcoin => ChainConfig::Bitcoin {
+                config: serde_json::from_value(config_item.config.clone())?,
+            },
+            ChainType::Avalanche => ChainConfig::Avalanche {
+                config: serde_json::from_value(config_item.config.clone())?,
+            },
+            ChainType::ChainReplication => ChainConfig::ChainReplication {
+                config: serde_json::from_value(config_item.config.clone())?,
+            },
+        };
+        println!("{:?}", config);
         for node in config_item.nodes {
-            let config = match chain_type {
-                ChainType::Dummy => ChainConfig::Dummy {
-                    config: serde_json::from_value(config_item.config.clone())?,
-                },
-                ChainType::Bitcoin => ChainConfig::Bitcoin {
-                    config: serde_json::from_value(config_item.config.clone())?,
-                },
-                ChainType::Avalanche => ChainConfig::Avalanche {
-                    config: serde_json::from_value(config_item.config.clone())?,
-                },
-                ChainType::ChainReplication => ChainConfig::ChainReplication {
-                    config: serde_json::from_value(config_item.config.clone())?,
-                },
-            };
             config_map.insert(
                 node,
                 NodeConfig {
-                    chain_config: config,
+                    chain_config: config.clone(),
                     max_concurrency: config_item.max_concurrency,
                 },
             );

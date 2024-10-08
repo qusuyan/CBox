@@ -7,19 +7,13 @@ BUILDTYPE=$1
 MACHINE_ID=$2
 LOCAL_ID=$3
 THREADS=$4
-CHAIN_TYPE=$5
-ACCOUNTS=$6
-MAX_INFLIGHT=$7
-FREQUENCY=$8
-DISSEM=$9
-DISABLE_TXN_DISSEM=${10}
-CONFIG=${11}
-
-if [[ $CONFIG == "" ]]; then
-    CONFIG_ARG=""
-else
-    CONFIG_ARG="--config ${CONFIG}"
-fi
+MAILBOX_WORKERS=$5
+CHAIN_TYPE=$6
+CRYPTO=$7
+ACCOUNTS=$8
+MAX_INFLIGHT=$9
+FREQUENCY=${10}
+DISABLE_TXN_DISSEM=${11}
 
 if [[ $DISABLE_TXN_DISSEM == "false" ]]; then
     DISABLE_TXN_DISSEM=""
@@ -27,7 +21,7 @@ else
     DISABLE_TXN_DISSEM="--disable-txn-dissem"
 fi
 
-ID=$(( ($MACHINE_ID << 12) + $LOCAL_ID ))
-./blockchain_copycat/target/${BUILDTYPE}/copycat_server -i ${ID} -t ${THREADS} \
-    -c ${CHAIN_TYPE} ${CONFIG_ARG} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} \
-    --topology bench_topo.json -n ${DISSEM} ${DISABLE_TXN_DISSEM}
+ID=$((($MACHINE_ID << 12) + $LOCAL_ID))
+./blockchain_copycat/target/${BUILDTYPE}/copycat_server -i ${ID} -t ${THREADS} -w ${MAILBOX_WORKERS} \
+    -c ${CHAIN_TYPE} -p ${CRYPTO} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} \
+    --topology bench_topo.json -n ${DISSEM} ${DISABLE_TXN_DISSEM} --config bench_validators.json

@@ -4,7 +4,6 @@ import json, time, sys, signal, os
 from datetime import datetime
 
 import pandas as pd
-import math
 
 from dist_make import Cluster, Configuration, Experiment
 from dist_make.logging import MetaLogger
@@ -14,6 +13,7 @@ from gen_topo import gen_topo
 from msg_delay import parse_msg_delay
 from sched_stats import parse_sched_stats
 from get_log_lines import get_log_lines
+from gen_validator_config import gen_validator_configs
 
 ENGINE = "home-runner"
 SETUP_TIME = 10
@@ -86,16 +86,24 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     with open("bench_network.json", "w") as f:
         json.dump(network_config, f)
 
-    # generate random network topology
     full_node_list = [node for tup in zip(*nodes) for node in tup]
+
+    # generate random network topology
     edges = gen_topo(full_node_list, params["topo-degree"], params["topo-skewness"])
     with open("bench_topo.json", "w") as f:
         json.dump(edges, f)
+
+    # generate validator configs
+    validator_configs = gen_validator_configs(full_node_list, params["num-faulty"], params["faulty-type"], 
+                                              params["correct-config"], params["faulty-config"], params["per-node-concurrency"])
+    with open("bench_validators.json") as f:
+        json.dump(validator_configs, f)
 
     for addr in addrs: 
         cluster.copy_to(addr, "bench_machines.json", f'{cluster.workdir}/bench_machines.json')
         cluster.copy_to(addr, "bench_network.json", f'{cluster.workdir}/bench_network.json')
         cluster.copy_to(addr, "bench_topo.json", f'{cluster.workdir}/bench_topo.json')
+        cluster.copy_to(addr, "bench_validators.json", f'{cluster.workdir}/bench_validators.json')
 
     # compute 
     num_flow_gen = params["num-machines"]
@@ -107,29 +115,32 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     clients_remainder = params["num-clients"] % params["num-machines"]
 
     if params["single-process-cluster"]:
-        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox_workers"], params["per-node-concurrency"], params["chain-type"], 
-                    params["crypto"], params["conn_multiply"], clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["txn-span"], 
-                    params["disable-txn-dissem"], params["config"]]
+        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox-workers"], params["chain-type"], 
+                    params["crypto"], params["conn-multiply"], clients_per_machine, clients_remainder, num_accounts, max_inflight, 
+                    frequency, params["txn-span"], params["disable-txn-dissem"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
         # start mailbox
-        mailbox_task = exp_machines.run_background(config, "mailbox", args=[params["build-type"], "@POS", params["mailbox-threads"],], engine=ENGINE, verbose=verbose)
+        mailbox_task = exp_machines.run_background(config, "mailbox", args=[params["build-type"], "@POS", params["mailbox-threads"], 
+                                                                            params["mailbox-workers"], params["conn-multiply"]], 
+                                                   engine=ENGINE, verbose=verbose)
         tasks.append(mailbox_task)
 
         time.sleep(5)
 
         for local_id in range(num_nodes_per_machine):
-            run_args = [params["build-type"], "@POS", local_id, params["node-threads"], params["chain-type"], 
-                        num_accounts, max_inflight, frequency, params["dissem"], params["disable-txn-dissem"], params["config"]]
+            run_args = [params["build-type"], "@POS", local_id, params["node-threads"], params["mailbox-workers"], params["chain-type"], 
+                        params["crypto"], num_accounts, max_inflight, frequency, params["disable-txn-dissem"]]
             node_task = exp_machines.run_background(config, "node", args=run_args, engine=ENGINE, verbose=verbose)
             tasks.append(node_task)
 
         # remaining nodes
-        run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["node-threads"], params["chain-type"], 
-                    num_accounts, max_inflight, frequency, params["dissem"], params["disable-txn-dissem"], params["config"]]
+        run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["node-threads"], params["mailbox-workers"], 
+                    params["chain-type"], params["crypto"], num_accounts, max_inflight, frequency, params["disable-txn-dissem"]]
         if num_nodes_remainder > 0:
-            remainder_task = exp_machines.run_background(config, "node", args=run_args, num_machines = num_nodes_remainder, engine=ENGINE, verbose=verbose)
+            remainder_task = exp_machines.run_background(config, "node", args=run_args, num_machines = num_nodes_remainder, 
+                                                         engine=ENGINE, verbose=verbose)
             tasks.append(remainder_task)
 
     # wait for timeout
@@ -219,15 +230,18 @@ if __name__ == "__main__":
         "max-inflight-txns": 100000,
         "frequency": 0,
         "txn-span": 1,
-        "config": "",
+        "num-faulty": 0,
+        "faulty-type": "",
+        "correct-config": "",
+        "faulty-config": "",
         "topo-degree": 3,
         "topo-skewness": 0.0, # uniform
         "disable-txn-dissem": False,
         "crypto": "dummy",
         "single-process-cluster": True,
-        "conn_multiply": 1,
+        "conn-multiply": 1,
         "per-node-concurrency": 2,
-        "mailbox_workers": 40,
+        "mailbox-workers": 40,
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

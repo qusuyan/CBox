@@ -19,6 +19,7 @@ atomic_float = "1.0.0"
 bincode = "1.3.3"
 clap = {version = "4.4.2", features = ["derive"]}
 dashmap = "5.5.3"
+default_fields = "0.1.0"
 env_logger = "0.10"
 get-size = {version = "0.1.4", features = ["derive"]}
 k256 = {version = "0.13.3", features = ["alloc"]}
@@ -40,12 +41,12 @@ toml = "0.8.8"
 [features]
 interprocess = ["mailbox_client/interprocess"]
 
+[profile.release]
+debug = "line-tables-only"
+
 [patch.'ssh://git@github.com/qusuyan/mailbox.git']
 mailbox = {path = "../mailbox"}
 mailbox_client = {path = "../mailbox/mailbox_client"}
 
 # [patch.crates-io]
 # tokio = {path = "../tokio/tokio"}
-
-[profile.release]
-debug = "line-tables-only"
