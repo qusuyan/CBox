@@ -89,14 +89,15 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     full_node_list = [node for tup in zip(*nodes) for node in tup]
 
     # generate random network topology
-    edges = gen_topo(full_node_list, params["topo-degree"], params["topo-skewness"])
+    degree = len(full_node_list) - 1 if params["topo-degree"] == 0 else params["topo-degree"]
+    edges = gen_topo(full_node_list, degree, params["topo-skewness"])
     with open("bench_topo.json", "w") as f:
         json.dump(edges, f)
 
     # generate validator configs
     validator_configs = gen_validator_configs(full_node_list, params["num-faulty"], params["faulty-type"], 
                                               params["correct-config"], params["faulty-config"], params["per-node-concurrency"])
-    with open("bench_validators.json") as f:
+    with open("bench_validators.json", "w") as f:
         json.dump(validator_configs, f)
 
     for addr in addrs: 
@@ -234,7 +235,7 @@ if __name__ == "__main__":
         "faulty-type": "",
         "correct-config": "",
         "faulty-config": "",
-        "topo-degree": 3,
+        "topo-degree": 0,
         "topo-skewness": 0.0, # uniform
         "disable-txn-dissem": False,
         "crypto": "dummy",

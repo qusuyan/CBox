@@ -7,7 +7,8 @@ from random import sample
 def parse_config(config: str):
     if config == "":
         return {}
-    return dict([pair.split("=") for pair in config.split('+')])
+    pairs = [pair.split("=") for pair in config.split('+')]
+    return dict([(pair[0], eval(pair[1])) for pair in pairs])
 
 
 def gen_node_config(nodes: list[int], node_type: str, config: dict, max_concurrency: int):

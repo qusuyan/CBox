@@ -6,6 +6,9 @@ import math
 import numpy as np
 
 def gen_topo(nodes, degree, skewness):
+    if degree >= len(nodes) - 1:
+        return all_to_all(nodes)
+
     if skewness <= 1:
         rng = lambda max: math.floor(np.random.uniform() * max)
     else:
@@ -70,6 +73,9 @@ def gen_topo(nodes, degree, skewness):
         compartments.append(graph1)
 
     return list(edges)
+
+def all_to_all(nodes):
+    return [(a, b) for a in nodes for b in nodes if a != b]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
