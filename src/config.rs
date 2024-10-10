@@ -69,7 +69,14 @@ impl Default for BitcoinConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum AvalancheConfig {
     Correct { config: AvalancheCorrectConfig },
+    Blizzard { config: AvalancheCorrectConfig },
     VoteNo { config: AvalancheVoteNoConfig },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum AvalancheMode {
+    Orig,
+    Blizzard,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
@@ -90,6 +97,8 @@ pub struct AvalancheCorrectConfig {
     pub max_inflight_blk: usize,
     #[serde(default = "AvalancheCorrectConfig::get_default_txn_dissem")]
     pub txn_dissem: DissemPattern,
+    #[serde(default = "AvalancheCorrectConfig::get_default_mode")]
+    pub mode: AvalancheMode,
 }
 
 // https://arxiv.org/pdf/1906.08936.pdf
@@ -104,6 +113,7 @@ impl Default for AvalancheCorrectConfig {
             proposal_timeout_secs: 5.0,
             max_inflight_blk: 40, // 40 * blk_len ~ 1800 txns / blk (bitcoin)
             txn_dissem: DissemPattern::Broadcast,
+            mode: AvalancheMode::Orig,
         }
     }
 }
@@ -137,6 +147,19 @@ impl NodeConfig {
             ChainConfig::Avalanche { config } => {
                 match config {
                     AvalancheConfig::Correct { config } => {
+                        let max_voters = neighbors.len() + 1; // including self
+                        if config.k > max_voters {
+                            log::warn!("not enough neighbors, setting k to {max_voters} instead");
+                            config.k = max_voters;
+                        }
+                        if config.alpha <= 0.5 {
+                            log::warn!(
+                                "alpha has to be greater than 0.5 to ensure majority vote, setting to 0.51"
+                            );
+                            config.alpha = 0.51
+                        }
+                    }
+                    AvalancheConfig::Blizzard { config } => {
                         let max_voters = neighbors.len() + 1; // including self
                         if config.k > max_voters {
                             log::warn!("not enough neighbors, setting k to {max_voters} instead");
@@ -187,6 +210,7 @@ impl ChainConfig {
             ChainConfig::Bitcoin { config } => config.txn_dissem.clone(),
             ChainConfig::Avalanche { config } => match config {
                 AvalancheConfig::Correct { config } => config.txn_dissem.clone(),
+                AvalancheConfig::Blizzard { config } => config.txn_dissem.clone(),
                 AvalancheConfig::VoteNo { .. } => DissemPattern::Passthrough,
             },
             ChainConfig::ChainReplication { .. } => DissemPattern::Passthrough,
@@ -199,6 +223,9 @@ impl ChainConfig {
             ChainConfig::Bitcoin { config } => config.blk_dissem.clone(),
             ChainConfig::Avalanche { config } => match config {
                 AvalancheConfig::Correct { config } => DissemPattern::Sample {
+                    sample_size: config.k,
+                },
+                AvalancheConfig::Blizzard { config } => DissemPattern::Sample {
                     sample_size: config.k,
                 },
                 AvalancheConfig::VoteNo { .. } => DissemPattern::Passthrough,

@@ -20,6 +20,9 @@ pub fn new(
         AvalancheConfig::Correct { config } => {
             Box::new(AvalancheBlockManagement::new(id, config, peer_messenger))
         }
+        AvalancheConfig::Blizzard { config } => {
+            Box::new(AvalancheBlockManagement::new(id, config, peer_messenger))
+        }
         AvalancheConfig::VoteNo { config } => {
             Box::new(AvalancheVoteNoBlockManagement::new(id, config))
         }

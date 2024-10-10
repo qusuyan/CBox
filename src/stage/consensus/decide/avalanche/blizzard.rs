@@ -24,8 +24,7 @@ use atomic_float::AtomicF64;
 struct ConflictSet {
     pub has_conflicts: bool,
     pub pref: Hash,
-    pub last: Option<Hash>,
-    pub count: u64,
+    pub total_rounds: u64, // equal to the sum of the confidence of all txns in the set
 }
 
 struct DagNode {
@@ -33,7 +32,7 @@ struct DagNode {
     pub children: Vec<Hash>,
 }
 
-pub struct AvalancheDecision {
+pub struct BlizzardDecision {
     id: NodeId,
     crypto_scheme: CryptoScheme,
     k: usize,
@@ -65,7 +64,7 @@ pub struct AvalancheDecision {
     delay: Arc<AtomicF64>,
 }
 
-impl AvalancheDecision {
+impl BlizzardDecision {
     pub fn new(
         id: NodeId,
         crypto_scheme: CryptoScheme,
@@ -256,14 +255,12 @@ impl AvalancheDecision {
                         _ => unreachable!(),
                     };
 
-                    let (has_conflicts, count) = match avax_txn {
-                        AvalancheTxn::Grant { .. } | AvalancheTxn::Noop { .. } => {
-                            (false, confidence_score)
-                        }
+                    let (has_conflicts, conflict_count) = match avax_txn {
+                        AvalancheTxn::Grant { .. } | AvalancheTxn::Noop { .. } => (false, 0),
                         AvalancheTxn::Send {
                             sender, in_utxo, ..
                         } => {
-                            let mut count = confidence_score;
+                            let mut conflict_count = 0;
                             let mut has_conflicts = false;
                             for input_txn in in_utxo {
                                 let utxo = (input_txn.clone(), sender.clone());
@@ -299,23 +296,18 @@ impl AvalancheDecision {
                                     }
                                 }
 
-                                if Some(next_txn) == ct.last {
-                                    ct.count += 1;
-                                } else {
-                                    ct.last = Some(next_txn);
-                                    ct.count = 1;
-                                }
+                                // add one round for this conflict set
+                                ct.total_rounds += 1;
 
                                 // txn conflicts with other txns on one of the input utxos
                                 if ct.has_conflicts {
                                     has_conflicts = true;
                                 }
-                                // let count be the lowest count for safety
-                                if ct.count < count {
-                                    count = ct.count;
-                                }
+                                // conflict_count is the total rounds for this conflict set - my_count
+                                // account for all conflicting txns on any UTXO
+                                conflict_count += ct.total_rounds - confidence_score;
                             }
-                            (has_conflicts, count)
+                            (has_conflicts, conflict_count)
                         }
                         AvalancheTxn::PlaceHolder => unreachable!(),
                     };
@@ -329,13 +321,15 @@ impl AvalancheDecision {
                         }
                     }
 
+                    // my_count is always the confidence score of current txn
                     let is_accepted = if parents_accepted && !has_conflicts {
-                        count > self.beta1 // safe early commitment
+                        confidence_score > self.beta1 + conflict_count // safe early commitment
                     } else {
-                        count > self.beta2 // consecutive counter
+                        confidence_score > self.beta2 + conflict_count // consecutive counter
                     };
 
-                    pf_trace!(self.id; "txn {} - is_accepted: {}, parents accepted: {}, have conflicts: {}, count: {}, pending txns: {}", next_txn, is_accepted, parents_accepted, has_conflicts, count, self.txn_dag.len());
+                    pf_trace!(self.id; "txn {} - is_accepted: {}, parents accepted: {}, have conflicts: {}, confidence_score: {}, conflict_count: {}, pending txns: {}", 
+                                    next_txn, is_accepted, parents_accepted, has_conflicts, confidence_score, conflict_count, self.txn_dag.len());
 
                     if is_accepted {
                         pf_trace!(self.id; "txn {} accepted", next_txn);
@@ -346,41 +340,6 @@ impl AvalancheDecision {
                             AvalancheTxn::Grant { .. } | AvalancheTxn::Send { .. }
                         ) {
                             txns_to_be_committed.push(next_txn);
-                        }
-                    }
-                }
-            } else {
-                // if not enough votes, reset counts to 0
-                pf_trace!(self.id; "vote failed for txn {}", txn_hash);
-                let mut dag_frontier = VecDeque::new();
-                let mut dedup = HashSet::new();
-                dag_frontier.push_back(txn_hash);
-                while let Some(next_txn_hash) = dag_frontier.pop_front() {
-                    if dedup.contains(&next_txn_hash) {
-                        continue;
-                    }
-                    dedup.insert(next_txn_hash);
-                    let dag_node = match self.txn_dag.get(&next_txn_hash) {
-                        Some(node) => node,
-                        None => continue, // the txn is already committed
-                    };
-                    dag_frontier.extend(dag_node.parents.iter());
-
-                    let (txn, _) = self.txn_pool.get(&next_txn_hash).unwrap();
-                    let avax_txn = match txn.as_ref() {
-                        Txn::Avalanche { txn } => txn,
-                        _ => unimplemented!(),
-                    };
-
-                    // only send txns can conflict with others
-                    if let AvalancheTxn::Send {
-                        sender, in_utxo, ..
-                    } = avax_txn
-                    {
-                        for input_txn in in_utxo {
-                            let utxo = (input_txn.clone(), sender.clone());
-                            let ct = self.conflict_sets.get_mut(&utxo).unwrap();
-                            ct.count = 0;
                         }
                     }
                 }
@@ -397,7 +356,7 @@ impl AvalancheDecision {
 }
 
 #[async_trait]
-impl Decision for AvalancheDecision {
+impl Decision for BlizzardDecision {
     async fn new_tail(
         &mut self,
         src: NodeId,
@@ -497,8 +456,7 @@ impl Decision for AvalancheDecision {
                                     e.insert(ConflictSet {
                                         has_conflicts: false,
                                         pref: txn_hash.clone(),
-                                        last: None,
-                                        count: 0,
+                                        total_rounds: 0,
                                     });
                                 }
                                 Entry::Occupied(mut e) => e.get_mut().has_conflicts = true,

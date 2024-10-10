@@ -95,7 +95,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         json.dump(edges, f)
 
     # generate validator configs
-    validator_configs = gen_validator_configs(full_node_list, params["num-faulty"], params["faulty-type"], 
+    validator_configs = gen_validator_configs(full_node_list, params["num-faulty"], params["correct-type"], params["faulty-type"], 
                                               params["correct-config"], params["faulty-config"], params["per-node-concurrency"])
     with open("bench_validators.json", "w") as f:
         json.dump(validator_configs, f)
@@ -232,6 +232,7 @@ if __name__ == "__main__":
         "frequency": 0,
         "txn-span": 1,
         "num-faulty": 0,
+        "correct-type": "Correct",
         "faulty-type": "",
         "correct-config": "",
         "faulty-config": "",

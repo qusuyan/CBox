@@ -11,6 +11,7 @@ use crate::NodeId;
 pub fn new(id: NodeId, config: AvalancheConfig) -> Box<dyn TxnValidation> {
     match config {
         AvalancheConfig::Correct { config } => Box::new(AvalancheTxnValidation::new(id, config)),
+        AvalancheConfig::Blizzard { config } => Box::new(AvalancheTxnValidation::new(id, config)),
         AvalancheConfig::VoteNo { config } => {
             Box::new(AvalancheVoteNoTxnValidation::new(id, config))
         }

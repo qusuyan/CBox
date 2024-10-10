@@ -1,5 +1,8 @@
 mod correct;
+use blizzard::BlizzardDecision;
 use correct::AvalancheDecision;
+
+mod blizzard;
 
 mod vote_no;
 use vote_no::AvalancheVoteNoDecision;
@@ -32,6 +35,14 @@ pub fn new(
 ) -> Box<dyn Decision> {
     match config {
         AvalancheConfig::Correct { config } => Box::new(AvalancheDecision::new(
+            id,
+            crypto_scheme,
+            config,
+            peer_messenger,
+            pmaker_feedback_send,
+            delay,
+        )),
+        AvalancheConfig::Blizzard { config } => Box::new(BlizzardDecision::new(
             id,
             crypto_scheme,
             config,

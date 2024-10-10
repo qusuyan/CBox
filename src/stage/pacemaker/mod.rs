@@ -41,6 +41,9 @@ fn get_pacemaker(
             AvalancheConfig::Correct { config } => {
                 Box::new(FixedInflightBlkPaceMaker::new(config.max_inflight_blk))
             }
+            AvalancheConfig::Blizzard { config } => {
+                Box::new(FixedInflightBlkPaceMaker::new(config.max_inflight_blk))
+            }
             AvalancheConfig::VoteNo { .. } => Box::new(DummyPacemaker::new()),
         },
         ChainConfig::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,

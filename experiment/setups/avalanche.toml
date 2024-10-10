@@ -6,6 +6,7 @@ chain-type = "avalanche"
 cluster-threads = 32
 conn-multiply = 1
 correct-config = "blk_len=40+max_inflight_blk=20"
+correct-type = "Blizzard"
 crypto = "dummy-ecdsa"
 disable-txn-dissem = true
 exp-time = 310
