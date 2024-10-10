@@ -69,7 +69,7 @@ impl Default for BitcoinConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum AvalancheConfig {
     Correct { config: AvalancheCorrectConfig },
-    Blizzard { config: AvalancheCorrectConfig },
+    Blizzard { config: AvalancheCorrectConfig }, //https://arxiv.org/pdf/2401.02811
     VoteNo { config: AvalancheVoteNoConfig },
 }
 
