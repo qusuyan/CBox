@@ -1,0 +1,8 @@
+[cluster]
+username=""
+workdir=""
+prefix=""
+suffix=""
+
+[machine-classes]
+machines = [["10.10.1.1", "10.10.1.1"]]
