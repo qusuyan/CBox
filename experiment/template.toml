@@ -1,8 +1,8 @@
 [cluster]
-username=""
-workdir=""
-prefix=""
-suffix=""
+prefix = ""
+suffix = ""
+username = ""
+workdir = ""
 
 [machine-classes]
 machines = [["10.10.1.1", "10.10.1.1"]]
