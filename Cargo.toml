@@ -26,6 +26,7 @@ k256 = {version = "0.13.3", features = ["alloc"]}
 lazy_static = "1.4.0"
 log = "0.4"
 mailbox_client = {git = "ssh://git@github.com/qusuyan/mailbox.git"}
+# parking_lot = "0.12.3"
 primitive-types = {version = "0.12.2", features = ["serde"]}
 rand = "0.8.5"
 rand_chacha = "0.3.1"

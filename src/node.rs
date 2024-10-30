@@ -13,6 +13,7 @@ use crate::stage::pacemaker::pacemaker_thread;
 use crate::stage::txn_dissemination::txn_dissemination_thread;
 use crate::stage::txn_validation::txn_validation_thread;
 use crate::utils::{CopycatError, NodeId};
+use crate::vcores::VCoreGroup;
 
 use tokio::sync::Semaphore;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -50,7 +51,7 @@ impl Node {
 
         // let state = Arc::new(ChainState::new(chain_type));
         let max_concurrency = max_concurrency.unwrap_or(Semaphore::MAX_PERMITS);
-        let concurrency = Arc::new(Semaphore::new(max_concurrency));
+        let vcores = Arc::new(VCoreGroup::new(max_concurrency));
         let txns_seen = Arc::new(DashMap::new());
 
         let (
@@ -84,7 +85,7 @@ impl Node {
                 req_recv,
                 peer_txn_recv,
                 validated_txn_send,
-                concurrency.clone(),
+                vcores.clone(),
                 txns_seen.clone(),
                 _txn_validation_monitor.clone(),
             )));
@@ -98,7 +99,7 @@ impl Node {
                 peer_messenger.clone(),
                 validated_txn_recv,
                 txn_ready_send,
-                concurrency.clone(),
+                vcores.clone(),
                 _txn_dissemination_monitor.clone(),
             ),
         ));
@@ -111,7 +112,7 @@ impl Node {
             peer_pmaker_recv,
             pmaker_feedback_recv,
             pacemaker_send,
-            concurrency.clone(),
+            vcores.clone(),
             _pacemaker_monitor.clone(),
         )));
 
@@ -128,7 +129,7 @@ impl Node {
                 txn_ready_recv,
                 pacemaker_recv,
                 new_block_send,
-                concurrency.clone(),
+                vcores.clone(),
                 txns_seen.clone(),
                 _block_management_monitor.clone(),
             ),
@@ -142,7 +143,7 @@ impl Node {
                 peer_messenger.clone(),
                 new_block_recv,
                 block_ready_send,
-                concurrency.clone(),
+                vcores.clone(),
                 _block_dissemination_monitor.clone(),
             ),
         ));
@@ -157,7 +158,7 @@ impl Node {
             block_ready_recv,
             commit_send,
             pmaker_feedback_send,
-            concurrency.clone(),
+            vcores.clone(),
             _decision_monitor.clone(),
         )));
 
@@ -167,7 +168,7 @@ impl Node {
             config.clone(),
             commit_recv,
             executed_send,
-            concurrency.clone(),
+            vcores.clone(),
             _commit_monitor.clone(),
         )));
 

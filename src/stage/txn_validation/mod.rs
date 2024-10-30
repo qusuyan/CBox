@@ -1,6 +1,9 @@
 mod dummy;
 use dummy::DummyTxnValidation;
 
+mod bitcoin;
+use bitcoin::BitcoinTxnValidation;
+
 mod avalanche;
 
 use crate::config::ChainConfig;
@@ -12,6 +15,7 @@ use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
+use crate::vcores::VCoreGroup;
 
 use async_trait::async_trait;
 
@@ -20,8 +24,8 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::{mpsc, Semaphore};
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
@@ -40,7 +44,7 @@ fn get_txn_validation(id: NodeId, config: ChainConfig) -> Box<dyn TxnValidation>
         ChainConfig::Dummy { .. } | ChainConfig::ChainReplication { .. } => {
             Box::new(DummyTxnValidation::new(id))
         }
-        ChainConfig::Bitcoin { .. } => todo!(),
+        ChainConfig::Bitcoin { config } => Box::new(BitcoinTxnValidation::new(id, config)),
         ChainConfig::Avalanche { config } => avalanche::new(id, config),
     }
 }
@@ -52,7 +56,7 @@ pub async fn txn_validation_thread(
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
     validated_txn_send: mpsc::Sender<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
-    concurrency: Arc<Semaphore>,
+    core_group: Arc<VCoreGroup>,
     txns_seen: Arc<DashMap<Hash, bool>>,
     monitor: TaskMonitor,
 ) {
@@ -163,7 +167,7 @@ pub async fn txn_validation_thread(
 
                 let txn_seen = txns_seen.clone();
                 let txn_sender = pending_txns_sender.clone();
-                let sem = concurrency.clone();
+                let sem = core_group.clone();
 
                 tokio::spawn(async move {
                     // batch validating txns
@@ -226,7 +230,7 @@ pub async fn txn_validation_thread(
                     }
                 };
 
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -257,7 +261,7 @@ pub async fn txn_validation_thread(
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
                     // doing skipped compute cost
-                    let _permit = match concurrency.acquire().await {
+                    let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

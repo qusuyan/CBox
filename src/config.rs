@@ -44,8 +44,6 @@ impl Default for DummyConfig {
 pub struct BitcoinConfig {
     #[serde(default = "BitcoinConfig::get_default_difficulty")]
     pub difficulty: u8,
-    #[serde(default = "BitcoinConfig::get_default_compute_power")]
-    pub compute_power: f64,
     #[serde(default = "BitcoinConfig::get_default_commit_depth")]
     pub commit_depth: u8,
     #[serde(default = "BitcoinConfig::get_default_txn_dissem")]
@@ -58,7 +56,6 @@ impl Default for BitcoinConfig {
     fn default() -> Self {
         Self {
             difficulty: 25,
-            compute_power: 1.0,
             commit_depth: 6,
             txn_dissem: DissemPattern::Gossip,
             blk_dissem: DissemPattern::Gossip,

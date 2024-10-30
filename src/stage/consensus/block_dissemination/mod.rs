@@ -20,6 +20,7 @@ use crate::protocol::block::Block;
 use crate::protocol::DissemPattern;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
+use crate::vcores::VCoreGroup;
 use crate::{get_report_timer, ChainConfig};
 
 use async_trait::async_trait;
@@ -28,7 +29,7 @@ use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 use tokio_metrics::TaskMonitor;
 
@@ -65,7 +66,7 @@ pub async fn block_dissemination_thread(
     peer_messenger: Arc<PeerMessenger>,
     mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     block_ready_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
-    concurrency: Arc<Semaphore>,
+    core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "block dissemination stage starting...");
@@ -91,7 +92,7 @@ pub async fn block_dissemination_thread(
                     }
                 };
 
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -125,7 +126,7 @@ pub async fn block_dissemination_thread(
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
                     // doing skipped compute cost
-                    let _permit = match concurrency.acquire().await {
+                    let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

@@ -15,12 +15,13 @@ use crate::protocol::transaction::Txn;
 use crate::protocol::DissemPattern;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
+use crate::vcores::VCoreGroup;
 use crate::{get_report_timer, ChainConfig};
 
 use async_trait::async_trait;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
@@ -57,7 +58,7 @@ pub async fn txn_dissemination_thread(
     peer_messenger: Arc<PeerMessenger>,
     mut validated_txn_recv: mpsc::Receiver<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
     txn_ready_send: mpsc::Sender<Vec<(Arc<Txn>, Arc<TxnCtx>)>>,
-    concurrency: Arc<Semaphore>,
+    core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "txn dissemination stage starting...");
@@ -104,7 +105,7 @@ pub async fn txn_dissemination_thread(
 
             _ = wait_send_batch(batch.len(), DISSEM_BATCH_SIZE, txn_dissem_time), if txn_dissem_time.is_some() => {
                 // serializing the list of txns to be disseminated
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -139,7 +140,7 @@ pub async fn txn_dissemination_thread(
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
                     // doing skipped compute cost
-                    let _permit = match concurrency.acquire().await {
+                    let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

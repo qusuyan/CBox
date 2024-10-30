@@ -10,12 +10,13 @@ use crate::consts::PACE_DELAY_INTERVAL;
 use crate::get_report_timer;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
+use crate::vcores::VCoreGroup;
 use crate::{config::ChainConfig, peers::PeerMessenger};
 
 use async_trait::async_trait;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
@@ -57,7 +58,7 @@ pub async fn pacemaker_thread(
     mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut pmaker_feedback_recv: mpsc::Receiver<Vec<u8>>,
     should_propose_send: mpsc::Sender<Vec<u8>>,
-    concurrency: Arc<Semaphore>,
+    core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "pacemaker starting...");
@@ -74,7 +75,7 @@ pub async fn pacemaker_thread(
         tokio::select! {
             _ = pmaker.wait_to_propose() => {
                 // pmaker logic to decide if current node can propose new block
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -102,7 +103,7 @@ pub async fn pacemaker_thread(
 
             feedback_msg = pmaker_feedback_recv.recv() => {
                 // getting feedback from decide stage and update internal states
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -127,7 +128,7 @@ pub async fn pacemaker_thread(
 
             peer_msg = peer_pmaker_recv.recv() => {
                 // handle pmaker messages from peers
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -155,7 +156,7 @@ pub async fn pacemaker_thread(
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
                     // doing skipped compute cost
-                    let _permit = match concurrency.acquire().await {
+                    let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

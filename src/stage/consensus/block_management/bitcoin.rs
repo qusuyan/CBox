@@ -8,6 +8,7 @@ use crate::protocol::crypto::{DummyMerkleTree, Hash, PubKey};
 use crate::protocol::transaction::{BitcoinTxn, Txn};
 use crate::protocol::MsgType;
 use crate::utils::{CopycatError, NodeId};
+use crate::vcores::VCoreGroup;
 
 use async_trait::async_trait;
 use get_size::GetSize;
@@ -25,12 +26,12 @@ const HEADER_HASH_TIME: f64 = 0.0000019;
 
 pub struct BitcoinBlockManagement {
     id: NodeId,
+    core_group: Arc<VCoreGroup>,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     block_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>, u64)>,
     utxo: HashSet<(Hash, PubKey)>,
     chain_tail: Hash,
     difficulty: u8, // hash has at most 256 bits
-    compute_power: f64,
     // fields for constructing new block
     pending_txns: VecDeque<Hash>,
     block_under_construction: Vec<Hash>,
@@ -46,15 +47,20 @@ pub struct BitcoinBlockManagement {
 }
 
 impl BitcoinBlockManagement {
-    pub fn new(id: NodeId, config: BitcoinConfig, peer_messenger: Arc<PeerMessenger>) -> Self {
+    pub fn new(
+        id: NodeId,
+        config: BitcoinConfig,
+        core_group: Arc<VCoreGroup>,
+        peer_messenger: Arc<PeerMessenger>,
+    ) -> Self {
         Self {
             id,
+            core_group,
             txn_pool: HashMap::new(),
             block_pool: HashMap::new(),
             utxo: HashSet::new(),
             chain_tail: U256::zero(),
             difficulty: config.difficulty,
-            compute_power: config.compute_power,
             pending_txns: VecDeque::new(),
             block_under_construction: vec![],
             merkle_root: None,
@@ -106,16 +112,17 @@ impl BitcoinBlockManagement {
         let p = 1f64 - 2f64.powf(-(self.difficulty as f64));
         let u = rand::thread_rng().gen::<f64>();
         let x = u.log(p);
-        let pow_time = Duration::from_secs_f64(HEADER_HASH_TIME * x / self.compute_power); // assume parallelism
+        let pow_time = HEADER_HASH_TIME * x;
         pf_trace!(
             self.id;
             "POW takes {} sec; p: {}, u: {}, x: {}, block size: {}, block len: {}",
-            pow_time.as_secs_f64(),
+            pow_time,
             p, u, x,
             self.block_size,
             self.block_under_construction.len(),
         );
-        pow_time
+        let compute_power = self.core_group.get_unused();
+        Duration::from_secs_f64(pow_time / compute_power)
     }
 
     fn validate_txn(&self, txn: &BitcoinTxn) -> Result<bool, CopycatError> {
@@ -198,15 +205,6 @@ impl BlockManagement for BitcoinBlockManagement {
         let txn_hash = ctx.id;
         // ignore duplicate txns
         if self.txn_pool.contains_key(&txn_hash) {
-            return Ok(false);
-        }
-
-        let bitcoin_txn = match txn.as_ref() {
-            Txn::Bitcoin { txn } => txn,
-            _ => unreachable!(),
-        };
-
-        if !self.validate_txn(bitcoin_txn)? {
             return Ok(false);
         }
 
@@ -418,6 +416,8 @@ impl BlockManagement for BitcoinBlockManagement {
                 if !self.validate_txn(bitcoin_txn)? {
                     return Ok(vec![]);
                 }
+                self.txn_pool
+                    .insert(txn_hash, (txn.clone(), txn_ctx.clone()));
             };
         }
 

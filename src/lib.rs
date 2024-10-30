@@ -8,6 +8,7 @@ mod node;
 mod peers;
 pub mod protocol;
 mod stage;
+mod vcores;
 
 pub use config::{parse_config_file, ChainConfig};
 pub use context::TxnCtx;

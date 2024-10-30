@@ -21,10 +21,11 @@ use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
+use crate::vcores::VCoreGroup;
 
 use async_trait::async_trait;
 
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use dashmap::DashMap;
@@ -69,13 +70,17 @@ trait BlockManagement: Sync + Send {
 fn get_blk_creation(
     id: NodeId,
     config: ChainConfig,
+    core_group: Arc<VCoreGroup>,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
     match config {
         ChainConfig::Dummy { .. } => Box::new(DummyBlockManagement::new()),
-        ChainConfig::Bitcoin { config } => {
-            Box::new(BitcoinBlockManagement::new(id, config, peer_messenger))
-        }
+        ChainConfig::Bitcoin { config } => Box::new(BitcoinBlockManagement::new(
+            id,
+            config,
+            core_group,
+            peer_messenger,
+        )),
         ChainConfig::Avalanche { config } => avalanche::new(id, config, peer_messenger),
         ChainConfig::ChainReplication { config } => {
             Box::new(ChainReplicationBlockManagement::new(id, config))
@@ -94,7 +99,7 @@ pub async fn block_management_thread(
     mut txn_ready_recv: mpsc::Receiver<Vec<(Arc<Txn>, Arc<TxnCtx>)>>,
     mut pacemaker_recv: mpsc::Receiver<Vec<u8>>,
     new_block_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
-    concurrency: Arc<Semaphore>,
+    core_group: Arc<VCoreGroup>,
     txns_seen: Arc<DashMap<Hash, bool>>,
     monitor: TaskMonitor,
 ) {
@@ -103,7 +108,8 @@ pub async fn block_management_thread(
     let delay = Arc::new(AtomicF64::new(0f64));
     let mut insert_delay_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
 
-    let mut block_management_stage = get_blk_creation(id, config, peer_messenger);
+    let mut block_management_stage =
+        get_blk_creation(id, config, core_group.clone(), peer_messenger);
     let mut blk_state = CurBlockState::Working;
 
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
@@ -122,7 +128,7 @@ pub async fn block_management_thread(
         tokio::select! {
             new_txn = txn_ready_recv.recv() => {
                 // check if transaction is valid based on log history
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -154,7 +160,7 @@ pub async fn block_management_thread(
 
             _ = pass(), if matches!(blk_state, CurBlockState::Working) => {
                 // preparing for the block to be proposed
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -175,7 +181,7 @@ pub async fn block_management_thread(
                 }
 
                 // packing prepared data into an actual block
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -223,7 +229,7 @@ pub async fn block_management_thread(
 
                 let blk_sender = pending_blk_sender.clone();
                 let txns_validated = txns_seen.clone();
-                let sem = concurrency.clone();
+                let sem = core_group.clone();
 
                 tokio::task::spawn(async move {
                     // validating txns in peer blocks
@@ -295,7 +301,7 @@ pub async fn block_management_thread(
                     }
                 };
 
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -333,7 +339,7 @@ pub async fn block_management_thread(
 
             pmaker_msg = pacemaker_recv.recv() => {
                 // handling pmaker message
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -358,7 +364,7 @@ pub async fn block_management_thread(
 
             req = peer_blk_req_recv.recv() => {
                 // handling block requests from peers
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -386,7 +392,7 @@ pub async fn block_management_thread(
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
                     // doing skipped compute cost
-                    let _permit = match concurrency.acquire().await {
+                    let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

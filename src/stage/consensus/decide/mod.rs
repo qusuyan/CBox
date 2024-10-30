@@ -16,13 +16,14 @@ use crate::protocol::block::Block;
 use crate::stage::pass;
 use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
+use crate::vcores::VCoreGroup;
 use crate::{config::ChainConfig, peers::PeerMessenger};
 use crate::{get_report_timer, CryptoScheme};
 
 use async_trait::async_trait;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
@@ -75,7 +76,7 @@ pub async fn decision_thread(
     mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
-    concurrency: Arc<Semaphore>,
+    core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "decision stage starting...");
@@ -103,7 +104,7 @@ pub async fn decision_thread(
         tokio::select! {
             new_tail = block_ready_recv.recv() => {
                 // handling new block to be voted
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -133,7 +134,7 @@ pub async fn decision_thread(
 
             commit_ready = decision_stage.commit_ready() => {
                 // getting blocks to be committed and perform clean up as needed
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -170,7 +171,7 @@ pub async fn decision_thread(
 
             peer_msg = peer_consensus_recv.recv() => {
                 // handling vote messages from peers
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -197,7 +198,7 @@ pub async fn decision_thread(
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
                     // doing skipped compute cost
-                    let _permit = match concurrency.acquire().await {
+                    let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
