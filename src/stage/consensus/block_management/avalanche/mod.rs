@@ -1,5 +1,5 @@
-mod correct;
-use correct::AvalancheBlockManagement;
+mod basic;
+use basic::AvalancheBlockManagement;
 
 mod vote_no;
 use vote_no::AvalancheVoteNoBlockManagement;
@@ -17,7 +17,7 @@ pub fn new(
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
     match config {
-        AvalancheConfig::Correct { config } => {
+        AvalancheConfig::Basic { config } => {
             Box::new(AvalancheBlockManagement::new(id, config, peer_messenger))
         }
         AvalancheConfig::Blizzard { config } => {

@@ -65,8 +65,8 @@ impl Default for BitcoinConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum AvalancheConfig {
-    Correct { config: AvalancheCorrectConfig },
-    Blizzard { config: AvalancheCorrectConfig }, //https://arxiv.org/pdf/2401.02811
+    Basic { config: AvalancheBasicConfig },
+    Blizzard { config: AvalancheBasicConfig }, //https://arxiv.org/pdf/2401.02811
     VoteNo { config: AvalancheVoteNoConfig },
 }
 
@@ -77,29 +77,29 @@ pub enum AvalancheMode {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
-pub struct AvalancheCorrectConfig {
-    #[serde(default = "AvalancheCorrectConfig::get_default_blk_len")]
+pub struct AvalancheBasicConfig {
+    #[serde(default = "AvalancheBasicConfig::get_default_blk_len")]
     pub blk_len: usize,
-    #[serde(default = "AvalancheCorrectConfig::get_default_k")]
+    #[serde(default = "AvalancheBasicConfig::get_default_k")]
     pub k: usize,
-    #[serde(default = "AvalancheCorrectConfig::get_default_alpha")]
+    #[serde(default = "AvalancheBasicConfig::get_default_alpha")]
     pub alpha: f64,
-    #[serde(default = "AvalancheCorrectConfig::get_default_beta1")]
+    #[serde(default = "AvalancheBasicConfig::get_default_beta1")]
     pub beta1: u64,
-    #[serde(default = "AvalancheCorrectConfig::get_default_beta2")]
+    #[serde(default = "AvalancheBasicConfig::get_default_beta2")]
     pub beta2: u64,
-    #[serde(default = "AvalancheCorrectConfig::get_default_proposal_timeout_secs")]
+    #[serde(default = "AvalancheBasicConfig::get_default_proposal_timeout_secs")]
     pub proposal_timeout_secs: f64,
-    #[serde(default = "AvalancheCorrectConfig::get_default_max_inflight_blk")]
+    #[serde(default = "AvalancheBasicConfig::get_default_max_inflight_blk")]
     pub max_inflight_blk: usize,
-    #[serde(default = "AvalancheCorrectConfig::get_default_txn_dissem")]
+    #[serde(default = "AvalancheBasicConfig::get_default_txn_dissem")]
     pub txn_dissem: DissemPattern,
-    #[serde(default = "AvalancheCorrectConfig::get_default_mode")]
+    #[serde(default = "AvalancheBasicConfig::get_default_mode")]
     pub mode: AvalancheMode,
 }
 
 // https://arxiv.org/pdf/1906.08936.pdf
-impl Default for AvalancheCorrectConfig {
+impl Default for AvalancheBasicConfig {
     fn default() -> Self {
         Self {
             blk_len: 40,
@@ -143,7 +143,7 @@ impl NodeConfig {
             ChainConfig::Bitcoin { .. } => {}
             ChainConfig::Avalanche { config } => {
                 match config {
-                    AvalancheConfig::Correct { config } => {
+                    AvalancheConfig::Basic { config } => {
                         let max_voters = neighbors.len() + 1; // including self
                         if config.k > max_voters {
                             log::warn!("not enough neighbors, setting k to {max_voters} instead");
@@ -206,7 +206,7 @@ impl ChainConfig {
             ChainConfig::Dummy { config } => config.txn_dissem.clone(),
             ChainConfig::Bitcoin { config } => config.txn_dissem.clone(),
             ChainConfig::Avalanche { config } => match config {
-                AvalancheConfig::Correct { config } => config.txn_dissem.clone(),
+                AvalancheConfig::Basic { config } => config.txn_dissem.clone(),
                 AvalancheConfig::Blizzard { config } => config.txn_dissem.clone(),
                 AvalancheConfig::VoteNo { .. } => DissemPattern::Passthrough,
             },
@@ -219,7 +219,7 @@ impl ChainConfig {
             ChainConfig::Dummy { config } => config.blk_dissem.clone(),
             ChainConfig::Bitcoin { config } => config.blk_dissem.clone(),
             ChainConfig::Avalanche { config } => match config {
-                AvalancheConfig::Correct { config } => DissemPattern::Sample {
+                AvalancheConfig::Basic { config } => DissemPattern::Sample {
                     sample_size: config.k,
                 },
                 AvalancheConfig::Blizzard { config } => DissemPattern::Sample {

@@ -39,7 +39,7 @@ fn get_pacemaker(
         ChainConfig::Dummy { .. } => Box::new(DummyPacemaker::new()),
         ChainConfig::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO
         ChainConfig::Avalanche { config } => match config {
-            AvalancheConfig::Correct { config } => {
+            AvalancheConfig::Basic { config } => {
                 Box::new(FixedInflightBlkPaceMaker::new(config.max_inflight_blk))
             }
             AvalancheConfig::Blizzard { config } => {

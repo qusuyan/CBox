@@ -1,8 +1,8 @@
-mod correct;
-use blizzard::BlizzardDecision;
-use correct::AvalancheDecision;
+mod basic;
+use basic::AvalancheDecision;
 
 mod blizzard;
+use blizzard::BlizzardDecision;
 
 mod vote_no;
 use vote_no::AvalancheVoteNoDecision;
@@ -34,7 +34,7 @@ pub fn new(
     delay: Arc<AtomicF64>,
 ) -> Box<dyn Decision> {
     match config {
-        AvalancheConfig::Correct { config } => Box::new(AvalancheDecision::new(
+        AvalancheConfig::Basic { config } => Box::new(AvalancheDecision::new(
             id,
             crypto_scheme,
             config,

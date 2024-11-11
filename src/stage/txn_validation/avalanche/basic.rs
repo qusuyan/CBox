@@ -1,5 +1,5 @@
 use super::TxnValidation;
-use crate::config::AvalancheCorrectConfig;
+use crate::config::AvalancheBasicConfig;
 use crate::protocol::crypto::Hash;
 use crate::transaction::{AvalancheTxn, Txn};
 use crate::{CopycatError, NodeId, TxnCtx};
@@ -16,7 +16,7 @@ pub struct AvalancheTxnValidation {
 }
 
 impl AvalancheTxnValidation {
-    pub fn new(id: NodeId, _config: AvalancheCorrectConfig) -> Self {
+    pub fn new(id: NodeId, _config: AvalancheBasicConfig) -> Self {
         AvalancheTxnValidation {
             _id: id,
             txn_pool: HashMap::new(),

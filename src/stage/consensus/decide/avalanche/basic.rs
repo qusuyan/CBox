@@ -1,5 +1,5 @@
 use super::{Decision, VoteMsg};
-use crate::config::AvalancheCorrectConfig;
+use crate::config::AvalancheBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
@@ -69,7 +69,7 @@ impl AvalancheDecision {
     pub fn new(
         id: NodeId,
         crypto_scheme: CryptoScheme,
-        config: AvalancheCorrectConfig,
+        config: AvalancheBasicConfig,
         peer_messenger: Arc<PeerMessenger>,
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
         delay: Arc<AtomicF64>,
