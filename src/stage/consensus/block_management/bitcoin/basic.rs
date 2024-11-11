@@ -1,8 +1,7 @@
-use super::{BlockManagement, CurBlockState};
+use super::{BlockManagement, CurBlockState, HEADER_HASH_TIME};
 use crate::config::BitcoinBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
-
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::{DummyMerkleTree, Hash, PubKey};
 use crate::protocol::transaction::{BitcoinTxn, Txn};
@@ -20,9 +19,6 @@ use tokio::time::{Duration, Instant};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-
-// sha256 in rust takes ~ 1.9 us for a 80 byte block header
-const HEADER_HASH_TIME: f64 = 0.0000019;
 
 pub struct BitcoinBlockManagement {
     id: NodeId,

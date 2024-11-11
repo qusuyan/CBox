@@ -1,7 +1,10 @@
 use super::{BlockManagement, CurBlockState};
+use crate::config::BitcoinPBSConfig;
 use crate::context::{BlkCtx, TxnCtx};
+use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::transaction::Txn;
+use crate::vcores::VCoreGroup;
 use crate::{CopycatError, NodeId};
 
 use std::sync::Arc;
@@ -10,11 +13,22 @@ use async_trait::async_trait;
 
 pub struct BitcoinBuilderBlockManagement {
     id: NodeId,
+    core_group: Arc<VCoreGroup>,
+    peer_messenger: Arc<PeerMessenger>,
 }
 
 impl BitcoinBuilderBlockManagement {
-    pub fn new(id: NodeId) -> Self {
-        Self { id }
+    pub fn new(
+        id: NodeId,
+        config: BitcoinPBSConfig,
+        core_group: Arc<VCoreGroup>,
+        peer_messenger: Arc<PeerMessenger>,
+    ) -> Self {
+        Self {
+            id,
+            core_group,
+            peer_messenger,
+        }
     }
 }
 
