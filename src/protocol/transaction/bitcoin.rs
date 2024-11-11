@@ -2,7 +2,7 @@ use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    protocol::crypto::{Hash, PubKey, Signature},
+    protocol::crypto::{sha256, Hash, PubKey, Signature},
     CopycatError, CryptoScheme,
 };
 
@@ -33,6 +33,12 @@ pub enum BitcoinTxn {
 }
 
 impl BitcoinTxn {
+    pub fn compute_id(&self) -> Result<Hash, CopycatError> {
+        let serialized = bincode::serialize(self)?;
+        let id = sha256(&serialized)?;
+        Ok(id)
+    }
+
     pub fn validate(&self, crypto: CryptoScheme) -> Result<(bool, f64), CopycatError> {
         match self {
             BitcoinTxn::Send {

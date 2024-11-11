@@ -1,8 +1,9 @@
 use super::TxnValidation;
 use crate::config::AvalancheBasicConfig;
+use crate::context::TxnCtx;
 use crate::protocol::crypto::Hash;
 use crate::transaction::{AvalancheTxn, Txn};
-use crate::{CopycatError, NodeId, TxnCtx};
+use crate::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 

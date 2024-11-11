@@ -1,6 +1,10 @@
 mod basic;
 use basic::BitcoinBlockManagement;
 
+mod proposer;
+
+mod builder;
+
 use super::{BlockManagement, CurBlockState};
 use crate::config::BitcoinConfig;
 use crate::peers::PeerMessenger;
@@ -22,5 +26,7 @@ pub fn new(
             core_group,
             peer_messenger,
         )),
+        BitcoinConfig::Proposer { config } => todo!(),
+        BitcoinConfig::Builder { config } => todo!(),
     }
 }

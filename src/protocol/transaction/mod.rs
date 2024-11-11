@@ -10,6 +10,7 @@ pub use avalanche::AvalancheTxn;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
+use crate::protocol::crypto::Hash;
 use crate::{CopycatError, CryptoScheme};
 
 // TODO: for better accuracy, we should implement GetSize manually so that message size
@@ -22,6 +23,14 @@ pub enum Txn {
 }
 
 impl Txn {
+    pub fn compute_id(&self) -> Result<Hash, CopycatError> {
+        match self {
+            Txn::Dummy { txn } => txn.compute_id(),
+            Txn::Bitcoin { txn } => txn.compute_id(),
+            Txn::Avalanche { txn } => txn.compute_id(),
+        }
+    }
+
     pub fn validate(&self, crypto: CryptoScheme) -> Result<(bool, f64), CopycatError> {
         match self {
             Txn::Dummy { txn } => txn.validate(crypto),

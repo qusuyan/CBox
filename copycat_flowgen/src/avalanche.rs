@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{AvalancheTxn, Txn};
-use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
+use copycat::{CopycatError, CryptoScheme, NodeId};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -110,12 +110,9 @@ impl FlowGen for AvalancheFlowGen {
                         receiver: pk.clone(),
                     },
                 };
-                let txn_ctx = TxnCtx::from_txn(&txn)?;
+                let txn_id = txn.compute_id()?;
                 // utxos.push_back((txn_ctx.id, 10));
-                self.utxos
-                    .get_mut(node)
-                    .unwrap()
-                    .push((idx, txn_ctx.id, 10));
+                self.utxos.get_mut(node).unwrap().push((idx, txn_id, 10));
                 txns.push((*node, Arc::new(txn)));
             }
         }
@@ -179,8 +176,7 @@ impl FlowGen for AvalancheFlowGen {
                 },
             });
 
-            let txn_ctx = TxnCtx::from_txn(&txn)?;
-            let txn_hash = txn_ctx.id;
+            let txn_hash = txn.compute_id()?;
             if remainder > 0 {
                 utxos.push((sender_idx, txn_hash.clone(), remainder));
             }
@@ -224,8 +220,7 @@ impl FlowGen for AvalancheFlowGen {
         chain_info.total_committed += txns.len() as u64;
 
         for txn in txns {
-            let txn_ctx = TxnCtx::from_txn(&txn)?;
-            let hash = txn_ctx.id;
+            let hash = txn.compute_id()?;
             let start_time = match self.in_flight.remove(&hash) {
                 Some(time) => time,
                 None => {

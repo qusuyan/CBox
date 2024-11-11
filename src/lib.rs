@@ -11,7 +11,6 @@ mod stage;
 mod vcores;
 
 pub use config::{parse_config_file, ChainConfig};
-pub use context::TxnCtx;
 pub use node::Node;
 pub use protocol::transaction;
 pub use protocol::{ChainType, CryptoScheme, DissemPattern};

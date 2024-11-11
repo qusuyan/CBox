@@ -2,7 +2,7 @@ use primitive_types::U256;
 
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::{sha256, Hash};
-use crate::transaction::{AvalancheTxn, Txn};
+use crate::transaction::Txn;
 use crate::CopycatError;
 
 use std::fmt::{Debug, Formatter};
@@ -20,21 +20,7 @@ pub struct BlkCtx {
 
 impl TxnCtx {
     pub fn from_txn(txn: &Txn) -> Result<Self, CopycatError> {
-        let id = match txn {
-            Txn::Dummy { txn } => txn.id.clone(),
-            Txn::Bitcoin { .. } => {
-                let serialized = bincode::serialize(txn)?;
-                sha256(&serialized)?
-            }
-            Txn::Avalanche { txn: avax_txn } => match avax_txn {
-                AvalancheTxn::PlaceHolder => U256::zero(),
-                _ => {
-                    let serialized = bincode::serialize(txn)?;
-                    sha256(&serialized)?
-                }
-            },
-        };
-
+        let id = txn.compute_id()?;
         Ok(TxnCtx { id })
     }
 }

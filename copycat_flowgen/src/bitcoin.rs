@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{BitcoinTxn, Txn};
-use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
+use copycat::{CopycatError, CryptoScheme, NodeId};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -110,8 +110,7 @@ impl FlowGen for BitcoinFlowGen {
                         receiver: account.clone(),
                     },
                 };
-                let txn_ctx = TxnCtx::from_txn(&txn)?;
-                let hash = txn_ctx.id;
+                let hash = txn.compute_id()?;
                 utxos.push_back((hash, 100));
                 txns.push((*node, Arc::new(txn)));
             }
@@ -185,8 +184,7 @@ impl FlowGen for BitcoinFlowGen {
                 break (sender_pk, remainder, recver_pk, out_utxo, txn);
             };
 
-            let txn_ctx = TxnCtx::from_txn(&txn)?;
-            let txn_hash = txn_ctx.id;
+            let txn_hash = txn.compute_id()?;
             if remainder > 0 {
                 let sender_utxos = utxos.get_mut(sender).unwrap();
                 sender_utxos.push_back((txn_hash.clone(), remainder));
@@ -237,8 +235,7 @@ impl FlowGen for BitcoinFlowGen {
         chain_info.total_committed += txns.len() as u64;
 
         for txn in txns {
-            let txn_ctx = TxnCtx::from_txn(&txn)?;
-            let hash = txn_ctx.id;
+            let hash = txn.compute_id()?;
             let start_time = match self.in_flight.remove(&hash) {
                 Some(time) => time,
                 None => continue, // unrecognized txn, possibly generated from another node

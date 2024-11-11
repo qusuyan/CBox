@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use crate::ClientId;
 use copycat::protocol::crypto::{Hash, PubKey, Signature};
 use copycat::protocol::transaction::{DummyTxn, Txn};
-use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
+use copycat::{CopycatError, CryptoScheme, NodeId};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -119,8 +119,7 @@ impl FlowGen for ChainReplicationFlowGen {
                     signature: self.signature.clone(),
                 },
             });
-            let txn_ctx = TxnCtx::from_txn(&txn)?;
-            let txn_hash = txn_ctx.id;
+            let txn_hash = txn.compute_id()?;
 
             self.next_txn_id += Hash::one();
             self.in_flight.insert(txn_hash, Instant::now());
@@ -154,8 +153,7 @@ impl FlowGen for ChainReplicationFlowGen {
         log_info.num_txns += txns.len() as u64;
 
         for txn in txns {
-            let txn_ctx = TxnCtx::from_txn(&txn)?;
-            let hash = txn_ctx.id;
+            let hash = txn.compute_id()?;
             let start_time = match self.in_flight.remove(&hash) {
                 Some(time) => time,
                 None => {

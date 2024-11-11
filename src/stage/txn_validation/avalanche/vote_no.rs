@@ -1,7 +1,8 @@
 use crate::config::AvalancheVoteNoConfig;
+use crate::context::TxnCtx;
 use crate::stage::txn_validation::TxnValidation;
 use crate::transaction::Txn;
-use crate::{CopycatError, NodeId, TxnCtx};
+use crate::{CopycatError, NodeId};
 
 use std::sync::Arc;
 
