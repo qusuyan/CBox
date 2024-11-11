@@ -40,19 +40,24 @@ impl Default for DummyConfig {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum BitcoinConfig {
+    Basic { config: BitcoinBasicConfig },
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
-pub struct BitcoinConfig {
-    #[serde(default = "BitcoinConfig::get_default_difficulty")]
+pub struct BitcoinBasicConfig {
+    #[serde(default = "BitcoinBasicConfig::get_default_difficulty")]
     pub difficulty: u8,
-    #[serde(default = "BitcoinConfig::get_default_commit_depth")]
+    #[serde(default = "BitcoinBasicConfig::get_default_commit_depth")]
     pub commit_depth: u8,
-    #[serde(default = "BitcoinConfig::get_default_txn_dissem")]
+    #[serde(default = "BitcoinBasicConfig::get_default_txn_dissem")]
     pub txn_dissem: DissemPattern,
-    #[serde(default = "BitcoinConfig::get_default_blk_dissem")]
+    #[serde(default = "BitcoinBasicConfig::get_default_blk_dissem")]
     pub blk_dissem: DissemPattern,
 }
 
-impl Default for BitcoinConfig {
+impl Default for BitcoinBasicConfig {
     fn default() -> Self {
         Self {
             difficulty: 25,
@@ -68,12 +73,6 @@ pub enum AvalancheConfig {
     Basic { config: AvalancheBasicConfig },
     Blizzard { config: AvalancheBasicConfig }, //https://arxiv.org/pdf/2401.02811
     VoteNo { config: AvalancheVoteNoConfig },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum AvalancheMode {
-    Orig,
-    Blizzard,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
@@ -94,8 +93,6 @@ pub struct AvalancheBasicConfig {
     pub max_inflight_blk: usize,
     #[serde(default = "AvalancheBasicConfig::get_default_txn_dissem")]
     pub txn_dissem: DissemPattern,
-    #[serde(default = "AvalancheBasicConfig::get_default_mode")]
-    pub mode: AvalancheMode,
 }
 
 // https://arxiv.org/pdf/1906.08936.pdf
@@ -110,7 +107,6 @@ impl Default for AvalancheBasicConfig {
             proposal_timeout_secs: 5.0,
             max_inflight_blk: 40, // 40 * blk_len ~ 1800 txns / blk (bitcoin)
             txn_dissem: DissemPattern::Broadcast,
-            mode: AvalancheMode::Orig,
         }
     }
 }
@@ -204,7 +200,9 @@ impl ChainConfig {
     pub fn get_txn_dissem(&self) -> DissemPattern {
         match self {
             ChainConfig::Dummy { config } => config.txn_dissem.clone(),
-            ChainConfig::Bitcoin { config } => config.txn_dissem.clone(),
+            ChainConfig::Bitcoin { config } => match config {
+                BitcoinConfig::Basic { config } => config.txn_dissem.clone(),
+            },
             ChainConfig::Avalanche { config } => match config {
                 AvalancheConfig::Basic { config } => config.txn_dissem.clone(),
                 AvalancheConfig::Blizzard { config } => config.txn_dissem.clone(),
@@ -217,7 +215,9 @@ impl ChainConfig {
     pub fn get_blk_dissem(&self) -> DissemPattern {
         match self {
             ChainConfig::Dummy { config } => config.blk_dissem.clone(),
-            ChainConfig::Bitcoin { config } => config.blk_dissem.clone(),
+            ChainConfig::Bitcoin { config } => match config {
+                BitcoinConfig::Basic { config } => config.blk_dissem.clone(),
+            },
             ChainConfig::Avalanche { config } => match config {
                 AvalancheConfig::Basic { config } => DissemPattern::Sample {
                     sample_size: config.k,

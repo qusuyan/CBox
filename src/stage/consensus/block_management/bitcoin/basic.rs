@@ -1,5 +1,5 @@
 use super::{BlockManagement, CurBlockState};
-use crate::config::BitcoinConfig;
+use crate::config::BitcoinBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 
@@ -49,7 +49,7 @@ pub struct BitcoinBlockManagement {
 impl BitcoinBlockManagement {
     pub fn new(
         id: NodeId,
-        config: BitcoinConfig,
+        config: BitcoinBasicConfig,
         core_group: Arc<VCoreGroup>,
         peer_messenger: Arc<PeerMessenger>,
     ) -> Self {

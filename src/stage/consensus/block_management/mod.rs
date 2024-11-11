@@ -1,10 +1,8 @@
 mod dummy;
 use dummy::DummyBlockManagement;
 
-mod bitcoin;
-use bitcoin::BitcoinBlockManagement;
-
 mod avalanche;
+mod bitcoin;
 
 mod chain_replication;
 use chain_replication::ChainReplicationBlockManagement;
@@ -75,12 +73,7 @@ fn get_blk_creation(
 ) -> Box<dyn BlockManagement> {
     match config {
         ChainConfig::Dummy { .. } => Box::new(DummyBlockManagement::new()),
-        ChainConfig::Bitcoin { config } => Box::new(BitcoinBlockManagement::new(
-            id,
-            config,
-            core_group,
-            peer_messenger,
-        )),
+        ChainConfig::Bitcoin { config } => bitcoin::new(id, config, core_group, peer_messenger),
         ChainConfig::Avalanche { config } => avalanche::new(id, config, peer_messenger),
         ChainConfig::ChainReplication { config } => {
             Box::new(ChainReplicationBlockManagement::new(id, config))

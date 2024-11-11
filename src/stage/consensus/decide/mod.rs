@@ -1,10 +1,8 @@
 mod dummy;
 use dummy::DummyDecision;
 
-mod bitcoin;
-use bitcoin::BitcoinDecision;
-
 mod avalanche;
+mod bitcoin;
 
 mod chain_replication;
 use chain_replication::ChainReplicationDecision;
@@ -52,7 +50,7 @@ fn get_decision(
 ) -> Box<dyn Decision> {
     match config {
         ChainConfig::Dummy { .. } => Box::new(DummyDecision::new()),
-        ChainConfig::Bitcoin { config } => Box::new(BitcoinDecision::new(id, config)),
+        ChainConfig::Bitcoin { config } => bitcoin::new(id, config),
         ChainConfig::Avalanche { config } => avalanche::new(
             id,
             crypto_scheme,

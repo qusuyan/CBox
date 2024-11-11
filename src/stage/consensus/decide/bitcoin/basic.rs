@@ -1,5 +1,5 @@
 use super::Decision;
-use crate::config::BitcoinConfig;
+use crate::config::BitcoinBasicConfig;
 use crate::context::BlkCtx;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::Hash;
@@ -23,7 +23,7 @@ pub struct BitcoinDecision {
 }
 
 impl BitcoinDecision {
-    pub fn new(id: NodeId, config: BitcoinConfig) -> Self {
+    pub fn new(id: NodeId, config: BitcoinBasicConfig) -> Self {
         Self {
             id,
             commit_len: config.commit_depth,

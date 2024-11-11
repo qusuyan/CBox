@@ -1,5 +1,5 @@
 use super::TxnValidation;
-use crate::config::BitcoinConfig;
+use crate::config::BitcoinBasicConfig;
 use crate::protocol::crypto::Hash;
 use crate::transaction::{BitcoinTxn, Txn};
 use crate::{CopycatError, NodeId, TxnCtx};
@@ -16,7 +16,7 @@ pub struct BitcoinTxnValidation {
 }
 
 impl BitcoinTxnValidation {
-    pub fn new(id: NodeId, _config: BitcoinConfig) -> Self {
+    pub fn new(id: NodeId, _config: BitcoinBasicConfig) -> Self {
         BitcoinTxnValidation {
             _id: id,
             txn_pool: HashMap::new(),
