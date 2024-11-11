@@ -16,6 +16,7 @@ use crate::NodeId;
 pub enum BlockHeader {
     Dummy,
     Bitcoin {
+        proposer: NodeId,
         prev_hash: Hash, // vec![] if first block of chain
         merkle_root: Hash,
         nonce: u32, // https://en.bitcoin.it/wiki/Nonce

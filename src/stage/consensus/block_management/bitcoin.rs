@@ -332,6 +332,7 @@ impl BlockManagement for BitcoinBlockManagement {
         let (txns, txn_ctxs) = txns_with_ctx.unzip();
 
         let header = BlockHeader::Bitcoin {
+            proposer: self.id,
             prev_hash: self.chain_tail.clone(),
             merkle_root: self.merkle_root.clone().unwrap().0, // TODO
             nonce: 1,                                         // use nonce = 1 to indicate valid pow
