@@ -742,7 +742,9 @@ impl BlockManagement for BitcoinBlockManagement {
         Ok(())
     }
 
-    fn report(&mut self) {}
+    fn report(&mut self) {
+        pf_info!(self.id; "PoW compute: {}", self.core_group.get_unused());
+    }
 
     //     async fn handle_peer_blk_resp(
     //         &mut self,

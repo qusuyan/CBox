@@ -1,0 +1,18 @@
+[experiment]
+num_iterations = 1
+
+[parameters]
+chain-type = "bitcoin"
+cluster-threads = 32
+crypto = "dummy-ecdsa"
+disable-txn-dissem = true
+exp-time = 310
+mailbox-workers = 16
+max-inflight-txns = 200000
+network-delay = 30
+num-accounts = 1000
+num-clients = 10
+num-machines = 1
+num-nodes = 40
+txn-span = 0
+validator-config = "bitcoin_asymmetric_compute_validators.json"

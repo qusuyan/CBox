@@ -65,46 +65,62 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     nodes = []
 
     addrs = exp_machines.get_addrs()
-    machine_config = {}
-    for (idx, addr) in enumerate(addrs):
-        base = idx << 12
-        curr_machine_num_nodes = num_nodes_per_machine + (1 if num_nodes_remainder > idx else 0)
-        node_list = [base + id for id in range(curr_machine_num_nodes)]
-        machine_config[idx] = {
-            "addr": f"{addr}:15500",
-            "node_list": node_list,
-        }
-        nodes.append(node_list)
-    with open("bench_machines.json", "w") as f:
-        json.dump(machine_config, f)
+    if params["machine-config"] is None:
+        machine_config = {}
+        for (idx, addr) in enumerate(addrs):
+            base = idx << 12
+            curr_machine_num_nodes = num_nodes_per_machine + (1 if num_nodes_remainder > idx else 0)
+            node_list = [base + id for id in range(curr_machine_num_nodes)]
+            machine_config[idx] = {
+                "addr": f"{addr}:15500",
+                "node_list": node_list,
+            }
+            nodes.append(node_list)
+        machine_config_file = "bench_machines.json"
+        with open(machine_config_file, "w") as f:
+            json.dump(machine_config, f)
+    else:
+        machine_config_file = params["machine_config"]
 
-    network_config = {
-        "default_delay_millis": params["network-delay"],
-        "default_bandwidth": params["network-bw"],
-        "pipes": []
-    }
-    with open("bench_network.json", "w") as f:
-        json.dump(network_config, f)
+    if params["network-config"] is None:
+        network_config = {
+            "default_delay_millis": params["network-delay"],
+            "default_bandwidth": params["network-bw"],
+            "pipes": []
+        }
+        network_config_file = "bench_network.json"
+        with open(network_config_file, "w") as f:
+            json.dump(network_config, f)
+    else:
+        network_config_file = params["network-config"]
 
     full_node_list = [node for tup in zip(*nodes) for node in tup]
 
-    # generate random network topology
-    degree = len(full_node_list) - 1 if params["topo-degree"] == 0 else params["topo-degree"]
-    edges = gen_topo(full_node_list, degree, params["topo-skewness"])
-    with open("bench_topo.json", "w") as f:
-        json.dump(edges, f)
+    if params["topo-config"] is None:
+        # generate random network topology
+        degree = len(full_node_list) - 1 if params["topo-degree"] == 0 else params["topo-degree"]
+        edges = gen_topo(full_node_list, degree, params["topo-skewness"])
+        topo_config_file = "bench_topo.json"
+        with open(topo_config_file, "w") as f:
+            json.dump(edges, f)
+    else:
+        topo_config_file = params["topo-config"]
 
-    # generate validator configs
-    validator_configs = gen_validator_configs(full_node_list, params["num-faulty"], params["correct-type"], params["faulty-type"], 
-                                              params["correct-config"], params["faulty-config"], params["per-node-concurrency"])
-    with open("bench_validators.json", "w") as f:
-        json.dump(validator_configs, f)
+    if params["validator-config"] is None:
+        # generate validator configs
+        validator_configs = gen_validator_configs(full_node_list, params["num-faulty"], params["correct-type"], params["faulty-type"], 
+                                                params["correct-config"], params["faulty-config"], params["per-node-concurrency"])
+        validator_config_file = "bench_validators.json"
+        with open(validator_config_file, "w") as f:
+            json.dump(validator_configs, f)
+    else:
+        validator_config_file = params["validator-config"]
 
     for addr in addrs: 
-        cluster.copy_to(addr, "bench_machines.json", f'{cluster.workdir}/bench_machines.json')
-        cluster.copy_to(addr, "bench_network.json", f'{cluster.workdir}/bench_network.json')
-        cluster.copy_to(addr, "bench_topo.json", f'{cluster.workdir}/bench_topo.json')
-        cluster.copy_to(addr, "bench_validators.json", f'{cluster.workdir}/bench_validators.json')
+        cluster.copy_to(addr, machine_config_file, f'{cluster.workdir}/bench_machines.json')
+        cluster.copy_to(addr, network_config_file, f'{cluster.workdir}/bench_network.json')
+        cluster.copy_to(addr, topo_config_file, f'{cluster.workdir}/bench_topo.json')
+        cluster.copy_to(addr, validator_config_file, f'{cluster.workdir}/bench_validators.json')
 
     # compute 
     num_flow_gen = params["num-machines"]
@@ -232,7 +248,7 @@ if __name__ == "__main__":
         "frequency": 0,
         "txn-span": 1,
         "num-faulty": 0,
-        "correct-type": "Correct",
+        "correct-type": "Basic",
         "faulty-type": "",
         "correct-config": "",
         "faulty-config": "",
@@ -244,6 +260,10 @@ if __name__ == "__main__":
         "conn-multiply": 1,
         "per-node-concurrency": 2,
         "mailbox-workers": 40,
+        "machine-config": None,
+        "network-config": None,
+        "topo-config": None,
+        "validator-config": None,
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)
