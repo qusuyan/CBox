@@ -68,12 +68,15 @@ trait BlockManagement: Sync + Send {
 fn get_blk_creation(
     id: NodeId,
     config: ChainConfig,
+    delay: Arc<AtomicF64>,
     core_group: Arc<VCoreGroup>,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
     match config {
         ChainConfig::Dummy { .. } => Box::new(DummyBlockManagement::new()),
-        ChainConfig::Bitcoin { config } => bitcoin::new(id, config, core_group, peer_messenger),
+        ChainConfig::Bitcoin { config } => {
+            bitcoin::new(id, config, delay, core_group, peer_messenger)
+        }
         ChainConfig::Avalanche { config } => avalanche::new(id, config, peer_messenger),
         ChainConfig::ChainReplication { config } => {
             Box::new(ChainReplicationBlockManagement::new(id, config))
@@ -101,8 +104,13 @@ pub async fn block_management_thread(
     let delay = Arc::new(AtomicF64::new(0f64));
     let mut insert_delay_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
 
-    let mut block_management_stage =
-        get_blk_creation(id, config, core_group.clone(), peer_messenger);
+    let mut block_management_stage = get_blk_creation(
+        id,
+        config,
+        delay.clone(),
+        core_group.clone(),
+        peer_messenger,
+    );
     let mut blk_state = CurBlockState::Working;
 
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);

@@ -9,7 +9,13 @@ use builder::BitcoinBuilderDecision;
 
 use super::Decision;
 use crate::config::BitcoinConfig;
+use crate::protocol::crypto::Hash;
 use crate::NodeId;
+
+struct EndorseMsg {
+    blk_id: Hash,
+    nonce: u32,
+}
 
 pub fn new(id: NodeId, config: BitcoinConfig) -> Box<dyn Decision> {
     match config {

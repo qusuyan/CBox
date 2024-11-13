@@ -1,4 +1,5 @@
 mod basic;
+use atomic_float::AtomicF64;
 use basic::BitcoinBlockManagement;
 
 mod proposer;
@@ -21,6 +22,7 @@ const HEADER_HASH_TIME: f64 = 0.0000019;
 pub fn new(
     id: NodeId,
     config: BitcoinConfig,
+    delay: Arc<AtomicF64>,
     core_group: Arc<VCoreGroup>,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
@@ -28,6 +30,7 @@ pub fn new(
         BitcoinConfig::Basic { config } => Box::new(BitcoinBlockManagement::new(
             id,
             config,
+            delay,
             core_group,
             peer_messenger,
         )),
@@ -40,6 +43,7 @@ pub fn new(
         BitcoinConfig::Builder { config } => Box::new(BitcoinBuilderBlockManagement::new(
             id,
             config,
+            delay,
             core_group,
             peer_messenger,
         )),

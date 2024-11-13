@@ -63,26 +63,29 @@ pub fn sha256(input: &[u8]) -> Result<Hash, CopycatError> {
 }
 
 #[derive(Clone, Debug)]
-pub struct DummyMerkleTree(pub Hash);
+pub struct DummyMerkleTree {
+    root: Hash,
+}
 
 impl DummyMerkleTree {
     const TIMEOUT_PER_LEAF: f64 = 1.23e-5; // from experiment with rs-merkle crate
 
-    pub async fn new(num_elem: usize) -> Result<Self, CopycatError> {
-        tokio::time::sleep(Duration::from_secs_f64(
-            Self::TIMEOUT_PER_LEAF * num_elem as f64,
-        ))
-        .await;
+    pub fn new(num_elem: usize) -> Result<(Self, Duration), CopycatError> {
+        let timeout = Duration::from_secs_f64(Self::TIMEOUT_PER_LEAF * num_elem as f64);
         let mut rng = rand::thread_rng();
         let raw: [u8; 32] = rng.gen();
-        Ok(Self(U256::from(raw)))
+        let tree = Self {
+            root: U256::from(raw),
+        };
+        Ok((tree, timeout))
     }
 
-    pub async fn verify(self, num_elem: usize) -> Result<bool, CopycatError> {
-        tokio::time::sleep(Duration::from_secs_f64(
-            Self::TIMEOUT_PER_LEAF * num_elem as f64,
-        ))
-        .await;
-        Ok(true)
+    pub fn get_root(&self) -> Hash {
+        self.root
+    }
+
+    pub fn verify(root: &Hash, num_elem: usize) -> Result<(bool, Duration), CopycatError> {
+        let timeout = Duration::from_secs_f64(Self::TIMEOUT_PER_LEAF * num_elem as f64);
+        Ok((true, timeout))
     }
 }

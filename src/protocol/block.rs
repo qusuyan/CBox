@@ -10,8 +10,6 @@ use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::NodeId;
 
-// TODO: for better accuracy, we should implement GetSize manually so that message size
-// matches the size after marshalling.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BlockHeader {
     Dummy,
@@ -34,6 +32,8 @@ pub enum BlockHeader {
     },
 }
 
+// TODO: for better accuracy, we should implement GetSize manually so that message size
+// matches the size after marshalling.
 impl GetSize for BlockHeader {}
 
 #[derive(Clone, Serialize, Deserialize, GetSize)]

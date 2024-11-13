@@ -6,10 +6,12 @@ use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::{DummyMerkleTree, Hash, PubKey};
 use crate::protocol::transaction::{BitcoinTxn, Txn};
 use crate::protocol::MsgType;
+use crate::stage::process_illusion;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 
 use async_trait::async_trait;
+use atomic_float::AtomicF64;
 use get_size::GetSize;
 use primitive_types::U256;
 use rand::Rng;
@@ -22,6 +24,7 @@ use std::sync::Arc;
 
 pub struct BitcoinBlockManagement {
     id: NodeId,
+    delay: Arc<AtomicF64>,
     core_group: Arc<VCoreGroup>,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     block_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>, u64)>,
@@ -46,11 +49,13 @@ impl BitcoinBlockManagement {
     pub fn new(
         id: NodeId,
         config: BitcoinBasicConfig,
+        delay: Arc<AtomicF64>,
         core_group: Arc<VCoreGroup>,
         peer_messenger: Arc<PeerMessenger>,
     ) -> Self {
         Self {
             id,
+            delay,
             core_group,
             txn_pool: HashMap::new(),
             block_pool: HashMap::new(),
@@ -210,7 +215,7 @@ impl BlockManagement for BitcoinBlockManagement {
     }
 
     async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError> {
-        let start_time = Instant::now();
+        // let start_time = Instant::now();
 
         let mut modified = false;
         let mut execution_delay = Duration::from_secs(0);
@@ -293,18 +298,19 @@ impl BlockManagement for BitcoinBlockManagement {
             };
         };
 
-        tokio::time::sleep(execution_delay).await;
-
         if modified || self.block_emit_time.is_none() {
-            self.merkle_root =
-                Some(DummyMerkleTree::new(self.block_under_construction.len()).await?);
+            let (merkle_root, timeout) = DummyMerkleTree::new(self.block_under_construction.len())?;
+            execution_delay += timeout;
+            self.merkle_root = Some(merkle_root);
             let start_pow = Instant::now();
             let pow_time = self.get_pow_time();
             self.pow_time = Some(pow_time);
             self.block_emit_time = Some(start_pow + pow_time);
-            let runtime = Instant::now() - start_time;
-            pf_debug!(self.id; "preparing new block takes {:?}, execution delay is {:?}", runtime, execution_delay);
+            // let runtime = Instant::now() - start_time;
+            // pf_debug!(self.id; "preparing new block takes {:?}, execution delay is {:?}", runtime, execution_delay);
         }
+
+        process_illusion(execution_delay, &self.delay).await;
 
         Ok(blk_full)
     }
@@ -330,8 +336,8 @@ impl BlockManagement for BitcoinBlockManagement {
         let header = BlockHeader::Bitcoin {
             proposer: self.id,
             prev_hash: self.chain_tail.clone(),
-            merkle_root: self.merkle_root.clone().unwrap().0, // TODO
-            nonce: 1,                                         // use nonce = 1 to indicate valid pow
+            merkle_root: self.merkle_root.clone().unwrap().get_root(), // TODO
+            nonce: 1, // use nonce = 1 to indicate valid pow
         };
         let block_ctx = Arc::new(BlkCtx::from_header_and_txns(&header, txn_ctxs)?);
         let hash = block_ctx.id;
@@ -392,9 +398,17 @@ impl BlockManagement for BitcoinBlockManagement {
         };
 
         // hash verification
-        tokio::time::sleep(Duration::from_secs_f64(HEADER_HASH_TIME)).await;
+        let mut verification_timeout = Duration::from_secs_f64(HEADER_HASH_TIME);
         if *nonce != 1 {
+            process_illusion(verification_timeout, &self.delay).await;
             return Ok(vec![]); // invalid POW
+        }
+
+        // merkle root verification
+        let (correct, timeout) = DummyMerkleTree::verify(merkle_root, block.txns.len())?;
+        verification_timeout += timeout;
+        if !correct {
+            return Ok(vec![]);
         }
 
         // validate txns
@@ -411,6 +425,7 @@ impl BlockManagement for BitcoinBlockManagement {
             // validate transaction
             if !self.txn_pool.contains_key(&txn_hash) {
                 if !self.validate_txn(bitcoin_txn)? {
+                    process_illusion(verification_timeout, &self.delay).await;
                     return Ok(vec![]);
                 }
                 self.txn_pool
@@ -418,11 +433,7 @@ impl BlockManagement for BitcoinBlockManagement {
             };
         }
 
-        // merkle root verification
-        let merkle_tree = DummyMerkleTree(merkle_root.clone());
-        if !merkle_tree.verify(block.txns.len()).await? {
-            return Ok(vec![]);
-        }
+        process_illusion(verification_timeout, &self.delay).await;
 
         // height of block in the chain or 0 if the height is unknown because we have not seen its parent yet
         let blk_height = if prev_hash.is_zero() {
