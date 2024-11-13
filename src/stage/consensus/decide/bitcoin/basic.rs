@@ -20,6 +20,7 @@ pub struct BitcoinDecision {
     chain_tail: VecDeque<Hash>,
     notify: Notify,
     first_block_seen: bool,
+    miners_blk_cnt: HashMap<NodeId, usize>,
 }
 
 impl BitcoinDecision {
@@ -31,6 +32,7 @@ impl BitcoinDecision {
             chain_tail: VecDeque::new(),
             notify: Notify::new(),
             first_block_seen: false,
+            miners_blk_cnt: HashMap::new(),
         }
     }
 }
@@ -122,6 +124,12 @@ impl Decision for BitcoinDecision {
         match self.chain_tail.pop_front() {
             Some(blk_hash) => {
                 let (blk, _, height) = self.block_pool.get(&blk_hash).unwrap();
+                let miner = match &blk.header {
+                    BlockHeader::Bitcoin { proposer, .. } => proposer,
+                    _ => unreachable!(),
+                };
+                let blk_cnt = self.miners_blk_cnt.entry(*miner).or_insert(0);
+                *blk_cnt += 1;
                 Ok((*height, blk.txns.clone()))
             }
             None => unreachable!(),
@@ -136,5 +144,7 @@ impl Decision for BitcoinDecision {
         unreachable!("Bitcoin consensus can be done locally")
     }
 
-    fn report(&mut self) {}
+    fn report(&mut self) {
+        pf_info!(self.id; "miner blk count: {:?}", self.miners_blk_cnt);
+    }
 }
