@@ -1,12 +1,12 @@
 [experiment]
-num_iterations = 1
+num_iterations = 5
 
 [parameters]
 chain-type = "bitcoin"
 cluster-threads = 32
 crypto = "dummy-ecdsa"
 disable-txn-dissem = true
-exp-time = 310
+exp-time = 610
 mailbox-workers = 16
 max-inflight-txns = 200000
 network-delay = 30
@@ -15,4 +15,11 @@ num-clients = 10
 num-machines = 1
 num-nodes = 40
 txn-span = 0
-validator-config = "bitcoin_asymmetric_compute_validators.json"
+validator-config = [
+  "bitcoin_asymmetric_compute_validators1.json",
+  "bitcoin_asymmetric_compute_validators2.json",
+  "bitcoin_asymmetric_compute_validators4.json",
+  "bitcoin_asymmetric_compute_validators6.json",
+  "bitcoin_asymmetric_compute_validators8.json",
+  "bitcoin_asymmetric_compute_validators10.json",
+]

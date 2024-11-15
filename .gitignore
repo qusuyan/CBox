@@ -1,6 +1,6 @@
 /target/
 /tmp/
-*.json
+test_*.json
 .idea
 
 # perf data

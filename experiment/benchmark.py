@@ -65,7 +65,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     nodes = []
 
     addrs = exp_machines.get_addrs()
-    if params["machine-config"] is None:
+    if params["machine-config"] == "":
         machine_config = {}
         for (idx, addr) in enumerate(addrs):
             base = idx << 12
@@ -82,7 +82,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     else:
         machine_config_file = params["machine_config"]
 
-    if params["network-config"] is None:
+    if params["network-config"] == "":
         network_config = {
             "default_delay_millis": params["network-delay"],
             "default_bandwidth": params["network-bw"],
@@ -96,7 +96,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
 
     full_node_list = [node for tup in zip(*nodes) for node in tup]
 
-    if params["topo-config"] is None:
+    if params["topo-config"] == "":
         # generate random network topology
         degree = len(full_node_list) - 1 if params["topo-degree"] == 0 else params["topo-degree"]
         edges = gen_topo(full_node_list, degree, params["topo-skewness"])
@@ -106,7 +106,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     else:
         topo_config_file = params["topo-config"]
 
-    if params["validator-config"] is None:
+    if params["validator-config"] == "":
         # generate validator configs
         validator_configs = gen_validator_configs(full_node_list, params["num-faulty"], params["correct-type"], params["faulty-type"], 
                                                 params["correct-config"], params["faulty-config"], params["per-node-concurrency"])
@@ -260,10 +260,10 @@ if __name__ == "__main__":
         "conn-multiply": 1,
         "per-node-concurrency": 2,
         "mailbox-workers": 40,
-        "machine-config": None,
-        "network-config": None,
-        "topo-config": None,
-        "validator-config": None,
+        "machine-config": "",
+        "network-config": "",
+        "topo-config": "",
+        "validator-config": "",
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)
