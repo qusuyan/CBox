@@ -67,7 +67,7 @@ impl Decision for AvalancheVoteNoDecision {
 
         let votes = vec![false; new_blk.txns.len()];
 
-        let msg_content = ((proposer, id), votes);
+        let msg_content = (id, votes);
         let serialized_msg = &bincode::serialize(&msg_content)?;
         let (signature, stime) = self.crypto_scheme.sign(&self.sk, serialized_msg)?;
         let delay = self.delay.fetch_add(stime, Ordering::Relaxed);
@@ -107,6 +107,15 @@ impl Decision for AvalancheVoteNoDecision {
         _content: Vec<u8>,
     ) -> Result<(), CopycatError> {
         Ok(()) // ignore votes from peers
+    }
+
+    async fn timeout(&self) -> Result<(), CopycatError> {
+        self._notify.notified().await;
+        unreachable!();
+    }
+
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
+        unreachable!();
     }
 
     fn report(&mut self) {}

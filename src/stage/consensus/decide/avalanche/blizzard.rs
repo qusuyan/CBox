@@ -44,9 +44,9 @@ pub struct BlizzardDecision {
     conflict_sets: HashMap<(Hash, PubKey), ConflictSet>,
     confidence: HashMap<Hash, (bool, u64)>, // (has_chit, confidence)
     // for voting
-    query_pool: HashMap<(NodeId, u64), Vec<Option<Hash>>>, // TODO: add timeouts
-    finished_query: HashSet<(NodeId, u64)>,
-    votes: HashMap<(NodeId, u64), (usize, Vec<usize>)>,
+    query_pool: HashMap<u64, Vec<Option<Hash>>>, // TODO: add timeouts
+    finished_query: HashSet<u64>,
+    votes: HashMap<u64, (usize, Vec<usize>)>,
     preference_cache: HashMap<Hash, bool>,
     // blocks ready to be committed
     commit_queue: VecDeque<(u64, Vec<Hash>)>,
@@ -180,7 +180,7 @@ impl BlizzardDecision {
 
     async fn record_votes(
         &mut self,
-        blk_id: (NodeId, u64),
+        blk_id: u64,
         src: NodeId,
         votes: Vec<bool>,
     ) -> Result<(), CopycatError> {
@@ -211,7 +211,7 @@ impl BlizzardDecision {
     }
 
     // TODO: call this function when timeout
-    async fn handle_votes(&mut self, blk_id: (NodeId, u64)) -> Result<(), CopycatError> {
+    async fn handle_votes(&mut self, blk_id: u64) -> Result<(), CopycatError> {
         let txns = match self.query_pool.remove(&blk_id) {
             Some(txns) => txns,
             None => return Ok(()), // if the batch has not yet been received or if the batch is already committed
@@ -346,8 +346,7 @@ impl BlizzardDecision {
             }
         }
 
-        self.commit_queue
-            .push_back((blk_id.1, txns_to_be_committed));
+        self.commit_queue.push_back((blk_id, txns_to_be_committed));
         // send to pmaker a batch is voted
         self.pmaker_feedback_send.send(vec![]).await?;
 
@@ -519,12 +518,11 @@ impl Decision for BlizzardDecision {
 
         if proposer == self.id {
             // if queried by myself, record block and and handle votes locally
-            self.query_pool.insert((proposer, blk_id), query_txns);
-            self.record_votes((proposer, blk_id), self.id, votes)
-                .await?;
+            self.query_pool.insert(blk_id, query_txns);
+            self.record_votes(blk_id, self.id, votes).await?;
         } else {
             // otherwise, send votes to peer that queries the block
-            let msg_content = ((proposer, blk_id), votes);
+            let msg_content = (blk_id, votes);
             let serialized_msg = &bincode::serialize(&msg_content)?;
             let (signature, stime) = self.crypto_scheme.sign(&self.sk, serialized_msg)?;
             let delay = self.delay.fetch_add(stime, Ordering::Relaxed);
@@ -563,6 +561,14 @@ impl Decision for BlizzardDecision {
             .collect();
         pf_debug!(self.id; "committing {} txns", txns.len());
         Ok((blk_id, txns))
+    }
+
+    async fn timeout(&self) -> Result<(), CopycatError> {
+        todo!()
+    }
+
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
+        todo!()
     }
 
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError> {

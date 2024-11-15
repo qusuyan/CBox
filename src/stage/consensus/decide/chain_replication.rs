@@ -126,6 +126,15 @@ impl Decision for ChainReplicationDecision {
         Ok((blk_id.as_u64(), txns))
     }
 
+    async fn timeout(&self) -> Result<(), CopycatError> {
+        self._notify.notified().await;
+        unreachable!();
+    }
+
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
+        unreachable!();
+    }
+
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError> {
         assert!(matches!(self.role, Role::Head));
         assert!(src == self.tail);

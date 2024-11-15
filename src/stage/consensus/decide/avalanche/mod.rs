@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct VoteMsg {
-    pub round: (NodeId, u64),
+    pub round: u64,
     pub votes: Vec<bool>,
     pub signature: Signature,
 }

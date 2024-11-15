@@ -18,7 +18,7 @@ pub struct BitcoinDecision {
     commit_len: u8,
     block_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>, u64)>,
     chain_tail: VecDeque<Hash>,
-    notify: Notify,
+    _notify: Notify,
     first_block_seen: bool,
     miners_blk_cnt: HashMap<NodeId, usize>,
 }
@@ -30,7 +30,7 @@ impl BitcoinDecision {
             commit_len: config.commit_depth,
             block_pool: HashMap::new(),
             chain_tail: VecDeque::new(),
-            notify: Notify::new(),
+            _notify: Notify::new(),
             first_block_seen: false,
             miners_blk_cnt: HashMap::new(),
         }
@@ -116,7 +116,7 @@ impl Decision for BitcoinDecision {
             if self.chain_tail.len() > self.commit_len as usize {
                 return Ok(());
             }
-            self.notify.notified().await;
+            self._notify.notified().await;
         }
     }
 
@@ -134,6 +134,15 @@ impl Decision for BitcoinDecision {
             }
             None => unreachable!(),
         }
+    }
+
+    async fn timeout(&self) -> Result<(), CopycatError> {
+        self._notify.notified().await;
+        unreachable!();
+    }
+
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
+        unreachable!();
     }
 
     async fn handle_peer_msg(

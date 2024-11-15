@@ -41,5 +41,13 @@ impl Decision for BitcoinProposerDecision {
         todo!()
     }
 
+    async fn timeout(&self) -> Result<(), CopycatError> {
+        todo!()
+    }
+
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
+        todo!()
+    }
+
     fn report(&mut self) {}
 }

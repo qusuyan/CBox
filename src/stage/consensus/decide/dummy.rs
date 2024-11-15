@@ -58,6 +58,15 @@ impl Decision for DummyDecision {
         }
     }
 
+    async fn timeout(&self) -> Result<(), CopycatError> {
+        self._notify.notified().await;
+        unreachable!();
+    }
+
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
+        unreachable!();
+    }
+
     async fn handle_peer_msg(
         &mut self,
         _src: NodeId,

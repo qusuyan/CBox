@@ -36,6 +36,8 @@ trait Decision: Sync + Send {
     ) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
+    async fn timeout(&self) -> Result<(), CopycatError>;
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError>;
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError>;
     fn report(&mut self);
 }
