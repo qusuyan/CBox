@@ -112,7 +112,9 @@ impl AvalancheBlockManagement {
                     // add values together to find total input value
 
                     let value = match utxo {
-                        AvalancheTxn::Grant { out_utxo, receiver } => {
+                        AvalancheTxn::Grant {
+                            out_utxo, receiver, ..
+                        } => {
                             if receiver == txn_sender {
                                 out_utxo
                             } else {

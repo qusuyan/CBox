@@ -117,6 +117,8 @@ pub struct AvalancheBasicConfig {
     pub beta2: u64,
     #[serde(default = "AvalancheBasicConfig::get_default_proposal_timeout_secs")]
     pub proposal_timeout_secs: f64,
+    #[serde(default = "AvalancheBasicConfig::get_default_vote_timeout")]
+    pub vote_timeout: f64,
     #[serde(default = "AvalancheBasicConfig::get_default_max_inflight_blk")]
     pub max_inflight_blk: usize,
     #[serde(default = "AvalancheBasicConfig::get_default_txn_dissem")]
@@ -133,6 +135,7 @@ impl Default for AvalancheBasicConfig {
             beta1: 11,
             beta2: 150,
             proposal_timeout_secs: 5.0,
+            vote_timeout: 5.0,
             max_inflight_blk: 40, // 40 * blk_len ~ 1800 txns / blk (bitcoin)
             txn_dissem: DissemPattern::Broadcast,
         }

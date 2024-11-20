@@ -43,6 +43,7 @@ pub fn get_flow_gen(
     num_accounts: usize,
     max_inflight: usize,
     frequency: usize,
+    conflict_rate: f64,
     chain: ChainType,
     crypto: CryptoScheme,
 ) -> Box<dyn FlowGen> {
@@ -62,6 +63,7 @@ pub fn get_flow_gen(
             num_accounts,
             max_inflight,
             frequency,
+            conflict_rate,
             crypto,
         )),
         ChainType::ChainReplication => Box::new(ChainReplicationFlowGen::new(

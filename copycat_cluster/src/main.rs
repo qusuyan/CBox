@@ -74,6 +74,10 @@ struct CliArgs {
     #[arg(long, short = 'q', value_enum, default_value = "0")]
     frequency: usize,
 
+    /// Probability that a conflict transaction will be generated
+    #[arg(long, short = 'r', default_value = "0")]
+    conflict_rate: f64,
+
     /// Number of nodes receiving a transaction, 0 means sending to all nodes
     #[arg(long, short = 's', default_value_t = 1)]
     txn_span: usize,
@@ -306,6 +310,7 @@ fn main() {
             num_accounts,
             max_inflight,
             frequency,
+            args.conflict_rate,
             args.chain,
             args.crypto,
         );

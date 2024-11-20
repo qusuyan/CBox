@@ -17,20 +17,29 @@ const MAX_BATCH_FREQ: usize = 100; // 100 batches per sec max, or 1 batch every 
 
 struct DagInfo {
     num_blks: u64,
-    txn_count: HashMap<u64, u64>,
-    total_committed: u64, // includes false commits
+    txn_count: u64, // includes false commits
 }
 
 pub struct AvalancheFlowGen {
+    avax_commit_depth: usize,
     max_inflight: usize,
     batch_frequency: usize,
     batch_size: usize,
+    conflict_rate: f64,
     next_batch_time: Instant,
     crypto: CryptoScheme,
     client_list: Vec<ClientId>,
-    utxos: HashMap<ClientId, Vec<(usize, Hash, u64)>>,
+    utxos: HashMap<ClientId, Vec<(usize, Hash, u64)>>, // (utxo_owner_idx, txn_hash, utxo_value)
     accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
     in_flight: HashMap<Hash, Instant>,
+    nonce: u64,
+    in_flight_conflict: HashMap<Hash, Hash>,
+    conflicting_utxos: Vec<((ClientId, usize), Hash, u64, (ClientId, ClientId))>,
+    pending_conflict_utxo: HashMap<Hash, ((ClientId, usize), Hash, u64, (ClientId, ClientId))>,
+    conflict_set: HashSet<Hash>,
+    conflicts_sent: usize,      // pair of conflicting txns sent
+    conflicts_recv: usize,      // pair of conflicting txns which I have receied one txn from them
+    conflicts_committed: usize, // pair of conflicting txns which I have received both txns
     num_completed_txns: u64,
     dag_info: HashMap<NodeId, DagInfo>,
     total_time_sec: f64,
@@ -45,6 +54,7 @@ impl AvalancheFlowGen {
         num_accounts: usize,
         max_inflight: usize,
         frequency: usize,
+        conflict_rate: f64,
         crypto: CryptoScheme,
     ) -> Self {
         let accounts_per_node = if client_list.len() == 0 {
@@ -79,15 +89,25 @@ impl AvalancheFlowGen {
         };
 
         Self {
+            avax_commit_depth: 12,
             max_inflight,
             batch_frequency,
             batch_size,
+            conflict_rate,
             next_batch_time: Instant::now(),
             crypto,
             client_list,
             utxos,
             accounts,
             in_flight: HashMap::new(),
+            nonce: 2,
+            in_flight_conflict: HashMap::new(),
+            conflicting_utxos: vec![],
+            pending_conflict_utxo: HashMap::new(),
+            conflict_set: HashSet::new(),
+            conflicts_sent: 0,
+            conflicts_recv: 0,
+            conflicts_committed: 0,
             num_completed_txns: 0,
             total_time_sec: 0.0,
             dag_info: HashMap::new(),
@@ -95,26 +115,58 @@ impl AvalancheFlowGen {
             inflight_snapshot: HashSet::new(),
         }
     }
+
+    fn get_inflight_count(&self) -> usize {
+        self.in_flight.len() - self.in_flight_conflict.len() + self.conflicts_sent
+            - self.conflicts_recv
+    }
 }
 
 #[async_trait]
 impl FlowGen for AvalancheFlowGen {
     async fn setup_txns(&mut self) -> Result<Vec<(ClientId, Arc<Txn>)>, CopycatError> {
         let mut txns = Vec::new();
-        for (node, accounts) in self.accounts.iter() {
+        for (client, accounts) in self.accounts.iter() {
             for idx in 0..accounts.len() {
                 let (pk, _) = &accounts[idx];
-                let txn = Txn::Avalanche {
+                let txn = Arc::new(Txn::Avalanche {
                     txn: AvalancheTxn::Grant {
                         out_utxo: 10,
                         receiver: pk.clone(),
+                        nonce: 0,
                     },
-                };
+                });
                 let txn_id = txn.compute_id()?;
                 // utxos.push_back((txn_ctx.id, 10));
-                self.utxos.get_mut(node).unwrap().push((idx, txn_id, 10));
-                txns.push((*node, Arc::new(txn)));
+                self.utxos.get_mut(client).unwrap().push((idx, txn_id, 10));
+                txns.push((*client, txn));
             }
+
+            // add grants for conflicting txns
+            let recver_idx = rand::random::<usize>() % accounts.len();
+            let (pk, _) = &accounts[recver_idx];
+            let conflict_txn = Arc::new(Txn::Avalanche {
+                txn: AvalancheTxn::Grant {
+                    out_utxo: 10,
+                    receiver: pk.clone(),
+                    nonce: 1,
+                },
+            });
+            let txn_id = conflict_txn.compute_id()?;
+            let other_client = {
+                let mut other_client_idx = rand::random::<usize>() % (self.client_list.len() - 1);
+                if self.client_list[other_client_idx] == *client {
+                    other_client_idx += 1;
+                }
+                self.client_list[other_client_idx]
+            };
+            self.conflicting_utxos.push((
+                (*client, recver_idx),
+                txn_id,
+                10,
+                (*client, other_client),
+            ));
+            txns.push((*client, conflict_txn));
         }
 
         Ok(txns)
@@ -127,7 +179,7 @@ impl FlowGen for AvalancheFlowGen {
         }
 
         loop {
-            if self.max_inflight == UNSET || self.in_flight.len() < self.max_inflight {
+            if self.max_inflight == UNSET || self.get_inflight_count() < self.max_inflight {
                 if Instant::now() < self.next_batch_time {
                     tokio::time::sleep_until(self.next_batch_time).await;
                 }
@@ -142,50 +194,226 @@ impl FlowGen for AvalancheFlowGen {
         let batch_size = if self.max_inflight == UNSET {
             self.batch_size
         } else {
-            std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len())
+            std::cmp::min(
+                self.batch_size,
+                self.max_inflight - self.get_inflight_count(),
+            )
         };
-        for _ in 0..batch_size {
-            let node = self.client_list[rand::random::<usize>() % self.client_list.len()];
-            let accounts = self.accounts.get(&node).unwrap();
-            let utxos = self.utxos.get_mut(&node).unwrap();
+        let mut cur_batch_size = 0;
+        while cur_batch_size < batch_size {
+            if rand::random::<f64>() > self.conflict_rate {
+                let client_idx = rand::random::<usize>() % self.client_list.len();
+                let client = self.client_list[client_idx];
+                let accounts = self.accounts.get(&client).unwrap();
+                let utxos = self.utxos.get_mut(&client).unwrap();
 
-            let send_utxo_idx = rand::random::<usize>() % utxos.len();
-            let (sender_idx, in_utxo_raw, in_utxo_amount) = utxos.remove(send_utxo_idx);
-            let (sender_pk, sender_sk) = &accounts[sender_idx];
+                let send_utxo_idx = rand::random::<usize>() % utxos.len();
+                let (sender_idx, in_utxo_raw, in_utxo_amount) = utxos.remove(send_utxo_idx);
+                let (sender_pk, sender_sk) = &accounts[sender_idx];
 
-            assert!(accounts.len() > 1);
-            let mut recver_idx = rand::random::<usize>() % (accounts.len() - 1);
-            if recver_idx >= sender_idx {
-                recver_idx += 1; // avoid sending to self
+                assert!(accounts.len() > 1);
+
+                let in_utxo = vec![in_utxo_raw];
+                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
+                let (sender_signature, _) = self.crypto.sign(&sender_sk, &serialized_in_utxo)?;
+                let out_utxo = std::cmp::min(in_utxo_amount, 10);
+                let remainder = in_utxo_amount - out_utxo;
+                let mut recver_idx = rand::random::<usize>() % (accounts.len() - 1);
+                if recver_idx >= sender_idx {
+                    recver_idx += 1; // avoid sending to self
+                }
+                let (recver_pk, _) = &accounts[recver_idx];
+                let txn = Arc::new(Txn::Avalanche {
+                    txn: AvalancheTxn::Send {
+                        sender: sender_pk.clone(),
+                        in_utxo,
+                        receiver: recver_pk.clone(),
+                        out_utxo,
+                        remainder,
+                        sender_signature,
+                    },
+                });
+
+                let txn_hash = txn.compute_id()?;
+                if remainder > 0 {
+                    utxos.push((sender_idx, txn_hash.clone(), remainder));
+                }
+                if out_utxo > 0 {
+                    utxos.push((recver_idx, txn_hash.clone(), out_utxo));
+                }
+
+                self.in_flight.insert(txn_hash, Instant::now());
+                batch.push((client, txn));
+                cur_batch_size += 1;
+            } else {
+                let ((client, sender_idx), in_txn_hash, value, (client1, client2)) =
+                    if self.conflicting_utxos.len() > 0 {
+                        self.conflicting_utxos
+                            .remove(rand::random::<usize>() % self.conflicting_utxos.len())
+                    } else {
+                        // create a new grant txn
+                        let client_idx = rand::random::<usize>() % self.client_list.len();
+                        let client = self.client_list[client_idx];
+                        let accounts = self.accounts.get(&client).unwrap();
+                        let owner_idx = rand::random::<usize>() % accounts.len();
+                        let (pk, _) = &accounts[owner_idx];
+                        let grant_txn = Arc::new(Txn::Avalanche {
+                            txn: AvalancheTxn::Grant {
+                                out_utxo: 10,
+                                receiver: pk.clone(),
+                                nonce: self.nonce,
+                            },
+                        });
+                        self.nonce += 1;
+                        let grant_txn_hash = grant_txn.compute_id()?;
+                        self.in_flight.insert(grant_txn_hash, Instant::now());
+
+                        let mut client2_idx =
+                            rand::random::<usize>() % (self.client_list.len() - 1);
+                        if client2_idx >= client_idx {
+                            client2_idx += 1;
+                        }
+                        let client2 = self.client_list[client2_idx];
+
+                        batch.push((client, grant_txn.clone()));
+                        batch.push((client2, grant_txn.clone()));
+                        cur_batch_size += 1;
+
+                        ((client, owner_idx), grant_txn_hash, 10, (client, client2))
+                    };
+
+                let accounts = self.accounts.get(&client).unwrap();
+                let (sender_pk, sender_sk) = &accounts[sender_idx];
+
+                let in_utxo = vec![in_txn_hash];
+                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
+                let (sender_signature, _) = self.crypto.sign(&sender_sk, &serialized_in_utxo)?;
+
+                let mut recver1_idx = rand::random::<usize>() % (accounts.len() - 1);
+                if recver1_idx >= sender_idx {
+                    recver1_idx += 1; // avoid sending to self
+                }
+                let (recver1_pk, _) = &accounts[recver1_idx];
+                let txn1 = Arc::new(Txn::Avalanche {
+                    txn: AvalancheTxn::Send {
+                        sender: sender_pk.clone(),
+                        in_utxo: in_utxo.clone(),
+                        receiver: recver1_pk.clone(),
+                        out_utxo: value,
+                        remainder: 0,
+                        sender_signature: sender_signature.clone(),
+                    },
+                });
+                let base_txn1_hash = txn1.compute_id()?;
+
+                let mut recver2_idx = rand::random::<usize>() % (accounts.len() - 2);
+                if recver2_idx >= sender_idx {
+                    recver2_idx += 1; // avoid sending to self
+                }
+                if recver2_idx >= recver1_idx {
+                    recver2_idx += 1; // avoid sending to the same receiver
+                }
+                let (recver2_pk, _) = &accounts[recver2_idx];
+                let txn2 = Arc::new(Txn::Avalanche {
+                    txn: AvalancheTxn::Send {
+                        sender: sender_pk.clone(),
+                        in_utxo,
+                        receiver: recver2_pk.clone(),
+                        out_utxo: value,
+                        remainder: 0,
+                        sender_signature,
+                    },
+                });
+                let base_txn2_hash = txn2.compute_id()?;
+
+                self.in_flight.insert(base_txn1_hash, Instant::now());
+                self.in_flight.insert(base_txn2_hash, Instant::now());
+                self.in_flight_conflict
+                    .insert(base_txn1_hash, base_txn2_hash);
+                self.in_flight_conflict
+                    .insert(base_txn2_hash, base_txn1_hash);
+                self.conflicts_sent += 1;
+
+                batch.push((client1, txn1.clone()));
+                batch.push((client1, txn2.clone()));
+                batch.push((client2, txn2.clone()));
+                batch.push((client2, txn1.clone()));
+                cur_batch_size += 1;
+
+                // extend both txns enough that they will be committed
+                let mut txn1_hash = base_txn1_hash;
+                let mut txn2_hash = base_txn2_hash;
+                for _ in 0..self.avax_commit_depth {
+                    let sender1_idx = recver1_idx;
+                    let (sender1_pk, sender1_sk) = &accounts[sender1_idx];
+                    recver1_idx = rand::random::<usize>() % (accounts.len() - 1);
+                    if recver1_idx >= sender1_idx {
+                        recver1_idx += 1;
+                    }
+                    let (recver1_pk, _) = &accounts[recver1_idx];
+
+                    let in_utxo1 = vec![txn1_hash];
+                    let serialized_in_utxo1 = bincode::serialize(&in_utxo1)?;
+                    let (sender_signature1, _) =
+                        self.crypto.sign(&sender1_sk, &serialized_in_utxo1)?;
+                    let txn1 = Arc::new(Txn::Avalanche {
+                        txn: AvalancheTxn::Send {
+                            sender: sender1_pk.clone(),
+                            in_utxo: in_utxo1,
+                            receiver: recver1_pk.clone(),
+                            out_utxo: value,
+                            remainder: 0,
+                            sender_signature: sender_signature1,
+                        },
+                    });
+                    txn1_hash = txn1.compute_id()?;
+
+                    let sender2_idx = recver2_idx;
+                    let (sender2_pk, sender2_sk) = &accounts[sender2_idx];
+                    recver2_idx = rand::random::<usize>() % (accounts.len() - 1);
+                    if recver2_idx >= sender2_idx {
+                        recver2_idx += 1;
+                    }
+                    let (recver2_pk, _) = &accounts[recver2_idx];
+
+                    let in_utxo2 = vec![txn2_hash];
+                    let serialized_in_utxo2 = bincode::serialize(&in_utxo2)?;
+                    let (sender_signature2, _) =
+                        self.crypto.sign(&sender2_sk, &serialized_in_utxo2)?;
+                    let txn2 = Arc::new(Txn::Avalanche {
+                        txn: AvalancheTxn::Send {
+                            sender: sender2_pk.clone(),
+                            in_utxo: in_utxo2,
+                            receiver: recver2_pk.clone(),
+                            out_utxo: value,
+                            remainder: 0,
+                            sender_signature: sender_signature2,
+                        },
+                    });
+                    txn2_hash = txn2.compute_id()?;
+
+                    self.in_flight.insert(txn1_hash, Instant::now());
+                    self.in_flight.insert(txn2_hash, Instant::now());
+                    self.in_flight_conflict.insert(txn1_hash, txn2_hash);
+                    self.in_flight_conflict.insert(txn2_hash, txn1_hash);
+                    self.conflicts_sent += 1;
+
+                    batch.push((client1, txn1.clone()));
+                    batch.push((client1, txn2.clone()));
+                    batch.push((client2, txn2.clone()));
+                    batch.push((client2, txn1.clone()));
+                    cur_batch_size += 1;
+                }
+
+                self.pending_conflict_utxo.insert(
+                    base_txn1_hash,
+                    ((client, recver1_idx), txn1_hash, value, (client1, client2)),
+                );
+                self.pending_conflict_utxo.insert(
+                    base_txn2_hash,
+                    ((client, recver2_idx), txn2_hash, value, (client1, client2)),
+                );
             }
-            let (recver_pk, _) = &accounts[recver_idx];
-
-            let in_utxo = vec![in_utxo_raw];
-            let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-            let (sender_signature, _) = self.crypto.sign(&sender_sk, &serialized_in_utxo)?;
-            let out_utxo = std::cmp::min(in_utxo_amount, 10);
-            let remainder = in_utxo_amount - out_utxo;
-            let txn = Arc::new(Txn::Avalanche {
-                txn: AvalancheTxn::Send {
-                    sender: sender_pk.clone(),
-                    in_utxo,
-                    receiver: recver_pk.clone(),
-                    out_utxo,
-                    remainder,
-                    sender_signature,
-                },
-            });
-
-            let txn_hash = txn.compute_id()?;
-            if remainder > 0 {
-                utxos.push((sender_idx, txn_hash.clone(), remainder));
-            }
-            if out_utxo > 0 {
-                utxos.push((recver_idx, txn_hash.clone(), out_utxo));
-            }
-
-            self.in_flight.insert(txn_hash, Instant::now());
-            batch.push((node, txn));
         }
 
         if self.batch_frequency != UNSET {
@@ -204,38 +432,42 @@ impl FlowGen for AvalancheFlowGen {
         &mut self,
         node: NodeId,
         txns: Vec<Arc<Txn>>,
-        blk_height: u64,
+        _blk_height: u64,
     ) -> Result<(), CopycatError> {
         // avoid counting blocks that are
         let chain_info = self.dag_info.entry(node).or_insert(DagInfo {
             num_blks: 0,
-            txn_count: HashMap::new(),
-            total_committed: 0,
+            txn_count: 0,
         });
 
-        if let Some(_) = chain_info.txn_count.insert(blk_height, txns.len() as u64) {
-        } else {
-            chain_info.num_blks += 1;
-        }
-        chain_info.total_committed += txns.len() as u64;
+        chain_info.num_blks += 1;
+        chain_info.txn_count += txns.len() as u64;
 
-        for txn in txns {
+        for txn in txns.iter() {
             let hash = txn.compute_id()?;
-            let start_time = match self.in_flight.remove(&hash) {
-                Some(time) => time,
-                None => {
-                    // if let Txn::Avalanche { txn: avax_txn } = txn.as_ref() {
-                    //     if matches!(avax_txn, AvalancheTxn::Send { .. }) {
-                    //         log::warn!("unrecognized txn");
-                    //     }
-                    // }
-                    continue;
-                } // unrecognized txn, possibly generated from another node
+
+            // update commit latency
+            if let Some(time) = self.in_flight.remove(&hash) {
+                let commit_latency = Instant::now() - time;
+                self.total_time_sec += commit_latency.as_secs_f64();
+                self.num_completed_txns += 1;
             };
 
-            let commit_latency = Instant::now() - start_time;
-            self.total_time_sec += commit_latency.as_secs_f64();
-            self.num_completed_txns += 1;
+            // check for conflicts
+            if let Some(conflict_hash) = self.in_flight_conflict.remove(&hash) {
+                if self.conflict_set.contains(&hash) {
+                    log::debug!("Conflicting txns committed");
+                    self.conflicts_committed += 1;
+                } else {
+                    self.conflicts_recv += 1;
+                    self.conflict_set.insert(conflict_hash);
+                }
+            }
+
+            // if conflict, add utxo back
+            if let Some(utxo) = self.pending_conflict_utxo.remove(&hash) {
+                self.conflicting_utxos.push(utxo);
+            }
         }
 
         Ok(())
@@ -247,31 +479,16 @@ impl FlowGen for AvalancheFlowGen {
         } else {
             self.total_time_sec / self.num_completed_txns as f64
         };
-        let (num_committed, chain_length, acc_commit_confidence) = self
+        let (num_committed, chain_length) = self
             .dag_info
             .values()
-            .map(|info| {
-                // since blocks can get committed out of order
-                let num_committed = info.txn_count.values().sum();
-                let commit_confidence = if info.total_committed == 0 {
-                    1f64
-                } else {
-                    num_committed as f64 / info.total_committed as f64
-                };
-                (num_committed, info.num_blks, commit_confidence)
-            })
-            .reduce(|acc, e| {
-                (
-                    std::cmp::max(acc.0, e.0),
-                    std::cmp::max(acc.1, e.1),
-                    (acc.2 + e.2),
-                )
-            })
-            .unwrap_or((0, 0, 0f64));
-        let commit_confidence = if self.dag_info.len() == 0 {
+            .map(|info| (info.txn_count, info.num_blks))
+            .reduce(|acc, e| (std::cmp::max(acc.0, e.0), std::cmp::max(acc.1, e.1)))
+            .unwrap_or((0, 0));
+        let commit_confidence = if self.conflicts_recv == 0 {
             1f64
         } else {
-            acc_commit_confidence / self.dag_info.len() as f64
+            1f64 - (self.conflicts_committed as f64 / self.conflicts_recv as f64)
         };
 
         if cfg!(debug_assertions) {
@@ -289,7 +506,7 @@ impl FlowGen for AvalancheFlowGen {
             num_committed,
             chain_length,
             commit_confidence,
-            inflight_txns: self.in_flight.len(),
+            inflight_txns: self.get_inflight_count(),
         }
     }
 }

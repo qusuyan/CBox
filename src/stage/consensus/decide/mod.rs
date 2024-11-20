@@ -169,6 +169,21 @@ pub async fn decision_thread(
 
             },
 
+            _ = decision_stage.timeout() => {
+                let _permit = match core_group.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
+
+                if let Err(e) = decision_stage.handle_timeout().await {
+                    pf_error!(id; "failed to handle timeout: {:?}", e);
+                    continue;
+                }
+            }
+
             peer_msg = peer_consensus_recv.recv() => {
                 // handling vote messages from peers
                 let _permit = match core_group.acquire().await {

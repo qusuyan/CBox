@@ -6,6 +6,7 @@ use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::MsgType;
 use crate::transaction::{AvalancheTxn, Txn};
+use crate::utils::time_queue::TimeQueue;
 use crate::{CopycatError, CryptoScheme, NodeId};
 
 use async_trait::async_trait;
@@ -14,10 +15,10 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
+use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
 
@@ -45,9 +46,11 @@ pub struct AvalancheDecision {
     conflict_sets: HashMap<(Hash, PubKey), ConflictSet>,
     confidence: HashMap<Hash, (bool, u64)>, // (has_chit, confidence)
     // for voting
+    vote_timeout: Duration,
     query_pool: HashMap<u64, Vec<Option<Hash>>>, // TODO: add timeouts
     finished_query: HashSet<u64>,
     votes: HashMap<u64, (usize, Vec<usize>)>,
+    vote_time_queue: TimeQueue<u64>,
     preference_cache: HashMap<Hash, bool>,
     // blocks ready to be committed
     commit_queue: VecDeque<(u64, Vec<Hash>)>,
@@ -78,6 +81,7 @@ impl AvalancheDecision {
         let (_, sk) = crypto_scheme.gen_key_pair(id.into());
         let vote_thresh = (config.k as f64 * config.alpha).ceil() as usize;
         pf_info!(id; "vote threshold is {}", vote_thresh);
+        let vote_timeout = Duration::from_secs_f64(config.vote_timeout);
 
         Self {
             id,
@@ -90,9 +94,11 @@ impl AvalancheDecision {
             txn_dag: HashMap::new(),
             conflict_sets: HashMap::new(),
             confidence: HashMap::new(),
+            vote_timeout,
             query_pool: HashMap::new(),
             finished_query: HashSet::new(),
             votes: HashMap::new(),
+            vote_time_queue: TimeQueue::new(vote_timeout / 2),
             preference_cache: HashMap::new(),
             commit_queue: VecDeque::new(),
             _notify: Notify::new(),
@@ -134,47 +140,32 @@ impl AvalancheDecision {
     }
 
     fn is_strongly_preferred(&mut self, txn_hash: &Hash) -> bool {
-        self.is_strongly_preferred_calls += 1;
+        self.is_preferred_checks += 1;
 
-        let mut frontier = VecDeque::new();
-        frontier.push_back(txn_hash);
-        let mut checked = vec![];
-
-        let result = loop {
-            let hash = match frontier.pop_front() {
-                Some(hash) => hash,
-                None => break true,
-            };
-
-            self.is_preferred_checks += 1;
-            // first check if the txn is already accpeted
-            let dag_node = match self.txn_dag.get(hash) {
-                Some(node) => node,
-                None => continue, // since the txn is already accepted
-            };
-
-            if let Some(strongly_preferred) = self.preference_cache.get(hash) {
-                if *strongly_preferred {
-                    continue;
-                } else {
-                    break false;
-                }
-            }
-
-            // not in cache - recursively perform the check
-            checked.push(hash);
-
-            if !self.is_preferred(hash) {
-                break false;
-            }
-
-            let parents: Vec<&Hash> = dag_node.parents.iter().collect();
-            frontier.extend(parents);
+        let dag_node = match self.txn_dag.get(txn_hash) {
+            Some(node) => node,
+            None => return true, // since the txn is already accepted
         };
 
-        for txn in checked {
-            self.preference_cache.insert(*txn, result);
+        if let Some(strongly_preferred) = self.preference_cache.get(txn_hash) {
+            return *strongly_preferred;
         }
+
+        let result = if !self.is_preferred(txn_hash) {
+            false
+        } else {
+            let mut is_strongly_preferred = true;
+            let parents = dag_node.parents.clone();
+            for parent in parents {
+                if !self.is_strongly_preferred(&parent) {
+                    is_strongly_preferred = false;
+                    break;
+                }
+            }
+            is_strongly_preferred
+        };
+
+        self.preference_cache.insert(*txn_hash, result);
 
         result
     }
@@ -222,6 +213,7 @@ impl AvalancheDecision {
         let (_, accept_votes) = self.votes.remove(&blk_id).unwrap();
         assert!(txns.len() == accept_votes.len());
         self.finished_query.insert(blk_id);
+        self.vote_time_queue.remove(&blk_id);
         for idx in 0..txns.len() {
             let txn_hash = match txns[idx] {
                 Some(hash) => hash,
@@ -330,9 +322,9 @@ impl AvalancheDecision {
                     }
 
                     let is_accepted = if parents_accepted && !has_conflicts {
-                        count > self.beta1 // safe early commitment
+                        count >= self.beta1 // safe early commitment
                     } else {
-                        count > self.beta2 // consecutive counter
+                        count >= self.beta2 // consecutive counter
                     };
 
                     pf_trace!(self.id; "txn {} - is_accepted: {}, parents accepted: {}, have conflicts: {}, count: {}, pending txns: {}", next_txn, is_accepted, parents_accepted, has_conflicts, count, self.txn_dag.len());
@@ -504,6 +496,7 @@ impl Decision for AvalancheDecision {
                             }
                         }
                     }
+                    self.is_strongly_preferred_calls += 1;
                     votes.push(self.is_strongly_preferred(&txn_hash));
                     // vote_params.push(VoteParams::Check {
                     //     hash: txn_hash.clone(),
@@ -530,6 +523,7 @@ impl Decision for AvalancheDecision {
                         }
                         self.confidence.insert(txn_hash, (false, 0));
                     }
+                    self.is_strongly_preferred_calls += 1;
                     votes.push(self.is_strongly_preferred(&txn_hash));
                     // vote_params.push(VoteParams::Check {
                     //     hash: txn_hash.clone(),
@@ -561,6 +555,8 @@ impl Decision for AvalancheDecision {
         if proposer == self.id {
             // if queried by myself, record block and and handle votes locally
             self.query_pool.insert(blk_id, query_txns);
+            self.vote_time_queue
+                .push(blk_id, Instant::now() + self.vote_timeout);
             self.record_votes(blk_id, self.id, votes).await?;
         } else {
             // otherwise, send votes to peer that queries the block
@@ -596,11 +592,21 @@ impl Decision for AvalancheDecision {
     }
 
     async fn timeout(&self) -> Result<(), CopycatError> {
-        todo!()
+        if let Err(_) = self.vote_time_queue.wait_next().await {
+            self._notify.notified().await;
+        }
+        Ok(())
     }
 
     async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
-        todo!()
+        let blk_id = self.vote_time_queue.pop().unwrap();
+        pf_debug!(self.id; "timeout triggered for blk {}", blk_id);
+        if self.finished_query.contains(&blk_id) {
+            // query has finished, do nothing
+            return Ok(());
+        }
+
+        self.handle_votes(blk_id).await
     }
 
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {

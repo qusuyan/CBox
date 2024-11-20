@@ -47,6 +47,10 @@ struct CliArgs {
     #[arg(long, short = 'q', value_enum, default_value = "0")]
     frequency: usize,
 
+    /// Probability that a conflict transaction will be generated
+    #[arg(long, short = 'r', default_value = "0")]
+    conflict_rate: f64,
+
     /// Path to validator configuration
     #[arg(long)]
     config: String,
@@ -150,6 +154,7 @@ pub fn main() {
             args.accounts,
             args.max_inflight,
             args.frequency,
+            args.conflict_rate,
             args.chain,
             args.crypto,
         );

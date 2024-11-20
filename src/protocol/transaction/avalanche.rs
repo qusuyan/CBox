@@ -21,6 +21,7 @@ pub enum AvalancheTxn {
     Grant {
         out_utxo: u64,
         receiver: PubKey,
+        nonce: u64,
     },
     Noop {
         parents: Vec<Hash>,
