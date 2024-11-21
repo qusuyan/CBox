@@ -44,7 +44,7 @@ pub struct AvalancheDecision {
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     txn_dag: HashMap<Hash, DagNode>,
     conflict_sets: HashMap<(Hash, PubKey), ConflictSet>,
-    confidence: HashMap<Hash, (bool, u64)>, // (has_chit, confidence)
+    confidence: HashMap<Hash, u64>,
     // for voting
     vote_timeout: Duration,
     query_pool: HashMap<u64, Vec<Option<Hash>>>, // TODO: add timeouts
@@ -222,8 +222,6 @@ impl AvalancheDecision {
             if accept_votes[idx] >= self.vote_thresh {
                 // we gathered enough votes
                 pf_trace!(self.id; "looking at txn {} at block idx {}", txn_hash, idx);
-                let (has_chit, _) = self.confidence.get_mut(&txn_hash).unwrap();
-                *has_chit = true;
                 // update the confidence and conflict set for all parents
                 let mut dag_frontier = VecDeque::new();
                 let mut dedup = HashSet::new();
@@ -239,9 +237,9 @@ impl AvalancheDecision {
                     };
                     dag_frontier.extend(dag_node.parents.iter());
                     // update confidence
-                    let (chit, confidence) = self.confidence.get_mut(&next_txn).unwrap();
+                    let confidence = self.confidence.get_mut(&next_txn).unwrap();
                     *confidence += 1;
-                    let confidence_score = if *chit { *confidence } else { 0 };
+                    let confidence_score = *confidence;
                     // update conflict set
                     let avax_txn = match self.txn_pool.get(&next_txn).unwrap().0.as_ref() {
                         Txn::Avalanche { txn } => txn,
@@ -264,14 +262,8 @@ impl AvalancheDecision {
                                 if ct.pref == next_txn {
                                     // do nothing
                                 } else {
-                                    let pref_confidence_score = {
-                                        let (chit, conf) = self.confidence.get(&ct.pref).unwrap();
-                                        if *chit {
-                                            *conf
-                                        } else {
-                                            0
-                                        }
-                                    };
+                                    let pref_confidence_score =
+                                        *self.confidence.get(&ct.pref).unwrap();
                                     if pref_confidence_score < confidence_score {
                                         // update conflict set
                                         ct.pref = next_txn;
@@ -451,7 +443,7 @@ impl Decision for AvalancheDecision {
                                 children: vec![],
                             },
                         );
-                        self.confidence.insert(txn_hash, (false, 0));
+                        self.confidence.insert(txn_hash, 0);
                     }
                     // vote true on grant msgs since they cannot conflict with others
                     votes.push(true);
@@ -479,7 +471,7 @@ impl Decision for AvalancheDecision {
                                 node.children.push(txn_hash.clone());
                             }
                         }
-                        self.confidence.insert(txn_hash, (false, 0));
+                        self.confidence.insert(txn_hash, 0);
                         // update conflict set as appropriate
                         for unspent_txn in in_utxo {
                             let utxo = (unspent_txn.clone(), sender.clone());
@@ -521,7 +513,7 @@ impl Decision for AvalancheDecision {
                                 node.children.push(txn_hash.clone());
                             }
                         }
-                        self.confidence.insert(txn_hash, (false, 0));
+                        self.confidence.insert(txn_hash, 0);
                     }
                     self.is_strongly_preferred_calls += 1;
                     votes.push(self.is_strongly_preferred(&txn_hash));

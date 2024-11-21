@@ -89,7 +89,7 @@ impl AvalancheFlowGen {
         };
 
         Self {
-            avax_commit_depth: 12,
+            avax_commit_depth: 50,
             max_inflight,
             batch_frequency,
             batch_size,
@@ -141,7 +141,11 @@ impl FlowGen for AvalancheFlowGen {
                 self.utxos.get_mut(client).unwrap().push((idx, txn_id, 10));
                 txns.push((*client, txn));
             }
+        }
 
+        for client_idx in 0..self.client_list.len() {
+            let client = &self.client_list[client_idx];
+            let accounts = self.accounts.get(client).unwrap();
             // add grants for conflicting txns
             let recver_idx = rand::random::<usize>() % accounts.len();
             let (pk, _) = &accounts[recver_idx];
@@ -154,7 +158,7 @@ impl FlowGen for AvalancheFlowGen {
             });
             let txn_id = conflict_txn.compute_id()?;
             let other_client = {
-                let mut other_client_idx = rand::random::<usize>() % (self.client_list.len() - 1);
+                let mut other_client_idx = (client_idx + 1) % self.client_list.len();
                 if self.client_list[other_client_idx] == *client {
                     other_client_idx += 1;
                 }
@@ -268,11 +272,7 @@ impl FlowGen for AvalancheFlowGen {
                         let grant_txn_hash = grant_txn.compute_id()?;
                         self.in_flight.insert(grant_txn_hash, Instant::now());
 
-                        let mut client2_idx =
-                            rand::random::<usize>() % (self.client_list.len() - 1);
-                        if client2_idx >= client_idx {
-                            client2_idx += 1;
-                        }
+                        let client2_idx = (client_idx + 1) % self.client_list.len();
                         let client2 = self.client_list[client2_idx];
 
                         batch.push((client, grant_txn.clone()));
@@ -458,6 +458,7 @@ impl FlowGen for AvalancheFlowGen {
                 if self.conflict_set.contains(&hash) {
                     log::debug!("Conflicting txns committed");
                     self.conflicts_committed += 1;
+                    self.conflict_set.remove(&hash); // to avoid double counting
                 } else {
                     self.conflicts_recv += 1;
                     self.conflict_set.insert(conflict_hash);
