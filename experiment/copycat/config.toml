@@ -27,6 +27,7 @@ cluster = [
   ["accounts", "10000"],
   ["max_inflight", "100000"],
   ["frequency", "0"],
+  ["conflict_rate", "0"],
   ["txn_span", "0"],
   ["disable_txn_dissem", "false"],
 ]

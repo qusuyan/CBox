@@ -80,7 +80,11 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         with open(machine_config_file, "w") as f:
             json.dump(machine_config, f)
     else:
-        machine_config_file = params["machine_config"]
+        machine_config_file = params["machine-config"]
+        with open(machine_config_file, "r") as f:
+            machine_config = json.load(f)
+            for machine in machine_config.values():
+                nodes.append(machine["node_list"])
 
     if params["network-config"] == "":
         network_config = {
@@ -134,7 +138,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     if params["single-process-cluster"]:
         run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox-workers"], params["chain-type"], 
                     params["crypto"], params["conn-multiply"], clients_per_machine, clients_remainder, num_accounts, max_inflight, 
-                    frequency, params["txn-span"], params["disable-txn-dissem"]]
+                    frequency, params["conflict_rate"], params["txn-span"], params["disable-txn-dissem"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -246,6 +250,7 @@ if __name__ == "__main__":
         "num-accounts": 10000,
         "max-inflight-txns": 100000,
         "frequency": 0,
+        "conflict_rate": 0,
         "txn-span": 1,
         "num-faulty": 0,
         "correct-type": "Basic",

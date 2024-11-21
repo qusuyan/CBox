@@ -35,7 +35,6 @@ pub struct AvalancheFlowGen {
     nonce: u64,
     in_flight_conflict: HashMap<Hash, Hash>,
     conflicting_utxos: Vec<((ClientId, usize), Hash, u64, (ClientId, ClientId))>,
-    pending_conflict_utxo: HashMap<Hash, ((ClientId, usize), Hash, u64, (ClientId, ClientId))>,
     conflict_set: HashSet<Hash>,
     conflicts_sent: usize,      // pair of conflicting txns sent
     conflicts_recv: usize,      // pair of conflicting txns which I have receied one txn from them
@@ -103,7 +102,6 @@ impl AvalancheFlowGen {
             nonce: 2,
             in_flight_conflict: HashMap::new(),
             conflicting_utxos: vec![],
-            pending_conflict_utxo: HashMap::new(),
             conflict_set: HashSet::new(),
             conflicts_sent: 0,
             conflicts_recv: 0,
@@ -141,36 +139,6 @@ impl FlowGen for AvalancheFlowGen {
                 self.utxos.get_mut(client).unwrap().push((idx, txn_id, 10));
                 txns.push((*client, txn));
             }
-        }
-
-        for client_idx in 0..self.client_list.len() {
-            let client = &self.client_list[client_idx];
-            let accounts = self.accounts.get(client).unwrap();
-            // add grants for conflicting txns
-            let recver_idx = rand::random::<usize>() % accounts.len();
-            let (pk, _) = &accounts[recver_idx];
-            let conflict_txn = Arc::new(Txn::Avalanche {
-                txn: AvalancheTxn::Grant {
-                    out_utxo: 10,
-                    receiver: pk.clone(),
-                    nonce: 1,
-                },
-            });
-            let txn_id = conflict_txn.compute_id()?;
-            let other_client = {
-                let mut other_client_idx = (client_idx + 1) % self.client_list.len();
-                if self.client_list[other_client_idx] == *client {
-                    other_client_idx += 1;
-                }
-                self.client_list[other_client_idx]
-            };
-            self.conflicting_utxos.push((
-                (*client, recver_idx),
-                txn_id,
-                10,
-                (*client, other_client),
-            ));
-            txns.push((*client, conflict_txn));
         }
 
         Ok(txns)
@@ -405,14 +373,18 @@ impl FlowGen for AvalancheFlowGen {
                     cur_batch_size += 1;
                 }
 
-                self.pending_conflict_utxo.insert(
-                    base_txn1_hash,
-                    ((client, recver1_idx), txn1_hash, value, (client1, client2)),
-                );
-                self.pending_conflict_utxo.insert(
-                    base_txn2_hash,
-                    ((client, recver2_idx), txn2_hash, value, (client1, client2)),
-                );
+                self.conflicting_utxos.push((
+                    (client, recver1_idx),
+                    txn1_hash,
+                    value,
+                    (client1, client2),
+                ));
+                self.conflicting_utxos.push((
+                    (client, recver2_idx),
+                    txn2_hash,
+                    value,
+                    (client1, client2),
+                ));
             }
         }
 
@@ -463,11 +435,6 @@ impl FlowGen for AvalancheFlowGen {
                     self.conflicts_recv += 1;
                     self.conflict_set.insert(conflict_hash);
                 }
-            }
-
-            // if conflict, add utxo back
-            if let Some(utxo) = self.pending_conflict_utxo.remove(&hash) {
-                self.conflicting_utxos.push(utxo);
             }
         }
 

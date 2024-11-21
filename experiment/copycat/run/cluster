@@ -18,8 +18,9 @@ CLIENTS_REMAINDER=$9
 ACCOUNTS=${10}
 MAX_INFLIGHT=${11}
 FREQUENCY=${12}
-TXN_SPAN=${13}
-DISABLE_TXN_DISSEM=${14}
+CONFLICT_RATE=${13}
+TXN_SPAN=${14}
+DISABLE_TXN_DISSEM=${15}
 
 if [[ $DISABLE_TXN_DISSEM == "False" ]]; then
     DISABLE_TXN_DISSEM=""
@@ -36,5 +37,5 @@ fi
 ./blockchain_copycat/target/${BUILDTYPE}/copycat_cluster -i ${ID} -t ${THREADS} \
     -w ${MAILBOX_WORKERS} -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} \
     --config bench_validators.json -p ${CRYPTO} -o ${CONN_MULTIPLY} -l ${CLIENTS} \
-    -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} \
+    -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} -r ${CONFLICT_RATE}\
     ${DISABLE_TXN_DISSEM} --topology bench_topo.json
