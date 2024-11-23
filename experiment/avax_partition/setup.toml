@@ -1,5 +1,5 @@
 [experiment]
-num_iterations = 1
+num_iterations = 2
 
 [parameters]
 chain-type = "avalanche"
@@ -7,20 +7,18 @@ cluster-threads = 32
 conflict_rate = 1
 conn-multiply = 1
 correct-config = [
-  "blk_len=40+max_inflight_blk=20+k=10+beta1=2+beta2=2",
-  "blk_len=40+max_inflight_blk=20+k=10+beta1=4+beta2=4",
-  "blk_len=40+max_inflight_blk=20+k=10+beta1=6+beta2=6",
-  "blk_len=40+max_inflight_blk=20+k=10+beta1=8+beta2=8",
-  "blk_len=40+max_inflight_blk=20+k=10+beta1=10+beta2=10",
-  "blk_len=40+max_inflight_blk=20+k=10+beta1=12+beta2=12",
+  "blk_len=40+max_inflight_blk=20+k=10+beta1=64+beta2=64",
+  "blk_len=40+max_inflight_blk=20+k=10+beta1=96+beta2=96",
+  "blk_len=40+max_inflight_blk=20+k=10+beta1=128+beta2=128",
+  "blk_len=40+max_inflight_blk=20+k=10+beta1=160+beta2=160",
 ]
 correct-type = ["Basic", "Blizzard"]
 crypto = "dummy-ecdsa"
 exp-time = 310
-frequency = 0
+frequency = 4000
 machine-config = "avax_partition/partition_machines.json"
 mailbox-workers = 16
-max-inflight-txns = 8000
+max-inflight-txns = 0
 network-config = "avax_partition/partition_network.json"
 num-accounts = 160
 num-clients = 10

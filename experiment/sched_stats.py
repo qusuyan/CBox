@@ -62,8 +62,8 @@ def parse_sched_stats(log_dir, line_ranges = {}):
     df["total_sched"] = df["sched_duration"] * df["sched_count"]
     df["total_poll"] = df["poll_duration"] * df["poll_count"]
     df = df.sum()
-    df["sched_dur"] = df["total_sched"] / df["sched_count"]
-    df["poll_dur"] = df["total_poll"] / df["poll_count"]
+    df["sched_dur"] = df["total_sched"] / df["sched_count"] if df["sched_count"] > 0 else 0
+    df["poll_dur"] = df["total_poll"] / df["poll_count"] if df["poll_count"] > 0 else 0
 
     return {"sched_dur_ms": df["sched_dur"] * 1000, "poll_dur_ms": df["poll_dur"] * 1000, # to ms
             "sched_count": int(df["sched_count"]), "poll_count": int(df["poll_count"])}
