@@ -64,6 +64,9 @@ pub struct BlizzardDecision {
     // statistics for debugging
     is_strongly_preferred_calls: usize,
     is_preferred_checks: usize,
+    commit_total: usize,
+    commit_count: usize,
+    txn_query_count: usize,
     // batch sleep time to reduce overhead
     delay: Arc<AtomicF64>,
 }
@@ -108,6 +111,9 @@ impl BlizzardDecision {
             pmaker_feedback_send,
             is_strongly_preferred_calls: 0,
             is_preferred_checks: 0,
+            commit_total: 0,
+            commit_count: 0,
+            txn_query_count: 0,
             delay,
         }
     }
@@ -333,16 +339,21 @@ impl BlizzardDecision {
                 Some(hash) => hash,
                 None => continue, // the txn is not valid
             };
+            self.txn_query_count += 1;
             if accept_votes[idx] >= self.vote_thresh {
                 // we gathered enough votes
                 pf_trace!(self.id; "looking at txn {} at block idx {}", txn_hash, idx);
                 // update the confidence and conflict set for all parents
                 let mut dedup = HashSet::new();
                 let mut commit_list = self.handle_votes_helper(&txn_hash, &mut dedup)?;
+                if commit_list.len() > 0 {
+                    self.commit_count += 1;
+                }
                 txns_to_be_committed.append(&mut commit_list);
             }
         }
 
+        self.commit_total += txns_to_be_committed.len();
         self.commit_queue.push_back((blk_id, txns_to_be_committed));
         // send to pmaker a batch is voted
         self.pmaker_feedback_send.send(vec![]).await?;
@@ -609,7 +620,11 @@ impl Decision for BlizzardDecision {
     fn report(&mut self) {
         pf_info!(self.id; "In the last minute: is_strongly_preferred_calls: {}, is_preferred_checks: {}", self.is_strongly_preferred_calls, self.is_preferred_checks);
         pf_info!(self.id; "working set size: txn_dag: {}, perference_cache: {}", self.txn_dag.len(), self.preference_cache.len());
+        pf_info!(self.id; "In the last minute: txns_queried: {}, commit_count: {}, avg_commit_len: {}", self.txn_query_count, self.commit_count, self.commit_total / self.commit_count);
         self.is_strongly_preferred_calls = 0;
         self.is_preferred_checks = 0;
+        self.txn_query_count = 0;
+        self.commit_count = 0;
+        self.commit_total = 0;
     }
 }

@@ -24,6 +24,7 @@ use dashmap::DashMap;
 pub struct Node {
     id: NodeId,
     req_send: mpsc::Sender<Arc<Txn>>,
+    core_group: Arc<VCoreGroup>,
     _peer_messenger: Arc<PeerMessenger>,
     // actor threads
     _txn_validation_handle: JoinHandle<()>,
@@ -178,6 +179,7 @@ impl Node {
             Self {
                 id,
                 req_send,
+                core_group: vcores,
                 _peer_messenger: peer_messenger,
                 _txn_validation_handle,
                 _txn_dissemination_handle,
@@ -208,5 +210,9 @@ impl Node {
             return Err(CopycatError(format!("{e:?}")));
         }
         Ok(())
+    }
+
+    pub fn report(&self) {
+        pf_info!(self.id; "vCore utilization: {}", self.core_group.get_utilization());
     }
 }

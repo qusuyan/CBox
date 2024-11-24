@@ -427,6 +427,10 @@ fn main() {
                     log::info!("Cumulatively: active tasks: {} avg queue depth: {}, avg poll count: {}, avg overflow count: {}, avg steal count: {}", active_tasks, avg_queue_depth, avg_poll_count, avg_overflow_count, avg_steal_count);
                     txns_sent = 0;
                     prev_committed = stats.num_committed;
+
+                    for node in node_map.values() {
+                        node.report();
+                    }
                 }
             }
         }
