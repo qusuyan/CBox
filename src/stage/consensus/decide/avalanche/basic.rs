@@ -662,7 +662,12 @@ impl Decision for AvalancheDecision {
     fn report(&mut self) {
         pf_info!(self.id; "In the last minute: is_strongly_preferred_calls: {}, is_preferred_checks: {}", self.is_strongly_preferred_calls, self.is_preferred_checks);
         pf_info!(self.id; "working set size: txn_dag: {}, perference_cache: {}", self.txn_dag.len(), self.preference_cache.len());
-        pf_info!(self.id; "In the last minute: txns_queried: {}, commit_count: {}, avg_commit_len: {}", self.txn_query_count, self.commit_count, self.commit_total / self.commit_count);
+        let avg_commit_len = if self.commit_count == 0 {
+            0
+        } else {
+            self.commit_total / self.commit_count
+        };
+        pf_info!(self.id; "In the last minute: txns_queried: {}, commit_count: {}, avg_commit_len: {}", self.txn_query_count, self.commit_count, avg_commit_len);
         self.is_strongly_preferred_calls = 0;
         self.is_preferred_checks = 0;
         self.txn_query_count = 0;
