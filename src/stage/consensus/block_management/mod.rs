@@ -11,6 +11,7 @@ use tokio_metrics::TaskMonitor;
 use crate::config::ChainConfig;
 use crate::consts::BLK_MNG_DELAY_INTERVAL;
 use crate::context::{BlkCtx, TxnCtx};
+use crate::get_report_timer;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::crypto::Hash;
@@ -19,7 +20,6 @@ use crate::protocol::CryptoScheme;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::{VCoreGroup, VCoreOwned};
-use crate::{get_report_timer, vcores};
 
 use async_trait::async_trait;
 
