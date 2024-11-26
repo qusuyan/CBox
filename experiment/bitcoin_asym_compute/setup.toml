@@ -4,6 +4,7 @@ num_iterations = 5
 [parameters]
 chain-type = "bitcoin"
 cluster-threads = 32
+correct-type = "Basic"
 crypto = "dummy-ecdsa"
 disable-txn-dissem = true
 exp-time = 610

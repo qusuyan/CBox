@@ -22,6 +22,13 @@ def gen_node_config(nodes: list[int], node_type: str, config: dict, max_concurre
             "max_concurrency": max_concurrency,
         }
 
+def gen_simple_node_config(nodes: list[int], config: dict, max_concurrency: int):
+    return {
+        "nodes": nodes,
+        "config": config,
+        "max_concurrency": max_concurrency,
+    }
+
 def gen_validator_configs(nodes: list[int], 
                           num_faulty: int, 
                           correct_type: str,
@@ -34,6 +41,9 @@ def gen_validator_configs(nodes: list[int],
 
     correct_node_config = parse_config(correct_config)
     faulty_node_config = parse_config(faulty_config)
+
+    if correct_type == "" and faulty_type == "":
+        return [gen_simple_node_config(nodes, correct_node_config, max_concurrency)]
 
     config = [gen_node_config(correct_nodes, correct_type, correct_node_config, max_concurrency)] if num_faulty == 0 else \
         [gen_node_config(correct_nodes, correct_type, correct_node_config, max_concurrency), 

@@ -216,11 +216,12 @@ impl NodeConfig {
                     valid_order.sort();
                     log::warn!("invalid order, setting to {valid_order:?} instead");
                     config.order = valid_order;
-                }
-                // make sure that all nodes are included in the chain
-                for node in all_nodes.iter() {
-                    if !on_chain.contains(node) {
-                        config.order.push(*node)
+                } else {
+                    // make sure that all nodes are included in the chain
+                    for node in all_nodes.iter() {
+                        if !on_chain.contains(node) {
+                            config.order.push(*node)
+                        }
                     }
                 }
             }

@@ -253,7 +253,7 @@ if __name__ == "__main__":
         "conflict_rate": 0,
         "txn-span": 1,
         "num-faulty": 0,
-        "correct-type": "Basic",
+        "correct-type": "",
         "faulty-type": "",
         "correct-config": "",
         "faulty-config": "",
