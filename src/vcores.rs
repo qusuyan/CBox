@@ -2,8 +2,9 @@
 use crate::CopycatError;
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-use tokio::sync::{Semaphore, SemaphorePermit};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, SemaphorePermit};
 use tokio::time::Instant;
 
 use atomic_float::AtomicF64;
@@ -20,8 +21,19 @@ impl Drop for VCore<'_> {
     }
 }
 
+pub struct VCoreOwned {
+    _ticket: OwnedSemaphorePermit,
+    core_group: Arc<VCoreGroup>,
+}
+
+impl Drop for VCoreOwned {
+    fn drop(&mut self) {
+        self.core_group.release();
+    }
+}
+
 pub struct VCoreGroup {
-    cores: Semaphore,
+    cores: Arc<Semaphore>,
     max_cores: usize,
     start_time: Instant,
     last_wakeup: AtomicU64,
@@ -34,12 +46,16 @@ impl VCoreGroup {
         let last_wakeup = 0; // since num tickets is 0 and time since start is also 0
 
         Self {
-            cores: Semaphore::new(max_cores),
+            cores: Arc::new(Semaphore::new(max_cores)),
             max_cores,
             start_time: now,
             last_wakeup: AtomicU64::new(last_wakeup),
             utilization: AtomicF64::new(0f64),
         }
+    }
+
+    pub fn get_total_cores(&self) -> usize {
+        self.max_cores
     }
 
     pub async fn acquire(&self) -> Result<VCore<'_>, CopycatError> {
@@ -66,6 +82,35 @@ impl VCoreGroup {
         self.utilization.fetch_add(window_util, Ordering::Release);
 
         Ok(VCore {
+            _ticket: ticket,
+            core_group: self,
+        })
+    }
+
+    pub async fn acquire_owned(self: Arc<Self>) -> Result<VCoreOwned, CopycatError> {
+        let ticket = self.cores.clone().acquire_owned().await?;
+
+        let mut past = self.last_wakeup.load(Ordering::SeqCst);
+        let (now, past, tickets) = loop {
+            let now = Instant::now().duration_since(self.start_time).as_secs_f32();
+            let now_bits = now.to_bits() as u64;
+            let tickets = (past & 0xFFFFFFFF) + 1;
+            let curr = (now_bits << 32) | tickets;
+            match self
+                .last_wakeup
+                .compare_exchange(past, curr, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => break (now, past, tickets - 1),
+                Err(val) => past = val,
+            }
+        };
+
+        let last_ts = f32::from_bits((past >> 32) as u32);
+        let time_window = now - last_ts;
+        let window_util = time_window as f64 * tickets as f64;
+        self.utilization.fetch_add(window_util, Ordering::Release);
+
+        Ok(VCoreOwned {
             _ticket: ticket,
             core_group: self,
         })
