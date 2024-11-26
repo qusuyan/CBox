@@ -212,7 +212,8 @@ impl NodeConfig {
                     }
                 }
                 if !valid {
-                    let valid_order = all_nodes.iter().cloned().collect();
+                    let mut valid_order: Vec<NodeId> = all_nodes.iter().cloned().collect();
+                    valid_order.sort();
                     log::warn!("invalid order, setting to {valid_order:?} instead");
                     config.order = valid_order;
                 }

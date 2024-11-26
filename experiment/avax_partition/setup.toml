@@ -1,5 +1,5 @@
 [experiment]
-num_iterations = 2
+num_iterations = 3
 
 [parameters]
 chain-type = "avalanche"
@@ -7,6 +7,11 @@ cluster-threads = 32
 conflict_rate = 1
 conn-multiply = 1
 correct-config = [
+  "blk_len=40+max_inflight_blk=20+k=10+beta1=4+beta2=4",
+  "blk_len=40+max_inflight_blk=20+k=10+beta1=8+beta2=8",
+  "blk_len=40+max_inflight_blk=20+k=10+beta1=16+beta2=16",
+  "blk_len=40+max_inflight_blk=20+k=10+beta1=24+beta2=24",
+  "blk_len=40+max_inflight_blk=20+k=10+beta1=32+beta2=32",
   "blk_len=40+max_inflight_blk=20+k=10+beta1=64+beta2=64",
   "blk_len=40+max_inflight_blk=20+k=10+beta1=96+beta2=96",
   "blk_len=40+max_inflight_blk=20+k=10+beta1=128+beta2=128",

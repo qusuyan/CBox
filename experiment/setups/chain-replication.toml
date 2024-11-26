@@ -4,9 +4,9 @@ num_iterations = 1
 [parameters]
 chain-type = "chain-replication"
 cluster-threads = 32
-config = "blk_size=500000+order=[0]"
 conn-multiply = 1
-crypto = "ecdsa"
+correct-config = "blk_size=500000+order=[0]"
+crypto = "dummy-ecdsa"
 exp-time = 310
 frequency = 15000
 mailbox-workers = 8
@@ -15,6 +15,6 @@ network-delay = 30
 num-accounts = 1000
 num-clients = 1
 num-machines = 1
-num-nodes = [5, 10, 15, 20, 25, 30]
+num-nodes = [100, 200, 300, 400, 500, 600, 700, 800]
 per-node-concurrency = 1
 txn-span = 1
