@@ -95,7 +95,7 @@ pub async fn txn_validation_thread(
 
     loop {
         tokio::select! {
-            new_txn = req_recv.recv(), if txn_buffer.len() < VALIDATION_BATCH_SIZE => {
+            new_txn = req_recv.recv(), if txn_buffer.len() < VALIDATION_BATCH_SIZE * 3 => {
                 let mut txn = match new_txn {
                     Some(txn) => txn,
                     None => {
@@ -109,7 +109,7 @@ pub async fn txn_validation_thread(
                     self_txns_recved += 1;
                     txn_buffer.push_back((id, txn));
 
-                    if txn_buffer.len() >= VALIDATION_BATCH_SIZE {
+                    if txn_buffer.len() >= VALIDATION_BATCH_SIZE * 3 {
                         break;
                     }
 
