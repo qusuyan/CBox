@@ -19,12 +19,13 @@ correct-config = [
 ]
 correct-type = ["Basic", "Blizzard"]
 crypto = "dummy-ecdsa"
+exp-prefix = "Avax-Partition"
 exp-time = 310
 frequency = 4000
-machine-config = "avax_partition/partition_machines.json"
+machine-config = "setups/avax_partition/partition_machines.json"
 mailbox-workers = 16
 max-inflight-txns = 0
-network-config = "avax_partition/partition_network.json"
+network-config = "setups/avax_partition/partition_network.json"
 num-accounts = 160
 num-clients = 10
 num-faulty = 0
