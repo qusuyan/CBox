@@ -1,5 +1,5 @@
 [experiment]
-num_iterations = 1
+num_iterations = 3
 
 [parameters]
 chain-type = "avalanche"
@@ -9,8 +9,8 @@ correct-config = ["blk_len=40+max_inflight_blk=20", "blk_len=20+max_inflight_blk
 correct-type = "Basic"
 crypto = "dummy-ecdsa"
 disable-txn-dissem = true
-exp-prefix = "Avax-BlkLen-Unbounded-Inflight/"
-exp-time = 200
+exp-prefix = "Avax-BlkLen/"
+exp-time = 310
 frequency = 0
 mailbox-workers = 16
 max-inflight-txns = 4000
@@ -20,6 +20,6 @@ num-clients = 10
 num-faulty = 0
 num-machines = 1
 num-nodes = 40
-per-node-concurrency = 4
+per-node-concurrency = 2
 topo-degree = 0
 txn-span = 0
