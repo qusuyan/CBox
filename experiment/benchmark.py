@@ -49,7 +49,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     logger = MetaLogger(exp.log_dir)
     logger.print(f'Running benchmark on with parameters: {params}')
 
-    exp_name = f"experiment-{exp.uid}"
+    exp_name = f'{params["exp-prefix"]}experiment-{exp.uid}'
     os.makedirs(f"./results/{exp_name}")
     with open(f"./results/{exp_name}/config.json", "w") as f:
         json.dump(params, f, indent=2)
@@ -207,7 +207,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     stats["avg_cpu"] = cumulative["cpu_util"] / len(files)
     
     # TODO: parse only logs corresponding to specific range of experiment time
-    log_dir = f"./logs/{exp_name}"
+    log_dir = exp.log_dir
     log_line_ranges = get_log_lines(log_dir, start_rt, end_rt)
     msg_delay = parse_msg_delay(log_dir, line_ranges=log_line_ranges)
     stats["arrive_late_chance"] = msg_delay["arrive_late_chance"]
@@ -269,6 +269,7 @@ if __name__ == "__main__":
         "network-config": "",
         "topo-config": "",
         "validator-config": "",
+        "exp-prefix": "",
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

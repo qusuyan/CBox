@@ -11,7 +11,7 @@ use crate::get_report_timer;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
-use crate::stage::pass;
+use crate::stage::{pass, process_illusion};
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 
@@ -169,6 +169,7 @@ pub async fn txn_validation_thread(
                 let txn_sender = pending_txns_sender.clone();
                 let sem = core_group.clone();
                 let cores = cores_owned.clone();
+                let delay_pool = delay.clone();
 
                 tokio::spawn(async move {
                     // batch validating txns
@@ -210,10 +211,7 @@ pub async fn txn_validation_thread(
                         correct_txns.push((src, (txn, txn_ctx)));
                     }
 
-                    // 1ms
-                    if verification_time > 0.001 {
-                        tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
-                    }
+                    process_illusion(Duration::from_secs_f64(verification_time), &delay_pool).await;
 
                     if let Err(e) = txn_sender.send((correct_txns, _permit)).await {
                         pf_error!(id; "failed to send to pending_txns pipe: {:?}", e);

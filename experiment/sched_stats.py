@@ -48,12 +48,8 @@ def parse_sched_stats(log_dir, line_ranges = {}):
             parsed_metrics = [pattern.groups() for pattern in patterns]
 
             # skip first minute
-            nodes_seen = set()
             for (node, sched_count, sched_duration, poll_count, poll_duration) in parsed_metrics:
-                if node in nodes_seen:
-                    metrics.append((node, stage, int(sched_count), float(sched_duration), int(poll_count), float(poll_duration)))
-                else:
-                    nodes_seen.add(node)
+                metrics.append((node, stage, int(sched_count), float(sched_duration), int(poll_count), float(poll_duration)))
 
     df = pd.DataFrame(metrics, columns=["node", "stage", "sched_count", "sched_duration", "poll_count", "poll_duration"])
     # df = df.sort_values(["node", "stage"])

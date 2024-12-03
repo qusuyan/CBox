@@ -17,7 +17,7 @@ use crate::protocol::block::Block;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::protocol::CryptoScheme;
-use crate::stage::pass;
+use crate::stage::{pass, process_illusion};
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::{VCoreGroup, VCoreOwned};
 
@@ -232,6 +232,7 @@ pub async fn block_management_thread(
                 let txns_validated = txns_seen.clone();
                 let sem = core_group.clone();
                 let cores = cores_owned.clone();
+                let delay_pool = delay.clone();
 
                 tokio::task::spawn(async move {
                     // validating txns in peer blocks
@@ -282,7 +283,7 @@ pub async fn block_management_thread(
                         }
                     }
 
-                    tokio::time::sleep(Duration::from_secs_f64(verification_time)).await;
+                    process_illusion(Duration::from_secs_f64(verification_time), &delay_pool).await;
 
                     if !blk_valid {
                         cores.fetch_sub(1, Ordering::SeqCst);
