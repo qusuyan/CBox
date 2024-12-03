@@ -6,8 +6,15 @@ import pandas as pd
 
 # exp_dir = "results/Avax-Scale/"
 # configs = ["crypto", "num-nodes"]
-exp_dir = "results/Avax-BlkLen/"
-configs = ["correct-config", "num-nodes"]
+
+# exp_dir = "results/Avax-BlkLen/"
+# configs = ["correct-config", "num-nodes"]
+
+# exp_dir = "results/ChainReplication-DummyECDSA/"
+# configs = ["per-node-concurrency", "num-nodes"]
+
+exp_dir = "results/ChainReplication-NoEncrypt/"
+configs = ["per-node-concurrency", "num-nodes"]
 
 metrics = ["avg_tput", "avg_cpu", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms"]
 

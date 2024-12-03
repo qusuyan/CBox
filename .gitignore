@@ -11,5 +11,4 @@ test_*.json
 *.html
 *.pl
 *.data.old
-*.png
 .DS_Store

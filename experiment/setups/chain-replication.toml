@@ -17,5 +17,5 @@ num-accounts = 1000
 num-clients = 1
 num-machines = 1
 num-nodes = [600, 640, 680, 720, 760, 800, 840, 880, 920, 960, 1000]
-per-node-concurrency = 2
+per-node-concurrency = [1, 2]
 txn-span = 1
