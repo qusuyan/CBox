@@ -16,7 +16,7 @@ import pandas as pd
 # exp_dir = "results/ChainReplication-NoEncrypt/"
 # configs = ["per-node-concurrency", "num-nodes"]
 
-exp_dir = "results/Btc-Scale-all/"
+exp_dir = "results/Btc-Scale/"
 configs = ["num-nodes"]
 
 metrics = ["avg_tput", "avg_cpu", "stale_rate", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms"]
@@ -37,8 +37,8 @@ for result_dir in result_dirs:
     with open(stats_file, "r") as f:
         stats = json.load(f)
 
-    if stats["deliver_late_chance"] > 0.0005:
-        continue
+    # if stats["deliver_late_chance"] > 0.0005:
+    #     continue
     data = [config[c] for c in configs] + [stats[m] for m in metrics]
     records.append(data)
 

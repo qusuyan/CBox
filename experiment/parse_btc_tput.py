@@ -10,7 +10,7 @@ commit_depth = 6
 txns_per_block = 1957
 warmup_time = 0
 
-exp_dir = "results/Btc-Scale-all"
+exp_dir = "results/Btc-Scale/"
 csv_file_regex = "copycat_cluster_[\d]+\.csv"
 
 result_dirs = os.listdir(exp_dir)

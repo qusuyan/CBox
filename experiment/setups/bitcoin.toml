@@ -4,11 +4,11 @@ num_iterations = 5
 [parameters]
 chain-type = "bitcoin"
 cluster-threads = 32
-correct-config = "difficulty=32"
+correct-config = "difficulty=35"
 correct-type = "Basic"
 crypto = "dummy-ecdsa"
 disable-txn-dissem = true
-exp-prefix = "Btc-Scale-Difficulty32/"
+exp-prefix = "Btc-Scale/"
 exp-time = 910
 mailbox-workers = 64
 max-inflight-txns = 200000
@@ -16,7 +16,7 @@ network-delay = 30
 num-accounts = 1000
 num-clients = 10
 num-machines = 1
-num-nodes = [90, 70, 50]
+num-nodes = [320, 300, 280, 260, 240, 220, 200, 180, 160, 140, 120, 100, 80, 60, 40]
 per-node-concurrency = 16
 topo-degree = 5
 topo-skewness = 0.5
