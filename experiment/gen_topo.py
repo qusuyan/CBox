@@ -33,7 +33,8 @@ def gen_topo(nodes, degree, skewness):
             samples.sort()
         return samples
 
-    edge_count = degree / 2 # since edges are undirected
+    # edge_count = degree / 2 # since edges are undirected
+    edge_count = degree
     edges = set()
     for (idx, node) in enumerate(nodes):
         neighbor_idx = {nidx + (nidx >= idx) for nidx in sampler(rng, edge_count, len(nodes) - 1)}

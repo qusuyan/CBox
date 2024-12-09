@@ -194,9 +194,9 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         df = df.iloc[first_commit:last_record]
         avg_latency = df["Avg Latency (s)"].mean()
         df = df.loc[df["Runtime (s)"] > avg_latency + SETUP_TIME]
-        df = df.iloc[1::]   # skip the first record
-        start = int(df.iloc[0]["Runtime (s)"])
-        end = int(df.iloc[-1]["Runtime (s)"])
+        df = df.iloc[1::] if df.shape[0] > 0 else df   # skip the first record
+        start = int(df.iloc[0]["Runtime (s)"]) if df.shape[0] > 0 else None
+        end = int(df.iloc[-1]["Runtime (s)"]) if df.shape[0] > 0 else None
         start_rt = start if start_rt is None else max(start_rt, start)
         end_rt = end if end_rt is None else min(end_rt, end)
         stats["peak_tput"] = max(stats["peak_tput"], df.loc[:, 'Throughput (txn/s)'].max())

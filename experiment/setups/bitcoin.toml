@@ -4,23 +4,20 @@ num_iterations = 5
 [parameters]
 chain-type = "bitcoin"
 cluster-threads = 32
+correct-config = "difficulty=32"
 correct-type = "Basic"
 crypto = "dummy-ecdsa"
 disable-txn-dissem = true
-exp-time = 610
-mailbox-workers = 16
+exp-prefix = "Btc-Scale-Difficulty32/"
+exp-time = 910
+mailbox-workers = 64
 max-inflight-txns = 200000
 network-delay = 30
 num-accounts = 1000
 num-clients = 10
 num-machines = 1
-num-nodes = 40
+num-nodes = [90, 70, 50]
+per-node-concurrency = 16
+topo-degree = 5
+topo-skewness = 0.5
 txn-span = 0
-validator-config = [
-  "bitcoin_asymmetric_compute_validators1.json",
-  "bitcoin_asymmetric_compute_validators2.json",
-  "bitcoin_asymmetric_compute_validators4.json",
-  "bitcoin_asymmetric_compute_validators6.json",
-  "bitcoin_asymmetric_compute_validators8.json",
-  "bitcoin_asymmetric_compute_validators10.json",
-]

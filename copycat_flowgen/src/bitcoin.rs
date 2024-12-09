@@ -231,7 +231,7 @@ impl FlowGen for BitcoinFlowGen {
             chain_info.txn_count.remove(&height);
         }
         chain_info.txn_count.insert(blk_height, txns.len() as u64);
-        chain_info.chain_length = blk_height + 1;
+        chain_info.chain_length = blk_height; // blk_height starts with 1
         chain_info.total_committed += txns.len() as u64;
 
         for txn in txns {
