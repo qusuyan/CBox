@@ -38,8 +38,7 @@ pub struct BitcoinBlockManagement {
     block_size: usize,
     new_utxo: HashSet<(Hash, PubKey)>,
     utxo_spent: HashSet<(Hash, PubKey)>,
-    block_emit_time: Option<Instant>,
-    pow_time: Option<Duration>, // for debugging
+    pow_time: Option<(Instant, f64)>, // for debugging
     // for requesting missing blocks
     peer_messenger: Arc<PeerMessenger>,
     orphan_blocks: HashMap<Hash, HashSet<Hash>>,
@@ -68,7 +67,6 @@ impl BitcoinBlockManagement {
             block_size: 0,
             new_utxo: HashSet::new(),
             utxo_spent: HashSet::new(),
-            block_emit_time: None,
             pow_time: None,
             peer_messenger,
             orphan_blocks: HashMap::new(),
@@ -106,7 +104,7 @@ impl BitcoinBlockManagement {
 }
 
 impl BitcoinBlockManagement {
-    fn get_pow_time(&self) -> Duration {
+    fn get_pow_time_secs(&self) -> f64 {
         // if we randomly pick a nonce,
         // the possibility of success is 2^(- self.difficulty)
         // the code here simulates a timeout with geometric distribution
@@ -114,7 +112,7 @@ impl BitcoinBlockManagement {
         let u = rand::thread_rng().gen::<f64>();
         let x = u.log(p);
         let pow_time = HEADER_HASH_TIME * x;
-        pf_trace!(
+        pf_debug!(
             self.id;
             "POW takes {} sec; p: {}, u: {}, x: {}, block size: {}, block len: {}",
             pow_time,
@@ -122,8 +120,7 @@ impl BitcoinBlockManagement {
             self.block_size,
             self.block_under_construction.len(),
         );
-        let compute_power = self.core_group.get_unused();
-        Duration::from_secs_f64(pow_time / compute_power)
+        pow_time
     }
 
     fn validate_txn(&self, txn: &BitcoinTxn) -> Result<bool, CopycatError> {
@@ -298,28 +295,33 @@ impl BlockManagement for BitcoinBlockManagement {
             };
         };
 
-        if modified || self.block_emit_time.is_none() {
+        if modified || self.pow_time.is_none() {
             let (merkle_root, timeout) = DummyMerkleTree::new(self.block_under_construction.len())?;
             execution_delay += timeout;
             self.merkle_root = Some(merkle_root);
-            let start_pow = Instant::now();
-            let pow_time = self.get_pow_time();
-            self.pow_time = Some(pow_time);
-            self.block_emit_time = Some(start_pow + pow_time);
+            process_illusion(execution_delay, &self.delay).await;
+            let pow_start_time = Instant::now();
+            let pow_time = self.get_pow_time_secs();
+            self.pow_time = Some((pow_start_time, pow_time));
             // let runtime = Instant::now() - start_time;
             // pf_debug!(self.id; "preparing new block takes {:?}, execution delay is {:?}", runtime, execution_delay);
+        } else {
+            process_illusion(execution_delay, &self.delay).await;
         }
-
-        process_illusion(execution_delay, &self.delay).await;
 
         Ok(blk_full)
     }
 
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         loop {
-            if let Some(emit_time) = self.block_emit_time {
-                tokio::time::sleep_until(emit_time).await;
-                return Ok(());
+            if let Some((pow_start_time, pow_time)) = self.pow_time {
+                let compute_power = self.core_group.get_unused();
+                let pow_dur = Duration::from_secs_f64(pow_time / compute_power);
+                if Instant::now() >= pow_start_time + pow_dur {
+                    return Ok(());
+                }
+                let recheck_time = std::cmp::min(pow_dur, Duration::from_secs(10));
+                tokio::time::sleep(recheck_time).await;
             }
             tokio::task::yield_now().await;
         }
@@ -354,12 +356,14 @@ impl BlockManagement for BitcoinBlockManagement {
         for utxo in self.utxo_spent.drain() {
             self.utxo.remove(&utxo);
         }
-        pf_debug!(
+        let (pow_start_time, pow_time) = self.pow_time.unwrap();
+        pf_info!(
             self.id;
-            "Block {} emitted at {:?}, pow takes {} sec, actual block size is {}+{}={}, block len is {}, block_size is {}, {} pending txns left ({:?})",
+            "Block {} pow started at {:?}, pow takes {} sec, compute power is {}, actual block size is {}+{}={}, block len is {}, block_size is {}, {} pending txns left ({:?})",
             hash,
-            self.block_emit_time.unwrap(),
-            self.pow_time.unwrap().as_secs_f64(),
+            pow_start_time,
+            pow_time,
+            self.core_group.get_unused(),
             block.header.get_size(),
             block.txns.get_size(),
             block.get_size(),
@@ -368,7 +372,6 @@ impl BlockManagement for BitcoinBlockManagement {
             self.pending_txns.len(),
             block.header,
         );
-        self.block_emit_time = None;
         self.merkle_root = None;
         self.pow_time = None;
         self.block_size = 0;
@@ -688,7 +691,6 @@ impl BlockManagement for BitcoinBlockManagement {
         }
 
         // the new block is the tail of the longer chain, move over
-        self.block_emit_time = None;
         self.merkle_root = None;
         self.pow_time = None;
         self.pending_txns

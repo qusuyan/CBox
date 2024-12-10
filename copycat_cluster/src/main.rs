@@ -332,7 +332,7 @@ fn main() {
         let report_interval = get_timer_interval().as_secs_f64();
         start_report_timer().await;
         // wait when setup txns are propogated over the network
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        // tokio::time::sleep(Duration::from_secs(10)).await;
         log::info!("flow generation starts");
         let mut txns_sent = 0;
         let mut prev_committed = 0;
