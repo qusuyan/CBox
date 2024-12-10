@@ -316,8 +316,8 @@ impl BlockManagement for BitcoinBlockManagement {
         loop {
             if let Some((pow_start_time, pow_time)) = self.pow_time {
                 let compute_power = self.core_group.get_unused();
-                let pow_dur = Duration::from_secs_f64(pow_time / compute_power);
-                if Instant::now() >= pow_start_time + pow_dur {
+                let pow_dur = Duration::from_secs_f64(pow_time / compute_power - 0.001);
+                if Instant::now() > pow_start_time + pow_dur {
                     return Ok(());
                 }
                 let recheck_time = std::cmp::min(pow_dur, Duration::from_secs(10));
@@ -357,7 +357,7 @@ impl BlockManagement for BitcoinBlockManagement {
             self.utxo.remove(&utxo);
         }
         let (pow_start_time, pow_time) = self.pow_time.unwrap();
-        pf_info!(
+        pf_debug!(
             self.id;
             "Block {} pow started at {:?}, pow takes {} sec, compute power is {}, actual block size is {}+{}={}, block len is {}, block_size is {}, {} pending txns left ({:?})",
             hash,
