@@ -201,6 +201,10 @@ impl BitcoinBuilderBlockManagement {
 
 #[async_trait]
 impl BlockManagement for BitcoinBuilderBlockManagement {
+    fn get_blk_state(&self) -> CurBlockState {
+        todo!()
+    }
+
     async fn record_new_txn(
         &mut self,
         txn: Arc<Txn>,
@@ -219,7 +223,7 @@ impl BlockManagement for BitcoinBuilderBlockManagement {
         Ok(true)
     }
 
-    async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError> {
+    async fn prepare_new_block(&mut self) -> Result<(), CopycatError> {
         todo!();
     }
 

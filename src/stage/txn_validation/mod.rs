@@ -18,7 +18,7 @@ use crate::vcores::VCoreGroup;
 use async_trait::async_trait;
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -69,7 +69,6 @@ pub async fn txn_validation_thread(
     let mut txn_batch_time = None;
 
     let (pending_txns_sender, mut pending_txns_recver) = mpsc::channel(0x100000);
-    let cores_owned = Arc::new(AtomicUsize::new(0));
 
     let mut txn_validation = get_txn_validation(id, config);
 
@@ -156,7 +155,7 @@ pub async fn txn_validation_thread(
                 }
             }
 
-            _ = wait_validation_batch(txn_buffer.len(), VALIDATION_BATCH_SIZE, txn_batch_time), if txn_batch_time.is_some() && cores_owned.load(Ordering::SeqCst) < core_group.get_total_cores() => {
+            _ = wait_validation_batch(txn_buffer.len(), VALIDATION_BATCH_SIZE, txn_batch_time), if txn_batch_time.is_some() => {
                 let num_txns_to_drain = std::cmp::min(VALIDATION_BATCH_SIZE, txn_buffer.len());
                 let txns_to_validate: Vec<_> = txn_buffer.drain(0..num_txns_to_drain).collect();
 
@@ -164,20 +163,17 @@ pub async fn txn_validation_thread(
                     txn_batch_time = None;
                 }
 
-                cores_owned.fetch_add(1, Ordering::SeqCst);
                 let txn_seen = txns_seen.clone();
                 let txn_sender = pending_txns_sender.clone();
                 let sem = core_group.clone();
-                let cores = cores_owned.clone();
                 let delay_pool = delay.clone();
 
                 tokio::spawn(async move {
                     // batch validating txns
-                    let _permit = match sem.acquire_owned().await {
+                    let _permit = match sem.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            cores.fetch_sub(1, Ordering::SeqCst);
                             return;
                         }
                     };
@@ -213,19 +209,26 @@ pub async fn txn_validation_thread(
 
                     process_illusion(Duration::from_secs_f64(verification_time), &delay_pool).await;
 
-                    if let Err(e) = txn_sender.send((correct_txns, _permit)).await {
+                    if let Err(e) = txn_sender.send((correct_txns)).await {
                         pf_error!(id; "failed to send to pending_txns pipe: {:?}", e);
                     }
                 });
             }
 
             txns_with_ctx = pending_txns_recver.recv() => {
-                cores_owned.fetch_sub(1, Ordering::SeqCst);
-                let (txns_with_ctx, _permit) = match txns_with_ctx {
+                let txns_with_ctx = match txns_with_ctx {
                     Some(batch) => batch,
                     None => {
                         pf_error!(id; "pending_txns closed");
                         continue;
+                    }
+                };
+
+                let _permit = match core_group.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        return;
                     }
                 };
 
@@ -250,7 +253,7 @@ pub async fn txn_validation_thread(
             _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
                 let sleep_time = delay.load(Ordering::Relaxed);
-                if sleep_time > 0.05 && cores_owned.load(Ordering::SeqCst) < core_group.get_total_cores() {
+                if sleep_time > 0.05 {
                     // doing skipped compute cost
                     let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,

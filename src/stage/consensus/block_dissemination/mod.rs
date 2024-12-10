@@ -20,7 +20,7 @@ use crate::protocol::block::Block;
 use crate::protocol::DissemPattern;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
-use crate::vcores::{VCoreGroup, VCoreOwned};
+use crate::vcores::VCoreGroup;
 use crate::{get_report_timer, ChainConfig};
 
 use async_trait::async_trait;
@@ -64,7 +64,7 @@ pub async fn block_dissemination_thread(
     id: NodeId,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
-    mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>, VCoreOwned)>,
+    mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     block_ready_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
@@ -84,11 +84,19 @@ pub async fn block_dissemination_thread(
         tokio::select! {
             new_blk = new_block_recv.recv() => {
                 // for serializing blocks sent
-                let (src, new_tail, _permit) = match new_blk {
+                let (src, new_tail) = match new_blk {
                     Some(blk) => blk,
                     None => {
                         pf_error!(id; "new_block pipe closed unexpectedly");
                         return;
+                    }
+                };
+
+                let _permit = match core_group.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
                     }
                 };
 
