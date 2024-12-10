@@ -1,7 +1,6 @@
 #! /bin/python3
 
-import os
-import json
+import os, json, math
 import pandas as pd
 
 # exp_dir = "results/Avax-Scale/"
@@ -16,10 +15,10 @@ import pandas as pd
 # exp_dir = "results/ChainReplication-NoEncrypt/"
 # configs = ["per-node-concurrency", "num-nodes"]
 
-exp_dir = "results/Btc-Scale/"
+exp_dir = "results/Btc-Few-Ecore/"
 configs = ["num-nodes"]
 
-metrics = ["avg_tput", "avg_cpu", "stale_rate", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms"]
+metrics = ["avg_tput", "stale_rate", "avg_cpu", "ecore_util", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms", "poll_dur_ms"]
 
 result_dirs = os.listdir(exp_dir)
 records = []
@@ -37,8 +36,10 @@ for result_dir in result_dirs:
     with open(stats_file, "r") as f:
         stats = json.load(f)
 
-    # if stats["deliver_late_chance"] > 0.0005:
+    # if stats["deliver_late_chance"] > 0.0003:
     #     continue
+    if math.isnan(stats["avg_tput"]):
+        continue
     data = [config[c] for c in configs] + [stats[m] for m in metrics]
     records.append(data)
 

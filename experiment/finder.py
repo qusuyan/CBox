@@ -2,9 +2,9 @@
 import os, json
 import pandas as pd
 
-exp_dir = "results/Btc-Scale-all/"
+exp_dir = "results/Btc-Scale-32/"
 configs = ["num-nodes"]
-metrics = ["avg_tput", "avg_cpu", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms"]
+metrics = ["avg_tput", "avg_cpu", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms", "stale_rate"]
 
 records = []
 result_dirs = os.listdir(exp_dir)
