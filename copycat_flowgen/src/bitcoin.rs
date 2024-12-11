@@ -260,7 +260,7 @@ impl FlowGen for BitcoinFlowGen {
             .values()
             .map(|info| {
                 let num_committed = if info.chain_length > 0 {
-                    (1..info.chain_length)
+                    (1..info.chain_length + 1)
                         .map(|height| info.txn_count.get(&height).unwrap())
                         .sum()
                 } else {

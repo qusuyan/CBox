@@ -361,8 +361,9 @@ impl BlockManagement for BitcoinBlockManagement {
         let (pow_start_time, pow_time) = self.pow_time.unwrap();
         pf_debug!(
             self.id;
-            "Block {} pow started at {:?}, pow takes {} sec, compute power is {}, actual block size is {}+{}={}, block len is {}, block_size is {}, {} pending txns left ({:?})",
+            "Block {} at height {}, pow started at {:?}, pow takes {} sec, compute power is {}, actual block size is {}+{}={}, block len is {}, block_size is {}, {} pending txns left ({:?})",
             hash,
+            chain_length + 1,
             pow_start_time,
             pow_time,
             self.core_group.get_unused(),
@@ -516,9 +517,11 @@ impl BlockManagement for BitcoinBlockManagement {
         // the new block is the tail of a shorter chain, do nothing
         let chain_length = self.get_chain_length();
         if new_tail_height <= chain_length {
-            pf_debug!(self.id; "new chain is shorter: new chain {} vs old chain {}", new_tail_height, chain_length);
+            pf_debug!(self.id; "new chain tail {} is shorter: new chain {} vs old chain {}", new_tail_ctx.id, new_tail_height, chain_length);
             return Ok(vec![]);
         }
+
+        pf_debug!(self.id; "moving to a longer chain tail {} at height {}", new_tail_ctx.id, new_tail_height);
 
         // find blocks belonging to the diverging chain up to the common ancestor
         let mut new_chain: Vec<(Arc<Block>, Arc<BlkCtx>)> =
