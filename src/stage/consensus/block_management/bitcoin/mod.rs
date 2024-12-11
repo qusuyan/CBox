@@ -1,12 +1,8 @@
 mod basic;
-use atomic_float::AtomicF64;
 use basic::BitcoinBlockManagement;
 
-mod proposer;
-use proposer::BitcoinProposerBlockManagement;
-
-mod builder;
-use builder::BitcoinBuilderBlockManagement;
+mod eager;
+use eager::BitcoinEagerBlockManagement;
 
 use super::{BlockManagement, CurBlockState};
 use crate::config::BitcoinConfig;
@@ -14,6 +10,7 @@ use crate::peers::PeerMessenger;
 use crate::vcores::VCoreGroup;
 use crate::NodeId;
 
+use atomic_float::AtomicF64;
 use std::sync::Arc;
 
 // sha256 in rust takes ~ 1.9 us for a 80 byte block header
@@ -34,13 +31,7 @@ pub fn new(
             core_group,
             peer_messenger,
         )),
-        BitcoinConfig::Proposer { config } => Box::new(BitcoinProposerBlockManagement::new(
-            id,
-            config,
-            core_group,
-            peer_messenger,
-        )),
-        BitcoinConfig::Builder { config } => Box::new(BitcoinBuilderBlockManagement::new(
+        BitcoinConfig::Eager { config } => Box::new(BitcoinEagerBlockManagement::new(
             id,
             config,
             delay,

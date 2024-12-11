@@ -43,8 +43,7 @@ impl Default for DummyConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BitcoinConfig {
     Basic { config: BitcoinBasicConfig },
-    Proposer { config: BitcoinPBSConfig },
-    Builder { config: BitcoinPBSConfig },
+    Eager { config: BitcoinBasicConfig },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
@@ -63,32 +62,6 @@ impl Default for BitcoinBasicConfig {
     fn default() -> Self {
         Self {
             difficulty: 25,
-            commit_depth: 6,
-            txn_dissem: DissemPattern::Gossip,
-            blk_dissem: DissemPattern::Gossip,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
-pub struct BitcoinPBSConfig {
-    #[serde(default = "BitcoinPBSConfig::get_default_proposer_difficulty")]
-    pub proposer_difficulty: u8,
-    #[serde(default = "BitcoinPBSConfig::get_default_builder_difficulty")]
-    pub builder_difficulty: u8,
-    #[serde(default = "BitcoinPBSConfig::get_default_commit_depth")]
-    pub commit_depth: u8,
-    #[serde(default = "BitcoinPBSConfig::get_default_txn_dissem")]
-    pub txn_dissem: DissemPattern,
-    #[serde(default = "BitcoinPBSConfig::get_default_blk_dissem")]
-    pub blk_dissem: DissemPattern,
-}
-
-impl Default for BitcoinPBSConfig {
-    fn default() -> Self {
-        Self {
-            proposer_difficulty: 25,
-            builder_difficulty: 23,
             commit_depth: 6,
             txn_dissem: DissemPattern::Gossip,
             blk_dissem: DissemPattern::Gossip,
@@ -235,8 +208,7 @@ impl ChainConfig {
             ChainConfig::Dummy { config } => config.txn_dissem.clone(),
             ChainConfig::Bitcoin { config } => match config {
                 BitcoinConfig::Basic { config } => config.txn_dissem.clone(),
-                BitcoinConfig::Proposer { config } => config.txn_dissem.clone(),
-                BitcoinConfig::Builder { config } => config.txn_dissem.clone(),
+                BitcoinConfig::Eager { config } => config.txn_dissem.clone(),
             },
             ChainConfig::Avalanche { config } => match config {
                 AvalancheConfig::Basic { config } => config.txn_dissem.clone(),
@@ -252,8 +224,7 @@ impl ChainConfig {
             ChainConfig::Dummy { config } => config.blk_dissem.clone(),
             ChainConfig::Bitcoin { config } => match config {
                 BitcoinConfig::Basic { config } => config.blk_dissem.clone(),
-                BitcoinConfig::Proposer { config } => config.blk_dissem.clone(),
-                BitcoinConfig::Builder { config } => config.blk_dissem.clone(),
+                BitcoinConfig::Eager { config } => config.blk_dissem.clone(),
             },
             ChainConfig::Avalanche { config } => match config {
                 AvalancheConfig::Basic { config } => DissemPattern::Sample {

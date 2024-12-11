@@ -12,7 +12,7 @@ commit_depth = 6
 txns_per_block = 1957
 warmup_time = 0
 
-exp_dir = "results/Btc-Few-Ecore/"
+exp_dir = "results/Btc-Scale-32/"
 csv_file_regex = "copycat_cluster_[\d]+\.csv"
 
 result_dirs = os.listdir(exp_dir)
@@ -54,9 +54,8 @@ for result_dir in result_dirs:
         orig_json = json.load(f)
         
     # chain length is off by 1
-    orig_json["avg_tput"] = ((actual_chain_length - 1 + commit_depth) * txns_per_block) / (actual_ts + warmup_time) if actual_chain_length > 0 else float('nan')
-    orig_json["stale_rate"] = 1 - ((actual_chain_length - 1 + commit_depth) / blocks_generated) if actual_chain_length > 0 else float('nan')
+    orig_json["avg_tput"] = ((actual_chain_length + commit_depth) * txns_per_block) / (actual_ts + warmup_time) if actual_chain_length > 0 else float('nan')
+    orig_json["stale_rate"] = 1 - ((actual_chain_length + commit_depth) / blocks_generated) if actual_chain_length > 0 else float('nan')
     orig_json["ecore_util"] = ecore_util["avg"]
-    print(f'{config["num-nodes"]}: {ecore_util}\n')
     with open(stats_file, "w") as f:
         json.dump(orig_json, f, indent=2)

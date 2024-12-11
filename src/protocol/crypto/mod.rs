@@ -84,7 +84,7 @@ impl DummyMerkleTree {
         self.root
     }
 
-    pub fn verify(root: &Hash, num_elem: usize) -> Result<(bool, Duration), CopycatError> {
+    pub fn verify(_root: &Hash, num_elem: usize) -> Result<(bool, Duration), CopycatError> {
         let timeout = Duration::from_secs_f64(Self::TIMEOUT_PER_LEAF * num_elem as f64);
         Ok((true, timeout))
     }

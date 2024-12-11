@@ -40,6 +40,7 @@ pub struct VCoreGroup {
     utilization: AtomicF64,
 }
 
+#[allow(unused)]
 impl VCoreGroup {
     pub fn new(max_cores: usize) -> Self {
         let now = Instant::now();
