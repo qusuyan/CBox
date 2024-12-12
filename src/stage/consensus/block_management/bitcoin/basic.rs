@@ -359,7 +359,7 @@ impl BlockManagement for BitcoinBlockManagement {
             self.utxo.remove(&utxo);
         }
         let (pow_start_time, pow_time) = self.pow_time.unwrap();
-        pf_debug!(
+        pf_info!(
             self.id;
             "Block {} at height {}, pow actually takes {} sec, pow takes {} sec, compute power is {}, actual block size is {}+{}={}, block len is {}, block_size is {}, {} pending txns left ({:?})",
             hash,
