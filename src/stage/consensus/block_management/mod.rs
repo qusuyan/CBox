@@ -29,6 +29,7 @@ use tokio::time::{Duration, Instant};
 use dashmap::DashMap;
 
 use atomic_float::AtomicF64;
+use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -111,6 +112,7 @@ pub async fn block_management_thread(
         core_group.clone(),
         peer_messenger,
     );
+    let mut blks_seen = HashSet::new();
     let mut blk_state = CurBlockState::Working;
 
     let (pending_blk_sender, mut pending_blk_recver) = mpsc::channel(0x100000);
@@ -198,10 +200,13 @@ pub async fn block_management_thread(
                     }
                 };
 
+                drop(_permit);
+
                 pf_debug!(id; "proposing new block {:?}", new_blk);
                 blk_state = CurBlockState::Working;
                 self_blks_sent += 1;
                 self_txns_sent += new_blk.txns.len();
+                blks_seen.insert(new_blk_ctx.id);
 
                 if let Err(e) = new_block_send.send((id, vec![(new_blk, new_blk_ctx)])).await {
                     pf_error!(id; "failed to send to new_block pipe: {:?}", e);
@@ -225,6 +230,19 @@ pub async fn block_management_thread(
                 };
 
                 pf_debug!(id; "got from {} new block {:?}, computing its context...", src, new_block);
+                match new_block.header.compute_id() {
+                    Ok(blk_id) => {
+                        if blks_seen.contains(&blk_id) {
+                            continue;
+                        } else {
+                            blks_seen.insert(blk_id);
+                        }
+                    }
+                    Err(e) => {
+                        pf_error!(id; "failed to compute blk_)id: {:?}", e);
+                        continue;
+                    }
+                }
 
                 let blk_sender = pending_blk_sender.clone();
                 let txns_validated = txns_seen.clone();

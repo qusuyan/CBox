@@ -6,9 +6,10 @@ use std::{
     sync::Arc,
 };
 
-use crate::protocol::crypto::Hash;
+use super::crypto::sha256;
 use crate::protocol::transaction::Txn;
 use crate::NodeId;
+use crate::{protocol::crypto::Hash, CopycatError};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum BlockHeader {
@@ -30,6 +31,19 @@ pub enum BlockHeader {
     ChainReplication {
         blk_id: Hash,
     },
+}
+
+impl BlockHeader {
+    pub fn compute_id(&self) -> Result<Hash, CopycatError> {
+        match self {
+            BlockHeader::Dummy | BlockHeader::Avalanche { .. } => Ok(Hash::zero()),
+            BlockHeader::Bitcoin { .. } => {
+                let serialized_header = bincode::serialize(self)?;
+                Ok(sha256(&serialized_header)?)
+            }
+            BlockHeader::ChainReplication { blk_id } => Ok(*blk_id),
+        }
+    }
 }
 
 // TODO: for better accuracy, we should implement GetSize manually so that message size

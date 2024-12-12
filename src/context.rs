@@ -1,7 +1,5 @@
-use primitive_types::U256;
-
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::{sha256, Hash};
+use crate::protocol::crypto::Hash;
 use crate::transaction::Txn;
 use crate::CopycatError;
 
@@ -26,19 +24,8 @@ impl TxnCtx {
 }
 
 impl BlkCtx {
-    fn get_blk_id(header: &BlockHeader) -> Result<Hash, CopycatError> {
-        match header {
-            BlockHeader::Dummy | BlockHeader::Avalanche { .. } => Ok(U256::zero()),
-            BlockHeader::Bitcoin { .. } => {
-                let serialized_header = bincode::serialize(header)?;
-                Ok(sha256(&serialized_header)?)
-            }
-            BlockHeader::ChainReplication { blk_id } => Ok(*blk_id),
-        }
-    }
-
     pub fn from_blk(block: &Block) -> Result<Self, CopycatError> {
-        let blk_id = Self::get_blk_id(&block.header)?;
+        let blk_id = block.header.compute_id()?;
 
         let mut txn_ctx = vec![];
         for txn in block.txns.iter() {
@@ -55,7 +42,7 @@ impl BlkCtx {
         header: &BlockHeader,
         txn_ctx: Vec<Arc<TxnCtx>>,
     ) -> Result<Self, CopycatError> {
-        let blk_id = Self::get_blk_id(&header)?;
+        let blk_id = header.compute_id()?;
 
         Ok(BlkCtx {
             id: blk_id,
