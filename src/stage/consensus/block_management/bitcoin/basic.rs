@@ -624,16 +624,13 @@ impl BlockManagement for BitcoinBlockManagement {
             }
         }
 
-        self.utxo.extend(undo_utxo_spent);
-        self.utxo.retain(|utxo| !undo_new_utxo.contains(utxo));
-
         // reverse the new tail so that it goes in order
         new_chain.reverse();
 
         let mut total_exec_time = Duration::from_secs(0);
         // apply transactions of the new chain and check if this chain is valid
-        let mut new_utxos = HashSet::new();
-        let mut utxos_spent = HashSet::new();
+        let mut new_utxos = undo_utxo_spent;
+        let mut utxos_spent = undo_new_utxo;
         let mut txns_applied: HashSet<Hash> = HashSet::new();
         for (new_block, new_block_ctx) in new_chain.iter() {
             assert!(new_block.txns.len() == new_block_ctx.txn_ctx.len());
@@ -653,12 +650,12 @@ impl BlockManagement for BitcoinBlockManagement {
                 {
                     for in_txn_hash in in_utxo {
                         let utxo = (in_txn_hash.clone(), sender.clone());
-                        if self.utxo.contains(&utxo) && !utxos_spent.contains(&utxo) {
-                            // good case, using existing utxo that has not been spent
-                            utxos_spent.insert(utxo);
-                        } else if new_utxos.contains(&utxo) {
+                        if new_utxos.contains(&utxo) {
                             // good case, using new utxos created but not committed yet
                             new_utxos.remove(&utxo);
+                        } else if self.utxo.contains(&utxo) && !utxos_spent.contains(&utxo) {
+                            // good case, using existing utxo that has not been spent
+                            utxos_spent.insert(utxo);
                         } else {
                             // pf_debug!(self.id; "double spending - in utxo ({}): {}, in utxo_spent ({}): {}, in new_utxos ({}): {}", self.utxo.len(), self.utxo.contains(&utxo), utxos_spent.len(), utxos_spent.contains(&utxo), new_utxos.len(), new_utxos.contains(&utxo));
                             tokio::time::sleep(total_exec_time).await;
@@ -692,17 +689,29 @@ impl BlockManagement for BitcoinBlockManagement {
                         ..
                     } => {
                         if *out_utxo > 0 {
-                            new_utxos.insert((txn_hash.clone(), receiver.clone()));
+                            let utxo = (txn_hash.clone(), receiver.clone());
+                            if !utxos_spent.remove(&utxo) {
+                                new_utxos.insert(utxo);
+                            }
                         }
                         if *remainder > 0 {
-                            new_utxos.insert((txn_hash.clone(), sender.clone()));
+                            let utxo = (txn_hash.clone(), sender.clone());
+                            if !utxos_spent.remove(&utxo) {
+                                new_utxos.insert(utxo);
+                            }
                         }
                     }
                     BitcoinTxn::Grant { receiver, .. } => {
-                        new_utxos.insert((txn_hash.clone(), receiver.clone()));
+                        let utxo = (txn_hash.clone(), receiver.clone());
+                        if !utxos_spent.remove(&utxo) {
+                            new_utxos.insert(utxo);
+                        }
                     }
                     BitcoinTxn::Incentive { receiver, .. } => {
-                        new_utxos.insert((txn_hash.clone(), receiver.clone()));
+                        let utxo = (txn_hash.clone(), receiver.clone());
+                        if !utxos_spent.remove(&utxo) {
+                            new_utxos.insert(utxo);
+                        }
                     }
                 }
 
