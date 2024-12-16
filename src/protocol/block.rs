@@ -1,4 +1,5 @@
 use get_size::GetSize;
+use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 
 use std::{
@@ -36,7 +37,20 @@ pub enum BlockHeader {
 impl BlockHeader {
     pub fn compute_id(&self) -> Result<Hash, CopycatError> {
         match self {
-            BlockHeader::Dummy | BlockHeader::Avalanche { .. } => Ok(Hash::zero()),
+            BlockHeader::Dummy => {
+                let mut rng = thread_rng();
+                let mut rand = [0u8; 32];
+                rng.fill(&mut rand);
+                Ok(Hash::from_little_endian(&rand))
+            }
+            BlockHeader::Avalanche {
+                proposer,
+                id,
+                depth,
+            } => {
+                let raw = [0u64, *depth as u64, *proposer, *id];
+                Ok(Hash { 0: raw })
+            }
             BlockHeader::Bitcoin { .. } => {
                 let serialized_header = bincode::serialize(self)?;
                 Ok(sha256(&serialized_header)?)
