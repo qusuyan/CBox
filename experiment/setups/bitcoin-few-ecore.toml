@@ -10,6 +10,7 @@ crypto = "dummy-ecdsa"
 disable-txn-dissem = true
 exp-prefix = "Btc-Few-Ecore/"
 exp-time = 910
+frequency = 2000
 mailbox-workers = 64
 max-inflight-txns = 200000
 network-delay = 30

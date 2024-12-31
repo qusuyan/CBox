@@ -15,10 +15,16 @@ import pandas as pd
 # exp_dir = "results/ChainReplication-NoEncrypt/"
 # configs = ["per-node-concurrency", "num-nodes"]
 
-exp_dir = "results/Btc-Scale-32/"
-configs = ["num-nodes"]
+# exp_dir = "results/Bitcoin-AsymmCompute/"
+# configs = ["validator-config"]
 
-metrics = ["avg_tput", "stale_rate", "avg_cpu", "ecore_util", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms", "poll_dur_ms"]
+# exp_dir = "results/Avax-Partition/"
+# configs = ["correct-type", "correct-config"]
+
+exp_dir = "results/Avax-Faulty/"
+configs = ["correct-type", "num-faulty"]
+
+metrics = ["avg_tput", "avg_cpu", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms"]
 
 result_dirs = os.listdir(exp_dir)
 records = []

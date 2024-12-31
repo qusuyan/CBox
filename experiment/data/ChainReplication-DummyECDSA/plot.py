@@ -17,6 +17,8 @@ fig, (tput_ax, sched_ax, msg_ax, cpu_ax) = plt.subplots(4, 1, sharex = True, fig
 bar_width = 16
 
 # plot tput
+tput_ax.axvline(x = 940, color=ecore1_color_dark, linestyle="--", linewidth=0.7)
+tput_ax.axvline(x = 820, color=ecore2_color_dark, linestyle="--", linewidth=0.7)
 ecore1_max = ecore1_df["avg_tput"].max()
 ecore2_max = ecore2_df["avg_tput"].max()
 tput_exp_ax = tput_ax.twinx()
@@ -30,8 +32,8 @@ tput_ax.set_ylabel('Tput (ktps.)', labelpad=2)
 tput_ax.set_ylim((0, 13))
 
 # plot sched delay
-sched_ax.axvline(x = 920, color=ecore1_color_dark, linestyle="--", linewidth=0.7)
-sched_ax.axvline(x = 800, color=ecore2_color_dark, linestyle="--", linewidth=0.7)
+sched_ax.axvline(x = 940, color=ecore1_color_dark, linestyle="--", linewidth=0.7)
+sched_ax.axvline(x = 820, color=ecore2_color_dark, linestyle="--", linewidth=0.7)
 sched_ax.plot(ecore1_df["num-nodes"], ecore1_df["sched_dur_ms"], 'o-', color=ecore1_color, label="eCore=1")
 sched_ax.plot(ecore2_df["num-nodes"], ecore2_df["sched_dur_ms"], 's-', color=ecore2_color, label="eCore=2")
 sched_ax.set_ylabel('Sched Delay (ms)', labelpad=7)
@@ -39,8 +41,8 @@ sched_ax.set_ylim((0, 2.5))
 sched_ax.legend(loc="upper left")
 
 # plot msg delay
-msg_ax.axvline(x = 920, color=ecore1_color_dark, linestyle="--", linewidth=0.7)
-msg_ax.axvline(x = 800, color=ecore2_color_dark, linestyle="--", linewidth=0.7)
+msg_ax.axvline(x = 940, color=ecore1_color_dark, linestyle="--", linewidth=0.7)
+msg_ax.axvline(x = 820, color=ecore2_color_dark, linestyle="--", linewidth=0.7)
 msg_delay_ax = msg_ax.twinx()
 msg_delay_ax.bar(ecore1_df["num-nodes"]-bar_width/2, ecore1_df["deliver_late_dur_ms"], bar_width, color=ecore1_color, alpha=0.35, zorder=0)
 msg_delay_ax.bar(ecore2_df["num-nodes"]+bar_width/2, ecore2_df["deliver_late_dur_ms"], bar_width, color=ecore2_color, alpha=0.35, zorder=0)
@@ -52,8 +54,8 @@ msg_ax.set_ylabel('Msg Late (%)', labelpad=0)
 msg_ax.set_ylim((0, 0.299))
 
 # plot cpu util
-cpu_ax.axvline(x = 920, color=ecore1_color_dark, linestyle="--", linewidth=0.7)
-cpu_ax.axvline(x = 800, color=ecore2_color_dark, linestyle="--", linewidth=0.7)
+cpu_ax.axvline(x = 940, color=ecore1_color_dark, linestyle="--", linewidth=0.7)
+cpu_ax.axvline(x = 820, color=ecore2_color_dark, linestyle="--", linewidth=0.7)
 cpu_ax.plot(ecore1_df["num-nodes"], ecore1_df["avg_cpu"], 'o-', color=ecore1_color)
 cpu_ax.plot(ecore2_df["num-nodes"], ecore2_df["avg_cpu"], 's-', color=ecore2_color)
 cpu_ax.set_ylabel('CPU (%)', labelpad=-5)

@@ -9,7 +9,7 @@ import json
 file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
 deliver_regex = "Worker (\d) \(([\d]+)->([\d]+)\): message get delivered later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
 arrive_regex = "Worker (\d) \(([\d]+)->([\d]+)\): message arrived later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
-msgs_sent_recv_regex = "copycat::peers: \(([\d]+)\) In the last minute: ([\d]+) msgs sent and ([\d]+) msgs recved"
+msgs_sent_recv_regex = "copycat::peers::peers: \(([\d]+)\) In the last minute: ([\d]+) msgs sent and ([\d]+) msgs recved"
 
 
 def parse_msg_delay(log_dir, line_ranges = {}):

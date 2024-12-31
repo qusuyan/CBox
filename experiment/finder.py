@@ -25,4 +25,5 @@ for result_dir in result_dirs:
             records.append(data)
 
 df = pd.DataFrame(records, columns=["exp_id"] + configs + metrics)
+df = df.sort_values("exp_id")
 print(df)
