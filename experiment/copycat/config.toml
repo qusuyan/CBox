@@ -22,6 +22,7 @@ cluster = [
   ["chain_type", "bitcoin"],
   ["crypto", "dummy"],
   ["conn_multiply", "1"],
+  ["warmup_time", "10"],
   ["num_clients", "1"],
   ["clients_remainder", "0"],
   ["accounts", "10000"],

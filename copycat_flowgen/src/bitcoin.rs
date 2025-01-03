@@ -32,9 +32,8 @@ pub struct BitcoinFlowGen {
     utxos: HashMap<ClientId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
     accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
     in_flight: HashMap<Hash, Instant>,
-    num_completed_txns: u64,
     chain_info: HashMap<NodeId, ChainInfo>,
-    total_time_sec: f64,
+    latencies: Vec<f64>,
     _notify: Notify,
 }
 
@@ -90,8 +89,7 @@ impl BitcoinFlowGen {
             utxos,
             accounts,
             in_flight: HashMap::new(),
-            num_completed_txns: 0,
-            total_time_sec: 0.0,
+            latencies: vec![],
             chain_info: HashMap::new(),
             _notify: Notify::new(),
         }
@@ -242,19 +240,13 @@ impl FlowGen for BitcoinFlowGen {
             };
 
             let commit_latency = Instant::now() - start_time;
-            self.total_time_sec += commit_latency.as_secs_f64();
-            self.num_completed_txns += 1;
+            self.latencies.push(commit_latency.as_secs_f64());
         }
 
         Ok(())
     }
 
     fn get_stats(&mut self) -> Stats {
-        let latency = if self.num_completed_txns == 0 {
-            0f64
-        } else {
-            self.total_time_sec / self.num_completed_txns as f64
-        };
         let (num_committed, chain_length, acc_commit_confidence) = self
             .chain_info
             .values()
@@ -285,8 +277,11 @@ impl FlowGen for BitcoinFlowGen {
         } else {
             acc_commit_confidence / self.chain_info.len() as f64
         };
+
+        let latencies = std::mem::replace(&mut self.latencies, vec![]);
+
         Stats {
-            latency,
+            latencies,
             num_committed,
             chain_length,
             commit_confidence,

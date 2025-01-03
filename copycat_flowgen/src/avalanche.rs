@@ -39,9 +39,8 @@ pub struct AvalancheFlowGen {
     conflicts_sent: usize,      // pair of conflicting txns sent
     conflicts_recv: usize,      // pair of conflicting txns which I have receied one txn from them
     conflicts_committed: usize, // pair of conflicting txns which I have received both txns
-    num_completed_txns: u64,
     dag_info: HashMap<NodeId, DagInfo>,
-    total_time_sec: f64,
+    latencies: Vec<f64>,
     _notify: Notify,
     inflight_snapshot: HashSet<Hash>,
 }
@@ -106,8 +105,7 @@ impl AvalancheFlowGen {
             conflicts_sent: 0,
             conflicts_recv: 0,
             conflicts_committed: 0,
-            num_completed_txns: 0,
-            total_time_sec: 0.0,
+            latencies: vec![],
             dag_info: HashMap::new(),
             _notify: Notify::new(),
             inflight_snapshot: HashSet::new(),
@@ -421,8 +419,7 @@ impl FlowGen for AvalancheFlowGen {
             // update commit latency
             if let Some(time) = self.in_flight.remove(&hash) {
                 let commit_latency = Instant::now() - time;
-                self.total_time_sec += commit_latency.as_secs_f64();
-                self.num_completed_txns += 1;
+                self.latencies.push(commit_latency.as_secs_f64());
             };
 
             // check for conflicts
@@ -442,11 +439,6 @@ impl FlowGen for AvalancheFlowGen {
     }
 
     fn get_stats(&mut self) -> Stats {
-        let latency = if self.num_completed_txns == 0 {
-            0f64
-        } else {
-            self.total_time_sec / self.num_completed_txns as f64
-        };
         let (num_committed, chain_length) = self
             .dag_info
             .values()
@@ -469,8 +461,10 @@ impl FlowGen for AvalancheFlowGen {
             self.inflight_snapshot = inflight_snapshot;
         }
 
+        let latencies = std::mem::replace(&mut self.latencies, vec![]);
+
         Stats {
-            latency,
+            latencies,
             num_committed,
             chain_length,
             commit_confidence,

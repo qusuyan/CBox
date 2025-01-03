@@ -35,8 +35,7 @@ pub struct ChainReplicationFlowGen {
     signature: Signature,
     // statistics
     stats: HashMap<NodeId, LogInfo>,
-    total_time_sec: f64,
-    num_completed_txns: u64,
+    latencies: Vec<f64>,
     _notify: Notify,
 }
 
@@ -72,8 +71,7 @@ impl ChainReplicationFlowGen {
             pub_key,
             signature,
             stats: HashMap::new(),
-            total_time_sec: 0f64,
-            num_completed_txns: 0,
+            latencies: vec![],
             _notify: Notify::new(),
         }
     }
@@ -162,20 +160,13 @@ impl FlowGen for ChainReplicationFlowGen {
             };
 
             let commit_latency = Instant::now() - start_time;
-            self.total_time_sec += commit_latency.as_secs_f64();
-            self.num_completed_txns += 1;
+            self.latencies.push(commit_latency.as_secs_f64());
         }
 
         Ok(())
     }
 
     fn get_stats(&mut self) -> Stats {
-        let latency = if self.num_completed_txns == 0 {
-            0f64
-        } else {
-            self.total_time_sec / self.num_completed_txns as f64
-        };
-
         let (num_committed, chain_length) = self
             .stats
             .values()
@@ -183,8 +174,10 @@ impl FlowGen for ChainReplicationFlowGen {
             .reduce(|acc, e| (std::cmp::max(acc.0, e.0), std::cmp::max(acc.1, e.1)))
             .unwrap_or((0, 0));
 
+        let latencies = std::mem::replace(&mut self.latencies, vec![]);
+
         Stats {
-            latency,
+            latencies,
             num_committed,
             chain_length,
             commit_confidence: 1.0, // since non BFT

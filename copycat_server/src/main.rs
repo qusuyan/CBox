@@ -124,8 +124,13 @@ pub fn main() {
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_node_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
-        .write(b"Throughput (txn/s), Avg Latency (s)\n")
+        .write(b"Throughput (txn/s)\n")
         .expect("write stats failed");
+    let mut latency_file = std::fs::File::create(format!("/tmp/copycat_node_{}_lat.csv", id))
+        .expect("latency file creation failed");
+    latency_file
+        .write(b"Latency (s)\n")
+        .expect("write latency failed");
 
     runtime.block_on(async {
         let (node, mut executed): (Node, _) = match Node::init(
@@ -219,13 +224,16 @@ pub fn main() {
                     let stats = flow_gen.get_stats();
                     let tput = stats.num_committed as f64 / report_timer.borrow().as_secs_f64();
                     log::info!(
-                        "Throughput: {} txn/s, Average Latency: {} s",
+                        "Throughput: {} txn/s",
                         tput,
-                        stats.latency
                     );
                     stats_file
-                        .write_fmt(format_args!("{},{}\n", tput, stats.latency))
+                        .write_fmt(format_args!("{}\n", tput))
                         .expect("write stats failed");
+                    for lat in stats.latencies {
+                        latency_file.write_fmt(format_args!("{}\n", lat))
+                        .expect("write latency failed");
+                    }
                 }
             }
         }

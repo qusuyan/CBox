@@ -137,8 +137,8 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
 
     if params["single-process-cluster"]:
         run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox-workers"], params["chain-type"], 
-                    params["crypto"], params["conn-multiply"], clients_per_machine, clients_remainder, num_accounts, max_inflight, 
-                    frequency, params["conflict_rate"], params["txn-span"], params["disable-txn-dissem"]]
+                    params["crypto"], params["conn-multiply"], SETUP_TIME, clients_per_machine, clients_remainder, num_accounts, 
+                    max_inflight, frequency, params["conflict_rate"], params["txn-span"], params["disable-txn-dissem"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -174,31 +174,35 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         addr = machine["addr"].split(":")[0]
         if params["single-process-cluster"]:
             stats_file = f"copycat_cluster_{machine_id}.csv"
-            files.append((addr, stats_file))
+            lat_file = f"copycat_cluster_{machine_id}_lat.csv"
+            files.append((addr, (stats_file, lat_file)))
         else:
             for node in machine_id["node_list"]:
                 stats_file = f"copycat_node_{node}.csv"
-                files.append((addr, stats_file))
+                lat_file = f"copycat_node_{node}_lat.csv"
+                files.append((addr, (stats_file, lat_file)))
     print(files)
 
     stats = { "peak_tput": 0 }
     cumulative = {"tput": 0, "cpu_util": 0}
     start_rt = None
     end_rt = None
-    for (addr, stats_file) in files:
+    for (addr, (stats_file, lat_file)) in files:
         cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
+        cluster.copy_from(addr, f"/tmp/{lat_file}", f"./results/{exp_name}/{lat_file}")
         df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
-        first_commit = df["Avg Latency (s)"].ne(0).idxmax()
+        lat = pd.read_csv(f"./results/{exp_name}/{lat_file}")
+        first_commit = df["Throughput (txn/s)"].ne(0).idxmax()
         last_record = (df["Available Memory"] > 3e8).idxmin()  # 300 MB
         last_record = last_record if last_record > 0 else df.shape[0]
         df = df.iloc[first_commit:last_record]
-        avg_latency = df["Avg Latency (s)"].mean()
+        avg_latency = lat["Latency (s)"].mean()
         df = df.loc[df["Runtime (s)"] > avg_latency + SETUP_TIME]
         df = df.iloc[1::] if df.shape[0] > 0 else df   # skip the first record
         start = int(df.iloc[0]["Runtime (s)"]) if df.shape[0] > 0 else None
         end = int(df.iloc[-1]["Runtime (s)"]) if df.shape[0] > 0 else None
-        start_rt = start if start_rt is None else max(start_rt, start)
-        end_rt = end if end_rt is None else min(end_rt, end)
+        start_rt = start if start_rt is None else start_rt if start is None else max(start_rt, start)
+        end_rt = end if end_rt is None else end_rt if end is None else min(end_rt, end)
         stats["peak_tput"] = max(stats["peak_tput"], df.loc[:, 'Throughput (txn/s)'].max())
         cumulative["tput"] += df['Throughput (txn/s)'].mean()
         cumulative["cpu_util"] += df['Avg CPU Usage'].mean()

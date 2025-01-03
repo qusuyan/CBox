@@ -16,11 +16,11 @@ pub type FlowGenId = u64;
 pub type ClientId = u64;
 
 pub struct Stats {
-    pub latency: f64,
     pub num_committed: u64,
     pub chain_length: u64,
     pub commit_confidence: f64,
     pub inflight_txns: usize,
+    pub latencies: Vec<f64>,
 }
 
 #[async_trait]

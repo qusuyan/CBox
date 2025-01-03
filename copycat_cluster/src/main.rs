@@ -227,9 +227,13 @@ fn main() {
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
-        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence,Avg CPU Usage,Available Memory\n")
+        .write(b"Runtime (s),Throughput (txn/s),Chain Length,Commit Confidence,Avg CPU Usage,Available Memory\n")
         .expect("write stats failed");
-
+    let mut latency_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}_lat.csv", id))
+        .expect("latency file creation failed");
+    latency_file
+        .write(b"Latency (s)\n")
+        .expect("write latency failed");
     // console_subscriber::init();
 
     let runtime = Builder::new_multi_thread()
@@ -332,7 +336,8 @@ fn main() {
         let report_interval = get_timer_interval().as_secs_f64();
         start_report_timer().await;
         // wait when setup txns are propogated over the network
-        // tokio::time::sleep(Duration::from_secs(10)).await;
+        let warn_up_time = std::env::var("WARMUP_TIME").map(|str| str.parse::<u64>().expect("invalid warmup time")).unwrap_or(0);
+        tokio::time::sleep(Duration::from_secs(warn_up_time)).await;
         log::info!("flow generation starts");
         let mut txns_sent = 0;
         let mut prev_committed = 0;
@@ -411,18 +416,21 @@ fn main() {
                     let avg_steal_count = (0..rt_metrics.num_workers()).map(|id| rt_metrics.worker_steal_count(id)).sum::<u64>() / rt_metrics.num_workers() as u64;
 
                     log::info!(
-                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit Confidence: {}, CPU Usage: {}, Memory Available: {}",
+                        "Runtime: {} s, Throughput: {} txn/s, Chain Length: {}, Commit Confidence: {}, CPU Usage: {}, Memory Available: {}",
                         run_time,
                         tput,
-                        stats.latency,
                         stats.chain_length,
                         stats.commit_confidence,
                         avg_cpu_usage,
                         mem_available,
                     );
                     stats_file
-                        .write_fmt(format_args!("{},{},{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence, avg_cpu_usage, mem_available))
+                        .write_fmt(format_args!("{},{},{},{},{},{}\n", run_time, tput, stats.chain_length, stats.commit_confidence, avg_cpu_usage, mem_available))
                         .expect("write stats failed");
+                    for lat in stats.latencies {
+                        latency_file.write_fmt(format_args!("{}\n", lat))
+                        .expect("write latency failed");
+                    }
                     log::info!("In the last minute: txns_sent: {}, inflight_txns: {}", txns_sent, stats.inflight_txns);
                     log::info!("Cumulatively: active tasks: {} avg queue depth: {}, avg poll count: {}, avg overflow count: {}, avg steal count: {}", active_tasks, avg_queue_depth, avg_poll_count, avg_overflow_count, avg_steal_count);
                     txns_sent = 0;
