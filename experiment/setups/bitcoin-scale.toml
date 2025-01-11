@@ -1,0 +1,23 @@
+[experiment]
+num_iterations = 5
+
+[parameters]
+chain-type = "bitcoin"
+cluster-threads = 32
+correct-config = "difficulty=36"
+correct-type = "Basic"
+crypto = "dummy-ecdsa"
+disable-txn-dissem = true
+exp-prefix = "Btc-Scale-32/"
+exp-time = 910
+mailbox-workers = 64
+max-inflight-txns = 200000
+network-delay = 30
+num-accounts = 1000
+num-clients = 10
+num-machines = 1
+num-nodes = [260, 280]
+per-node-concurrency = 32
+topo-degree = 5
+topo-skewness = 0.5
+txn-span = 0

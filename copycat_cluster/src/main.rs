@@ -1,9 +1,9 @@
 use mailbox::Mailbox;
 
 use copycat::log::colored_level;
-use copycat::{get_report_timer, get_timer_interval, start_report_timer, Node};
+use copycat::{get_report_timer, get_timer_interval, parse_config_file, start_report_timer, Node};
 use copycat::{fully_connected_topology, get_topology};
-use copycat::{ChainType, Config, CryptoScheme};
+use copycat::{ChainType, CryptoScheme};
 use copycat::protocol::MsgType;
 use copycat_flowgen::get_flow_gen;
 
@@ -34,6 +34,10 @@ struct CliArgs {
     #[clap(long, short = 'n')]
     network_config: String,
 
+    /// Path to the config file that contains the configuration of all nodes
+    #[arg(long)]
+    config: String,
+
     /// Number of threads
     #[clap(long, short = 't', default_value_t = 8)]
     num_threads: u64,
@@ -41,10 +45,6 @@ struct CliArgs {
     /// Number of mailbox workers
     #[clap(long, short = 'w', default_value_t = 8)]
     num_mailbox_workers: usize,
-
-    /// Max allowed per node concurrency
-    #[clap(long, short = 'r')]
-    per_node_concurrency: Option<usize>,
 
     /// Number of concurrent TCP streams between each pair of peers
     #[clap(long, short = 'o', default_value_t = 1)]
@@ -74,13 +74,13 @@ struct CliArgs {
     #[arg(long, short = 'q', value_enum, default_value = "0")]
     frequency: usize,
 
+    /// Probability that a conflict transaction will be generated
+    #[arg(long, short = 'r', default_value = "0")]
+    conflict_rate: f64,
+
     /// Number of nodes receiving a transaction, 0 means sending to all nodes
     #[arg(long, short = 's', default_value_t = 1)]
     txn_span: usize,
-
-    /// Blockchain specific configuration string in TOML format
-    #[arg(long, default_value_t = String::from(""))]
-    config: String,
 
     /// Network topology
     #[arg(long, default_value_t = String::from(""))]
@@ -159,7 +159,7 @@ fn main() {
     };
     let local_nodes = machine_list[&id].node_list.clone();
 
-    let nodes = machine_list
+    let nodes: HashSet<u64> = machine_list
         .iter()
         .flat_map(|(_, mailbox::config::Machine { addr: _, node_list })| node_list.clone())
         .collect();
@@ -188,21 +188,12 @@ fn main() {
     };
     log::info!("topology: {topology:?}");
 
-    let mut node_config = if args.config.is_empty() {
-        Config::from_str(args.chain, None).unwrap()
-    } else {
-        args.config = args.config.replace('+', "\n");
-        match Config::from_str(args.chain, Some(&args.config)) {
-            Ok(config) => config,
-            Err(e) => {
-                log::warn!("Invalid config string ({e:?}), fall back to default");
-                Config::from_str(args.chain, None).unwrap()
-            }
-        }
+    let mut node_config_map = parse_config_file(&args.config, args.chain).unwrap();
+    for id in local_nodes.iter() {
+        let node_config = node_config_map.get_mut(id).unwrap();
+        node_config.validate(topology.get(id).unwrap(), &nodes);
     };
-    
-    node_config.validate(&topology);
-    log::info!("Node config: {:?}", node_config);
+    log::info!("Node configs: {:?}", node_config_map);
 
     // get flow generation metrics
     let txn_span = args.txn_span;
@@ -236,9 +227,13 @@ fn main() {
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
-        .write(b"Runtime (s),Throughput (txn/s),Avg Latency (s),Chain Length,Commit Confidence,Avg CPU Usage,Available Memory\n")
+        .write(b"Runtime (s),Throughput (txn/s),Chain Length,Commit Confidence,Avg CPU Usage,Available Memory\n")
         .expect("write stats failed");
-
+    let mut latency_file = std::fs::File::create(format!("/tmp/copycat_cluster_{}_lat.csv", id))
+        .expect("latency file creation failed");
+    latency_file
+        .write(b"Latency (s)\n")
+        .expect("write latency failed");
     // console_subscriber::init();
 
     let runtime = Builder::new_multi_thread()
@@ -271,16 +266,17 @@ fn main() {
             //     .thread_name(format!("copycat-node-{node_id}-thread"))
             //     .build()
             //     .expect("Creating new runtime failed");
+            let node_config = node_config_map.remove(&node_id).unwrap();
             let result = Node::init(
                 node_id,
                 args.num_mailbox_workers,
                 args.chain,
                 txn_crypto,
                 p2p_crypto,
-                node_config.clone(),
+                node_config.chain_config,
                 !args.disable_txn_dissem,
                 topology.remove(&node_id).unwrap_or(HashSet::new()),
-                args.per_node_concurrency,
+                node_config.max_concurrency,
             ).await;
             let (node, mut executed): (Node, _) = match result {
                 Ok(node) => node,
@@ -318,6 +314,7 @@ fn main() {
             num_accounts,
             max_inflight,
             frequency,
+            args.conflict_rate,
             args.chain,
             args.crypto,
         );
@@ -339,7 +336,8 @@ fn main() {
         let report_interval = get_timer_interval().as_secs_f64();
         start_report_timer().await;
         // wait when setup txns are propogated over the network
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        let warn_up_time = std::env::var("WARMUP_TIME").map(|str| str.parse::<u64>().expect("invalid warmup time")).unwrap_or(0);
+        tokio::time::sleep(Duration::from_secs(warn_up_time)).await;
         log::info!("flow generation starts");
         let mut txns_sent = 0;
         let mut prev_committed = 0;
@@ -418,22 +416,29 @@ fn main() {
                     let avg_steal_count = (0..rt_metrics.num_workers()).map(|id| rt_metrics.worker_steal_count(id)).sum::<u64>() / rt_metrics.num_workers() as u64;
 
                     log::info!(
-                        "Runtime: {} s, Throughput: {} txn/s, Average Latency: {} s, Chain Length: {}, Commit Confidence: {}, CPU Usage: {}, Memory Available: {}",
+                        "Runtime: {} s, Throughput: {} txn/s, Chain Length: {}, Commit Confidence: {}, CPU Usage: {}, Memory Available: {}",
                         run_time,
                         tput,
-                        stats.latency,
                         stats.chain_length,
                         stats.commit_confidence,
                         avg_cpu_usage,
                         mem_available,
                     );
                     stats_file
-                        .write_fmt(format_args!("{},{},{},{},{},{},{}\n", run_time, tput, stats.latency, stats.chain_length, stats.commit_confidence, avg_cpu_usage, mem_available))
+                        .write_fmt(format_args!("{},{},{},{},{},{}\n", run_time, tput, stats.chain_length, stats.commit_confidence, avg_cpu_usage, mem_available))
                         .expect("write stats failed");
+                    for lat in stats.latencies {
+                        latency_file.write_fmt(format_args!("{}\n", lat))
+                        .expect("write latency failed");
+                    }
                     log::info!("In the last minute: txns_sent: {}, inflight_txns: {}", txns_sent, stats.inflight_txns);
                     log::info!("Cumulatively: active tasks: {} avg queue depth: {}, avg poll count: {}, avg overflow count: {}, avg steal count: {}", active_tasks, avg_queue_depth, avg_poll_count, avg_overflow_count, avg_steal_count);
                     txns_sent = 0;
                     prev_committed = stats.num_committed;
+
+                    for node in node_map.values() {
+                        node.report();
+                    }
                 }
             }
         }

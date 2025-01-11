@@ -1,8 +1,9 @@
 use get_size::GetSize;
+use primitive_types::U256;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    protocol::crypto::{Hash, PubKey, Signature},
+    protocol::crypto::{sha256, Hash, PubKey, Signature},
     CopycatError, CryptoScheme,
 };
 
@@ -20,6 +21,7 @@ pub enum AvalancheTxn {
     Grant {
         out_utxo: u64,
         receiver: PubKey,
+        nonce: u64,
     },
     Noop {
         parents: Vec<Hash>,
@@ -28,6 +30,18 @@ pub enum AvalancheTxn {
 }
 
 impl AvalancheTxn {
+    pub fn compute_id(&self) -> Result<Hash, CopycatError> {
+        let id = match self {
+            AvalancheTxn::PlaceHolder => U256::zero(),
+            _ => {
+                let serialized = bincode::serialize(self)?;
+                sha256(&serialized)?
+            }
+        };
+
+        Ok(id)
+    }
+
     pub fn validate(&self, crypto: CryptoScheme) -> Result<(bool, f64), CopycatError> {
         match self {
             AvalancheTxn::Send {

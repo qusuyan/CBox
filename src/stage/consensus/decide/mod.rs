@@ -1,11 +1,8 @@
 mod dummy;
 use dummy::DummyDecision;
 
-mod bitcoin;
-use bitcoin::BitcoinDecision;
-
 mod avalanche;
-use avalanche::AvalancheDecision;
+mod bitcoin;
 
 mod chain_replication;
 use chain_replication::ChainReplicationDecision;
@@ -17,13 +14,14 @@ use crate::protocol::block::Block;
 use crate::stage::pass;
 use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
-use crate::{config::Config, peers::PeerMessenger};
+use crate::vcores::VCoreGroup;
+use crate::{config::ChainConfig, peers::PeerMessenger};
 use crate::{get_report_timer, CryptoScheme};
 
 use async_trait::async_trait;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
@@ -38,6 +36,8 @@ trait Decision: Sync + Send {
     ) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
+    async fn timeout(&self) -> Result<(), CopycatError>;
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError>;
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError>;
     fn report(&mut self);
 }
@@ -45,23 +45,23 @@ trait Decision: Sync + Send {
 fn get_decision(
     id: NodeId,
     crypto_scheme: CryptoScheme,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
     delay: Arc<AtomicF64>,
 ) -> Box<dyn Decision> {
     match config {
-        Config::Dummy { .. } => Box::new(DummyDecision::new()),
-        Config::Bitcoin { config } => Box::new(BitcoinDecision::new(id, config)),
-        Config::Avalanche { config } => Box::new(AvalancheDecision::new(
+        ChainConfig::Dummy { .. } => Box::new(DummyDecision::new()),
+        ChainConfig::Bitcoin { config } => bitcoin::new(id, config),
+        ChainConfig::Avalanche { config } => avalanche::new(
             id,
             crypto_scheme,
             config,
             peer_messenger,
             pmaker_feedback_send,
             delay,
-        )),
-        Config::ChainReplication { .. } => {
+        ),
+        ChainConfig::ChainReplication { .. } => {
             Box::new(ChainReplicationDecision::new(id, config, peer_messenger))
         }
     }
@@ -70,13 +70,13 @@ fn get_decision(
 pub async fn decision_thread(
     id: NodeId,
     crypto_scheme: CryptoScheme,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     mut peer_consensus_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
-    concurrency: Arc<Semaphore>,
+    core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "decision stage starting...");
@@ -104,7 +104,7 @@ pub async fn decision_thread(
         tokio::select! {
             new_tail = block_ready_recv.recv() => {
                 // handling new block to be voted
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -134,7 +134,7 @@ pub async fn decision_thread(
 
             commit_ready = decision_stage.commit_ready() => {
                 // getting blocks to be committed and perform clean up as needed
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -169,9 +169,24 @@ pub async fn decision_thread(
 
             },
 
+            _ = decision_stage.timeout() => {
+                let _permit = match core_group.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
+
+                if let Err(e) = decision_stage.handle_timeout().await {
+                    pf_error!(id; "failed to handle timeout: {:?}", e);
+                    continue;
+                }
+            }
+
             peer_msg = peer_consensus_recv.recv() => {
                 // handling vote messages from peers
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -198,7 +213,7 @@ pub async fn decision_thread(
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
                     // doing skipped compute cost
-                    let _permit = match concurrency.acquire().await {
+                    let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

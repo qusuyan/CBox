@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{BitcoinTxn, Txn};
-use copycat::{CopycatError, CryptoScheme, NodeId, TxnCtx};
+use copycat::{CopycatError, CryptoScheme, NodeId};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -32,9 +32,8 @@ pub struct BitcoinFlowGen {
     utxos: HashMap<ClientId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
     accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
     in_flight: HashMap<Hash, Instant>,
-    num_completed_txns: u64,
     chain_info: HashMap<NodeId, ChainInfo>,
-    total_time_sec: f64,
+    latencies: Vec<f64>,
     _notify: Notify,
 }
 
@@ -90,8 +89,7 @@ impl BitcoinFlowGen {
             utxos,
             accounts,
             in_flight: HashMap::new(),
-            num_completed_txns: 0,
-            total_time_sec: 0.0,
+            latencies: vec![],
             chain_info: HashMap::new(),
             _notify: Notify::new(),
         }
@@ -110,8 +108,7 @@ impl FlowGen for BitcoinFlowGen {
                         receiver: account.clone(),
                     },
                 };
-                let txn_ctx = TxnCtx::from_txn(&txn)?;
-                let hash = txn_ctx.id;
+                let hash = txn.compute_id()?;
                 utxos.push_back((hash, 100));
                 txns.push((*node, Arc::new(txn)));
             }
@@ -185,8 +182,7 @@ impl FlowGen for BitcoinFlowGen {
                 break (sender_pk, remainder, recver_pk, out_utxo, txn);
             };
 
-            let txn_ctx = TxnCtx::from_txn(&txn)?;
-            let txn_hash = txn_ctx.id;
+            let txn_hash = txn.compute_id()?;
             if remainder > 0 {
                 let sender_utxos = utxos.get_mut(sender).unwrap();
                 sender_utxos.push_back((txn_hash.clone(), remainder));
@@ -233,37 +229,30 @@ impl FlowGen for BitcoinFlowGen {
             chain_info.txn_count.remove(&height);
         }
         chain_info.txn_count.insert(blk_height, txns.len() as u64);
-        chain_info.chain_length = blk_height + 1;
+        chain_info.chain_length = blk_height; // blk_height starts with 1
         chain_info.total_committed += txns.len() as u64;
 
         for txn in txns {
-            let txn_ctx = TxnCtx::from_txn(&txn)?;
-            let hash = txn_ctx.id;
+            let hash = txn.compute_id()?;
             let start_time = match self.in_flight.remove(&hash) {
                 Some(time) => time,
                 None => continue, // unrecognized txn, possibly generated from another node
             };
 
             let commit_latency = Instant::now() - start_time;
-            self.total_time_sec += commit_latency.as_secs_f64();
-            self.num_completed_txns += 1;
+            self.latencies.push(commit_latency.as_secs_f64());
         }
 
         Ok(())
     }
 
     fn get_stats(&mut self) -> Stats {
-        let latency = if self.num_completed_txns == 0 {
-            0f64
-        } else {
-            self.total_time_sec / self.num_completed_txns as f64
-        };
         let (num_committed, chain_length, acc_commit_confidence) = self
             .chain_info
             .values()
             .map(|info| {
                 let num_committed = if info.chain_length > 0 {
-                    (1..info.chain_length)
+                    (1..info.chain_length + 1)
                         .map(|height| info.txn_count.get(&height).unwrap())
                         .sum()
                 } else {
@@ -288,8 +277,11 @@ impl FlowGen for BitcoinFlowGen {
         } else {
             acc_commit_confidence / self.chain_info.len() as f64
         };
+
+        let latencies = std::mem::replace(&mut self.latencies, vec![]);
+
         Stats {
-            latency,
+            latencies,
             num_committed,
             chain_length,
             commit_confidence,

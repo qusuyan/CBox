@@ -1,6 +1,7 @@
 use copycat::log::colored_level;
+use copycat::parse_config_file;
 use copycat::{get_neighbors, get_report_timer, start_report_timer};
-use copycat::{ChainType, Config, CryptoScheme, Node};
+use copycat::{ChainType, CryptoScheme, Node};
 use copycat_flowgen::get_flow_gen;
 
 use std::collections::HashSet;
@@ -46,8 +47,12 @@ struct CliArgs {
     #[arg(long, short = 'q', value_enum, default_value = "0")]
     frequency: usize,
 
-    /// Blockchain specific configuration string in TOML format
-    #[arg(long, default_value_t = String::from(""))]
+    /// Probability that a conflict transaction will be generated
+    #[arg(long, short = 'r', default_value = "0")]
+    conflict_rate: f64,
+
+    /// Path to validator configuration
+    #[arg(long)]
     config: String,
 
     /// Network topology
@@ -97,18 +102,10 @@ pub fn main() {
         .build()
         .expect("Creating new runtime failed");
 
-    let config = if args.config.is_empty() {
-        Config::from_str(args.chain, None).unwrap()
-    } else {
-        args.config = args.config.replace('+', "\n");
-        match Config::from_str(args.chain, Some(&args.config)) {
-            Ok(config) => config,
-            Err(e) => {
-                log::warn!("Invalid config string ({e:?}), fall back to default");
-                Config::from_str(args.chain, None).unwrap()
-            }
-        }
-    };
+    let config = parse_config_file(&args.config, args.chain)
+        .unwrap()
+        .remove(&id)
+        .unwrap();
     log::info!("Node config: {:?}", config);
 
     let neighbors = if args.topology.is_empty() {
@@ -127,8 +124,13 @@ pub fn main() {
     let mut stats_file = std::fs::File::create(format!("/tmp/copycat_node_{}.csv", id))
         .expect("stats file creation failed");
     stats_file
-        .write(b"Throughput (txn/s), Avg Latency (s)\n")
+        .write(b"Throughput (txn/s)\n")
         .expect("write stats failed");
+    let mut latency_file = std::fs::File::create(format!("/tmp/copycat_node_{}_lat.csv", id))
+        .expect("latency file creation failed");
+    latency_file
+        .write(b"Latency (s)\n")
+        .expect("write latency failed");
 
     runtime.block_on(async {
         let (node, mut executed): (Node, _) = match Node::init(
@@ -137,10 +139,10 @@ pub fn main() {
             args.chain,
             args.crypto,
             args.crypto,
-            config,
+            config.chain_config,
             !args.disable_txn_dissem,
             neighbors,
-            None,
+            config.max_concurrency,
         )
         .await
         {
@@ -157,6 +159,7 @@ pub fn main() {
             args.accounts,
             args.max_inflight,
             args.frequency,
+            args.conflict_rate,
             args.chain,
             args.crypto,
         );
@@ -221,13 +224,16 @@ pub fn main() {
                     let stats = flow_gen.get_stats();
                     let tput = stats.num_committed as f64 / report_timer.borrow().as_secs_f64();
                     log::info!(
-                        "Throughput: {} txn/s, Average Latency: {} s",
+                        "Throughput: {} txn/s",
                         tput,
-                        stats.latency
                     );
                     stats_file
-                        .write_fmt(format_args!("{},{}\n", tput, stats.latency))
+                        .write_fmt(format_args!("{}\n", tput))
                         .expect("write stats failed");
+                    for lat in stats.latencies {
+                        latency_file.write_fmt(format_args!("{}\n", lat))
+                        .expect("write latency failed");
+                    }
                 }
             }
         }

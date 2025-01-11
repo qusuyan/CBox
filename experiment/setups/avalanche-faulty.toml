@@ -1,0 +1,27 @@
+[experiment]
+num_iterations = 3
+
+[parameters]
+chain-type = "avalanche"
+cluster-threads = 32
+conn-multiply = 1
+correct-config = "blk_len=40+max_inflight_blk=40"
+correct-type = ["Basic", "Blizzard"]
+crypto = "dummy-ecdsa"
+disable-txn-dissem = true
+exp-prefix = "Avax-Faulty/"
+exp-time = 310
+faulty-config = ""
+faulty-type = "VoteNo"
+frequency = 3200
+mailbox-workers = 16
+max-inflight-txns = 0
+network-delay = 30
+num-accounts = 160
+num-clients = 10
+num-faulty = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+num-machines = 1
+num-nodes = 40
+per-node-concurrency = 1
+topo-degree = 0
+txn-span = 0

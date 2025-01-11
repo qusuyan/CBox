@@ -1,6 +1,7 @@
 use super::TxnValidation;
+use crate::context::TxnCtx;
 use crate::protocol::transaction::Txn;
-use crate::{CopycatError, NodeId, TxnCtx};
+use crate::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 

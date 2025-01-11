@@ -1,46 +1,40 @@
-use super::Decision;
-use crate::config::AvalancheConfig;
+use super::{Decision, VoteMsg};
+use crate::config::AvalancheBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::{Hash, PrivKey, PubKey, Signature};
+use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::MsgType;
 use crate::transaction::{AvalancheTxn, Txn};
-use crate::utils::CopycatError;
-use crate::{CryptoScheme, NodeId};
+use crate::utils::time_queue::TimeQueue;
+use crate::{CopycatError, CryptoScheme, NodeId};
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
+
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
+use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
 
 struct ConflictSet {
     pub has_conflicts: bool,
     pub pref: Hash,
-    pub count: u64,
+    pub total_rounds: u64, // equal to the sum of the confidence of all txns in the set
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct VoteMsg {
-    pub round: (NodeId, u64),
-    pub votes: Vec<bool>,
-    pub signature: Signature,
-}
-
+#[derive(Clone)]
 struct DagNode {
     pub parents: Vec<Hash>,
     pub children: Vec<Hash>,
 }
 
-pub struct AvalancheDecision {
+pub struct BlizzardDecision {
     id: NodeId,
     crypto_scheme: CryptoScheme,
     k: usize,
@@ -49,13 +43,14 @@ pub struct AvalancheDecision {
     beta2: u64,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     txn_dag: HashMap<Hash, DagNode>,
-    // txn_dag: HashMap<Hash, Vec<Hash>>,
-    conflict_sets: HashMap<(Hash, PubKey), ConflictSet>, // the cnt of grant txns is always its confidence
-    confidence: HashMap<Hash, (bool, u64)>,              // (has_chit, confidence)
+    conflict_sets: HashMap<(Hash, PubKey), ConflictSet>,
+    confidence: HashMap<Hash, u64>, // (has_chit, confidence)
     // for voting
-    query_pool: HashMap<(NodeId, u64), Vec<Option<Hash>>>, // TODO: add timeouts
-    finished_query: HashSet<(NodeId, u64)>,
-    votes: HashMap<(NodeId, u64), (usize, Vec<usize>)>,
+    vote_timeout: Duration,
+    query_pool: HashMap<u64, Vec<Option<Hash>>>,
+    finished_query: HashSet<u64>,
+    votes: HashMap<u64, (usize, Vec<usize>)>,
+    vote_time_queue: TimeQueue<u64>,
     preference_cache: HashMap<Hash, bool>,
     // blocks ready to be committed
     commit_queue: VecDeque<(u64, Vec<Hash>)>,
@@ -69,15 +64,18 @@ pub struct AvalancheDecision {
     // statistics for debugging
     is_strongly_preferred_calls: usize,
     is_preferred_checks: usize,
+    commit_total: usize,
+    commit_count: usize,
+    txn_query_count: usize,
     // batch sleep time to reduce overhead
     delay: Arc<AtomicF64>,
 }
 
-impl AvalancheDecision {
+impl BlizzardDecision {
     pub fn new(
         id: NodeId,
         crypto_scheme: CryptoScheme,
-        config: AvalancheConfig,
+        config: AvalancheBasicConfig,
         peer_messenger: Arc<PeerMessenger>,
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
         delay: Arc<AtomicF64>,
@@ -86,6 +84,7 @@ impl AvalancheDecision {
         let (_, sk) = crypto_scheme.gen_key_pair(id.into());
         let vote_thresh = (config.k as f64 * config.alpha).ceil() as usize;
         pf_info!(id; "vote threshold is {}", vote_thresh);
+        let vote_timeout = Duration::from_secs_f64(config.vote_timeout);
 
         Self {
             id,
@@ -98,9 +97,11 @@ impl AvalancheDecision {
             txn_dag: HashMap::new(),
             conflict_sets: HashMap::new(),
             confidence: HashMap::new(),
+            vote_timeout,
             query_pool: HashMap::new(),
             finished_query: HashSet::new(),
             votes: HashMap::new(),
+            vote_time_queue: TimeQueue::new(vote_timeout / 2),
             preference_cache: HashMap::new(),
             commit_queue: VecDeque::new(),
             _notify: Notify::new(),
@@ -110,6 +111,9 @@ impl AvalancheDecision {
             pmaker_feedback_send,
             is_strongly_preferred_calls: 0,
             is_preferred_checks: 0,
+            commit_total: 0,
+            commit_count: 0,
+            txn_query_count: 0,
             delay,
         }
     }
@@ -142,54 +146,39 @@ impl AvalancheDecision {
     }
 
     fn is_strongly_preferred(&mut self, txn_hash: &Hash) -> bool {
-        self.is_strongly_preferred_calls += 1;
+        self.is_preferred_checks += 1;
 
-        let mut frontier = VecDeque::new();
-        frontier.push_back(txn_hash);
-        let mut checked = vec![];
-
-        let result = loop {
-            let hash = match frontier.pop_front() {
-                Some(hash) => hash,
-                None => break true,
-            };
-
-            self.is_preferred_checks += 1;
-            // first check if the txn is already accpeted
-            let dag_node = match self.txn_dag.get(hash) {
-                Some(node) => node,
-                None => continue, // since the txn is already accepted
-            };
-
-            if let Some(strongly_preferred) = self.preference_cache.get(hash) {
-                if *strongly_preferred {
-                    continue;
-                } else {
-                    break false;
-                }
-            }
-
-            // not in cache - recursively perform the check
-            checked.push(hash);
-
-            if !self.is_preferred(hash) {
-                break false;
-            }
-
-            let parents: Vec<&Hash> = dag_node.parents.iter().collect();
-            frontier.extend(parents);
+        let dag_node = match self.txn_dag.get(txn_hash) {
+            Some(node) => node,
+            None => return true, // since the txn is already accepted
         };
 
-        for txn in checked {
-            self.preference_cache.insert(*txn, result);
+        if let Some(strongly_preferred) = self.preference_cache.get(txn_hash) {
+            return *strongly_preferred;
         }
+
+        let result = if !self.is_preferred(txn_hash) {
+            false
+        } else {
+            let mut is_strongly_preferred = true;
+            let parents = dag_node.parents.clone();
+            for parent in parents {
+                if !self.is_strongly_preferred(&parent) {
+                    is_strongly_preferred = false;
+                    break;
+                }
+            }
+            is_strongly_preferred
+        };
+
+        self.preference_cache.insert(*txn_hash, result);
 
         result
     }
 
-    async fn handle_votes(
+    async fn record_votes(
         &mut self,
-        blk_id: (NodeId, u64),
+        blk_id: u64,
         src: NodeId,
         votes: Vec<bool>,
     ) -> Result<(), CopycatError> {
@@ -212,177 +201,169 @@ impl AvalancheDecision {
         }
 
         if *votes_received >= self.k {
-            let txns = match self.query_pool.remove(&blk_id) {
-                Some(txns) => txns,
-                None => return Ok(()), // if the batch has not yet been received or if the batch is already committed
-            };
-            let mut txns_to_be_committed = vec![];
-
-            let (_, accept_votes) = self.votes.remove(&blk_id).unwrap();
-            assert!(txns.len() == accept_votes.len());
-            self.finished_query.insert(blk_id);
-            for idx in 0..txns.len() {
-                let txn_hash = match txns[idx] {
-                    Some(hash) => hash,
-                    None => continue, // the txn is not valid
-                };
-                if accept_votes[idx] >= self.vote_thresh {
-                    // we gathered enough votes
-                    pf_trace!(self.id; "looking at txn {} at block idx {}", txn_hash, idx);
-                    let (has_chit, _) = self.confidence.get_mut(&txn_hash).unwrap();
-                    *has_chit = true;
-                    // update the confidence and conflict set for all parents
-                    let mut dag_frontier = VecDeque::new();
-                    let mut dedup = HashSet::new();
-                    dag_frontier.push_back(txn_hash);
-                    while let Some(next_txn) = dag_frontier.pop_front() {
-                        dedup.insert(next_txn);
-                        let dag_node = match self.txn_dag.get(&next_txn) {
-                            Some(node) => node,
-                            None => continue, // the txn is already committed
-                        };
-                        dag_frontier
-                            .extend(dag_node.parents.iter().filter(|hash| !dedup.contains(hash)));
-                        // update confidence
-                        let (chit, confidence) = self.confidence.get_mut(&next_txn).unwrap();
-                        *confidence += 1;
-                        let confidence_score = if *chit { *confidence } else { 0 };
-                        // update conflict set
-                        let avax_txn = match self.txn_pool.get(&next_txn).unwrap().0.as_ref() {
-                            Txn::Avalanche { txn } => txn,
-                            _ => unreachable!(),
-                        };
-
-                        let (has_conflicts, count) = match avax_txn {
-                            AvalancheTxn::Grant { .. } | AvalancheTxn::Noop { .. } => {
-                                (false, confidence_score)
-                            }
-                            AvalancheTxn::Send {
-                                sender, in_utxo, ..
-                            } => {
-                                let mut count = confidence_score;
-                                let mut has_conflicts = false;
-                                for input_txn in in_utxo {
-                                    let utxo = (input_txn.clone(), sender.clone());
-                                    let ct = self.conflict_sets.get_mut(&utxo).unwrap();
-                                    if ct.pref == next_txn {
-                                        ct.count += 1;
-                                    } else {
-                                        let pref_confidence_score = {
-                                            let (chit, conf) =
-                                                self.confidence.get(&ct.pref).unwrap();
-                                            if *chit {
-                                                *conf
-                                            } else {
-                                                0
-                                            }
-                                        };
-                                        if pref_confidence_score < confidence_score {
-                                            // invalidate preference cache for ct.pref, next_txn and their offsprings
-                                            let mut frontier = VecDeque::new();
-                                            frontier.extend(vec![&ct.pref, &next_txn]);
-                                            while let Some(txn) = frontier.pop_front() {
-                                                self.preference_cache.remove(txn);
-                                                let children = match self.txn_dag.get(txn) {
-                                                    Some(node) => &node.children,
-                                                    None => continue,
-                                                };
-                                                frontier.extend(children);
-                                            }
-                                            // self.preference_cache.remove(&next_txn);
-                                            // self.preference_cache.remove(&ct.pref);
-                                            // update conflict set
-                                            ct.pref = next_txn;
-                                            ct.count = 1;
-                                        } else {
-                                            ct.count += 1;
-                                        }
-                                    }
-                                    if ct.count < count {
-                                        count = ct.count;
-                                    }
-                                    if ct.has_conflicts {
-                                        has_conflicts = true;
-                                    }
-                                }
-                                (has_conflicts, count)
-                            }
-                            AvalancheTxn::PlaceHolder => unreachable!(),
-                        };
-
-                        // add accepted txns to commit queue
-                        let mut parents_accepted = true;
-                        for parent in dag_node.parents.iter() {
-                            if self.txn_dag.contains_key(parent) {
-                                parents_accepted = false;
-                                break;
-                            }
-                        }
-
-                        let can_be_accepted = if !has_conflicts {
-                            count > self.beta1 // safe early commitment
-                        } else {
-                            count > self.beta2 // consecutive counter
-                        };
-
-                        pf_trace!(self.id; "txn {} - parents accepted: {}, can_be_accepted: {}, count: {}, have conflicts: {}, pending txns: {}", next_txn, parents_accepted, can_be_accepted, count, has_conflicts, self.txn_dag.len());
-
-                        if parents_accepted && can_be_accepted {
-                            pf_trace!(self.id; "txn {} accepted", next_txn);
-                            self.txn_dag.remove(&next_txn);
-                            self.preference_cache.remove(&next_txn);
-                            if matches!(
-                                avax_txn,
-                                AvalancheTxn::Grant { .. } | AvalancheTxn::Send { .. }
-                            ) {
-                                txns_to_be_committed.push(next_txn);
-                            }
-                        }
-                    }
-                } else {
-                    // if not enough votes, reset counts to 0
-                    let mut dag_frontier = VecDeque::new();
-                    dag_frontier.push_back(txn_hash);
-                    while let Some(next_txn_hash) = dag_frontier.pop_front() {
-                        let dag_node = match self.txn_dag.get(&next_txn_hash) {
-                            Some(node) => node,
-                            None => continue, // the txn is already committed
-                        };
-                        dag_frontier.extend(dag_node.parents.iter());
-
-                        let (txn, _) = self.txn_pool.get(&next_txn_hash).unwrap();
-                        let avax_txn = match txn.as_ref() {
-                            Txn::Avalanche { txn } => txn,
-                            _ => unimplemented!(),
-                        };
-
-                        // only send txns can conflict with others
-                        if let AvalancheTxn::Send {
-                            sender, in_utxo, ..
-                        } = avax_txn
-                        {
-                            for input_txn in in_utxo {
-                                let utxo = (input_txn.clone(), sender.clone());
-                                let ct = self.conflict_sets.get_mut(&utxo).unwrap();
-                                ct.count = 0;
-                            }
-                        }
-                    }
-                }
-            }
-
-            self.commit_queue
-                .push_back((blk_id.1, txns_to_be_committed));
-            // send to pmaker a batch is voted
-            self.pmaker_feedback_send.send(vec![]).await?;
+            // received all votes
+            self.handle_votes(blk_id).await?;
         }
+
+        Ok(())
+    }
+
+    // recursively update the confidence and conflict set for all parents
+    fn handle_votes_helper(
+        &mut self,
+        txn_id: &Hash,
+        dedup: &mut HashSet<Hash>,
+    ) -> Result<Vec<Hash>, CopycatError> {
+        if dedup.contains(txn_id) {
+            return Ok(vec![]);
+        }
+        dedup.insert(*txn_id);
+
+        let dag_node = match self.txn_dag.get(txn_id) {
+            Some(node) => node.clone(),
+            None => return Ok(vec![]), // the txn is already committed
+        };
+
+        let mut commit_list = vec![];
+        // check if parents can be accepted first
+        for parent in dag_node.parents.iter() {
+            commit_list.extend(self.handle_votes_helper(&parent, dedup)?);
+        }
+
+        // update confidence
+        let confidence = self.confidence.get_mut(txn_id).unwrap();
+        *confidence += 1;
+        let confidence_score = *confidence;
+        // update conflict set
+        let avax_txn = match self.txn_pool.get(txn_id).unwrap().0.as_ref() {
+            Txn::Avalanche { txn } => txn,
+            _ => unreachable!(),
+        };
+
+        let (has_conflicts, conflict_count) = match avax_txn {
+            AvalancheTxn::Grant { .. } | AvalancheTxn::Noop { .. } => (false, 0),
+            AvalancheTxn::Send {
+                sender, in_utxo, ..
+            } => {
+                let mut conflict_count = 0;
+                let mut has_conflicts = false;
+                for input_txn in in_utxo {
+                    let utxo = (input_txn.clone(), sender.clone());
+                    let ct = self.conflict_sets.get_mut(&utxo).unwrap();
+
+                    if ct.pref == *txn_id {
+                        // do nothing
+                    } else {
+                        let pref_confidence_score = *self.confidence.get(&ct.pref).unwrap();
+                        if pref_confidence_score < confidence_score {
+                            // update conflict set
+                            ct.pref = *txn_id;
+                            // invalidate preference cache for ct.pref, next_txn and their offsprings
+                            let mut frontier = VecDeque::new();
+                            frontier.extend(vec![&ct.pref, txn_id]);
+                            while let Some(txn) = frontier.pop_front() {
+                                self.preference_cache.remove(txn);
+                                let children = match self.txn_dag.get(txn) {
+                                    Some(node) => &node.children,
+                                    None => continue,
+                                };
+                                frontier.extend(children);
+                            }
+                            // self.preference_cache.remove(&next_txn);
+                            // self.preference_cache.remove(&ct.pref);
+                        }
+                    }
+
+                    // add one round for this conflict set
+                    ct.total_rounds += 1;
+
+                    // txn conflicts with other txns on one of the input utxos
+                    if ct.has_conflicts {
+                        has_conflicts = true;
+                    }
+                    // conflict_count is the total rounds for this conflict set - my_count
+                    // account for all conflicting txns on any UTXO
+                    conflict_count += ct.total_rounds - confidence_score;
+                }
+                (has_conflicts, conflict_count)
+            }
+            AvalancheTxn::PlaceHolder => unreachable!(),
+        };
+
+        // add accepted txns to commit queue
+        let mut parents_accepted = true;
+        for parent in dag_node.parents.iter() {
+            if self.txn_dag.contains_key(parent) {
+                parents_accepted = false;
+                break;
+            }
+        }
+
+        // my_count is always the confidence score of current txn
+        let is_accepted = if parents_accepted && !has_conflicts {
+            confidence_score >= self.beta1 + conflict_count // safe early commitment
+        } else {
+            confidence_score >= self.beta2 + conflict_count // consecutive counter
+        };
+
+        pf_trace!(self.id; "txn {} - is_accepted: {}, parents accepted: {}, have conflicts: {}, confidence_score: {}, conflict_count: {}, pending txns: {}", txn_id, is_accepted, parents_accepted, has_conflicts, confidence_score, conflict_count, self.txn_dag.len());
+
+        if is_accepted {
+            pf_trace!(self.id; "txn {} accepted", txn_id);
+            self.txn_dag.remove(txn_id);
+            self.preference_cache.remove(txn_id);
+            if matches!(
+                avax_txn,
+                AvalancheTxn::Grant { .. } | AvalancheTxn::Send { .. }
+            ) {
+                commit_list.push(*txn_id);
+            }
+        }
+
+        Ok(commit_list)
+    }
+
+    async fn handle_votes(&mut self, blk_id: u64) -> Result<(), CopycatError> {
+        let txns = match self.query_pool.remove(&blk_id) {
+            Some(txns) => txns,
+            None => return Ok(()), // if the batch has not yet been received or if the batch is already committed
+        };
+        let mut txns_to_be_committed = vec![];
+
+        let (_, accept_votes) = self.votes.remove(&blk_id).unwrap();
+        assert!(txns.len() == accept_votes.len());
+        self.finished_query.insert(blk_id);
+        self.vote_time_queue.remove(&blk_id);
+        for idx in 0..txns.len() {
+            let txn_hash = match txns[idx] {
+                Some(hash) => hash,
+                None => continue, // the txn is not valid
+            };
+            self.txn_query_count += 1;
+            if accept_votes[idx] >= self.vote_thresh {
+                // we gathered enough votes
+                pf_trace!(self.id; "looking at txn {} at block idx {}", txn_hash, idx);
+                // update the confidence and conflict set for all parents
+                let mut dedup = HashSet::new();
+                let mut commit_list = self.handle_votes_helper(&txn_hash, &mut dedup)?;
+                if commit_list.len() > 0 {
+                    self.commit_count += 1;
+                }
+                txns_to_be_committed.append(&mut commit_list);
+            }
+        }
+
+        self.commit_total += txns_to_be_committed.len();
+        self.commit_queue.push_back((blk_id, txns_to_be_committed));
+        // send to pmaker a batch is voted
+        self.pmaker_feedback_send.send(vec![]).await?;
 
         Ok(())
     }
 }
 
 #[async_trait]
-impl Decision for AvalancheDecision {
+impl Decision for BlizzardDecision {
     async fn new_tail(
         &mut self,
         src: NodeId,
@@ -445,7 +426,7 @@ impl Decision for AvalancheDecision {
                                 children: vec![],
                             },
                         );
-                        self.confidence.insert(txn_hash, (false, 0));
+                        self.confidence.insert(txn_hash, 0);
                     }
                     // vote true on grant msgs since they cannot conflict with others
                     votes.push(true);
@@ -473,7 +454,7 @@ impl Decision for AvalancheDecision {
                                 node.children.push(txn_hash.clone());
                             }
                         }
-                        self.confidence.insert(txn_hash, (false, 0));
+                        self.confidence.insert(txn_hash, 0);
                         // update conflict set as appropriate
                         for unspent_txn in in_utxo {
                             let utxo = (unspent_txn.clone(), sender.clone());
@@ -482,13 +463,14 @@ impl Decision for AvalancheDecision {
                                     e.insert(ConflictSet {
                                         has_conflicts: false,
                                         pref: txn_hash.clone(),
-                                        count: 0,
+                                        total_rounds: 0,
                                     });
                                 }
                                 Entry::Occupied(mut e) => e.get_mut().has_conflicts = true,
                             }
                         }
                     }
+                    self.is_strongly_preferred_calls += 1;
                     votes.push(self.is_strongly_preferred(&txn_hash));
                     // vote_params.push(VoteParams::Check {
                     //     hash: txn_hash.clone(),
@@ -513,8 +495,9 @@ impl Decision for AvalancheDecision {
                                 node.children.push(txn_hash.clone());
                             }
                         }
-                        self.confidence.insert(txn_hash, (false, 0));
+                        self.confidence.insert(txn_hash, 0);
                     }
+                    self.is_strongly_preferred_calls += 1;
                     votes.push(self.is_strongly_preferred(&txn_hash));
                     // vote_params.push(VoteParams::Check {
                     //     hash: txn_hash.clone(),
@@ -545,12 +528,13 @@ impl Decision for AvalancheDecision {
 
         if proposer == self.id {
             // if queried by myself, record block and and handle votes locally
-            self.query_pool.insert((proposer, blk_id), query_txns);
-            self.handle_votes((proposer, blk_id), self.id, votes)
-                .await?;
+            self.query_pool.insert(blk_id, query_txns);
+            self.vote_time_queue
+                .push(blk_id, Instant::now() + self.vote_timeout);
+            self.record_votes(blk_id, self.id, votes).await?;
         } else {
             // otherwise, send votes to peer that queries the block
-            let msg_content = ((proposer, blk_id), votes);
+            let msg_content = (blk_id, votes);
             let serialized_msg = &bincode::serialize(&msg_content)?;
             let (signature, stime) = self.crypto_scheme.sign(&self.sk, serialized_msg)?;
             let delay = self.delay.fetch_add(stime, Ordering::Relaxed);
@@ -565,7 +549,7 @@ impl Decision for AvalancheDecision {
                     MsgType::ConsensusMsg {
                         msg: bincode::serialize(&vote_msg)?,
                     },
-                    Duration::from_secs_f64(delay),
+                    Duration::from_secs_f64(delay + stime),
                 )
                 .await?;
         }
@@ -591,6 +575,23 @@ impl Decision for AvalancheDecision {
         Ok((blk_id, txns))
     }
 
+    async fn timeout(&self) -> Result<(), CopycatError> {
+        if let Err(_) = self.vote_time_queue.wait_next().await {
+            self._notify.notified().await;
+        }
+        Ok(())
+    }
+
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
+        let blk_id = self.vote_time_queue.pop().unwrap();
+        if self.finished_query.contains(&blk_id) {
+            // query has finished, do nothing
+            return Ok(());
+        }
+
+        self.handle_votes(blk_id).await
+    }
+
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError> {
         let msg: VoteMsg = bincode::deserialize(content.as_ref())?;
         if self.finished_query.contains(&msg.round) {
@@ -610,7 +611,7 @@ impl Decision for AvalancheDecision {
                 .verify(&peer_pk, &serialized_content, &msg.signature)?;
         self.delay.fetch_add(vtime, Ordering::Relaxed);
         if valid {
-            self.handle_votes(blk_id, src, votes).await?;
+            self.record_votes(blk_id, src, votes).await?;
         }
 
         Ok(())
@@ -619,7 +620,16 @@ impl Decision for AvalancheDecision {
     fn report(&mut self) {
         pf_info!(self.id; "In the last minute: is_strongly_preferred_calls: {}, is_preferred_checks: {}", self.is_strongly_preferred_calls, self.is_preferred_checks);
         pf_info!(self.id; "working set size: txn_dag: {}, perference_cache: {}", self.txn_dag.len(), self.preference_cache.len());
+        let avg_commit_len = if self.commit_count == 0 {
+            0
+        } else {
+            self.commit_total / self.commit_count
+        };
+        pf_info!(self.id; "In the last minute: txns_queried: {}, commit_count: {}, avg_commit_len: {}", self.txn_query_count, self.commit_count, avg_commit_len);
         self.is_strongly_preferred_calls = 0;
         self.is_preferred_checks = 0;
+        self.txn_query_count = 0;
+        self.commit_count = 0;
+        self.commit_total = 0;
     }
 }

@@ -3,7 +3,6 @@ use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::MsgType;
 use crate::utils::{CopycatError, NodeId};
-use crate::Config;
 
 use async_trait::async_trait;
 
@@ -16,12 +15,7 @@ pub struct LinearBlockDissemination {
 }
 
 impl LinearBlockDissemination {
-    pub fn new(me: NodeId, peer_messenger: Arc<PeerMessenger>, config: Config) -> Self {
-        let rep_order = match config {
-            Config::ChainReplication { config } => config.order,
-            _ => unimplemented!(),
-        };
-
+    pub fn new(me: NodeId, peer_messenger: Arc<PeerMessenger>, rep_order: Vec<NodeId>) -> Self {
         let mut idx = 0;
         let (prev, next) = loop {
             assert!(idx < rep_order.len());

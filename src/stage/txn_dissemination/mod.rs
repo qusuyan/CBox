@@ -10,17 +10,18 @@ use tokio_metrics::TaskMonitor;
 
 use crate::consts::{TXM_DISSEM_DELAY_INTERVAL, TXN_DISSEM_INTERVAL};
 use crate::context::TxnCtx;
-use crate::get_report_timer;
+use crate::peers::PeerMessenger;
 use crate::protocol::transaction::Txn;
 use crate::protocol::DissemPattern;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
-use crate::{config::Config, peers::PeerMessenger};
+use crate::vcores::VCoreGroup;
+use crate::{get_report_timer, ChainConfig};
 
 use async_trait::async_trait;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
@@ -34,7 +35,7 @@ trait TxnDissemination: Send + Sync {
 fn get_txn_dissemination(
     id: NodeId,
     enabled: bool,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn TxnDissemination> {
     if !enabled {
@@ -44,20 +45,20 @@ fn get_txn_dissemination(
     match config.get_txn_dissem() {
         DissemPattern::Broadcast => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)),
         DissemPattern::Gossip => Box::new(GossipTxnDissemination::new(id, peer_messenger)),
-        DissemPattern::Sample => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)), // TODO: use gossip for now
+        DissemPattern::Sample { .. } => todo!(), // TODO: use gossip for now
         DissemPattern::Passthrough => Box::new(PassthroughTxnDissemination::new()),
-        DissemPattern::Linear => Box::new(PassthroughTxnDissemination::new()), // TODO: use passthrough for now
+        DissemPattern::Linear { .. } => todo!(), // TODO: use passthrough for now
     }
 }
 
 pub async fn txn_dissemination_thread(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     enabled: bool,
     peer_messenger: Arc<PeerMessenger>,
     mut validated_txn_recv: mpsc::Receiver<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
     txn_ready_send: mpsc::Sender<Vec<(Arc<Txn>, Arc<TxnCtx>)>>,
-    concurrency: Arc<Semaphore>,
+    core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "txn dissemination stage starting...");
@@ -104,7 +105,7 @@ pub async fn txn_dissemination_thread(
 
             _ = wait_send_batch(batch.len(), DISSEM_BATCH_SIZE, txn_dissem_time), if txn_dissem_time.is_some() => {
                 // serializing the list of txns to be disseminated
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -139,7 +140,7 @@ pub async fn txn_dissemination_thread(
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
                     // doing skipped compute cost
-                    let _permit = match concurrency.acquire().await {
+                    let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

@@ -13,6 +13,10 @@ pub struct DummyTxn {
 }
 
 impl DummyTxn {
+    pub fn compute_id(&self) -> Result<Hash, CopycatError> {
+        Ok(self.id)
+    }
+
     pub fn get_size(&self) -> usize {
         self.content.len() + self.signature.len() + 64
     }

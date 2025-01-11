@@ -3,7 +3,6 @@ use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::MsgType;
 use crate::utils::{CopycatError, NodeId};
-use crate::Config;
 
 use async_trait::async_trait;
 
@@ -16,11 +15,7 @@ pub struct SamplingBlockDissemination {
 }
 
 impl SamplingBlockDissemination {
-    pub fn new(me: NodeId, peer_messenger: Arc<PeerMessenger>, config: Config) -> Self {
-        let sample_size = match config {
-            Config::Avalanche { config } => config.k,
-            _ => unimplemented!(),
-        };
+    pub fn new(me: NodeId, peer_messenger: Arc<PeerMessenger>, sample_size: usize) -> Self {
         Self {
             me,
             peer_messenger,

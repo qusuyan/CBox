@@ -5,7 +5,7 @@ use crate::protocol::block::Block;
 use crate::protocol::crypto::Hash;
 use crate::protocol::MsgType;
 use crate::transaction::Txn;
-use crate::{Config, CopycatError, NodeId};
+use crate::{ChainConfig, CopycatError, NodeId};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -38,9 +38,9 @@ pub struct ChainReplicationDecision {
 }
 
 impl ChainReplicationDecision {
-    pub fn new(me: NodeId, config: Config, peer_messenger: Arc<PeerMessenger>) -> Self {
+    pub fn new(me: NodeId, config: ChainConfig, peer_messenger: Arc<PeerMessenger>) -> Self {
         let rep_order = match config {
-            Config::ChainReplication { config } => config.order,
+            ChainConfig::ChainReplication { config } => config.order,
             _ => unimplemented!(),
         };
 
@@ -124,6 +124,15 @@ impl Decision for ChainReplicationDecision {
         let txns = blk.txns.clone();
         self.next_to_commit += Hash::one();
         Ok((blk_id.as_u64(), txns))
+    }
+
+    async fn timeout(&self) -> Result<(), CopycatError> {
+        self._notify.notified().await;
+        unreachable!();
+    }
+
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
+        unreachable!();
     }
 
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError> {

@@ -1,5 +1,5 @@
 use super::Decision;
-use crate::config::BitcoinConfig;
+use crate::config::BitcoinBasicConfig;
 use crate::context::BlkCtx;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::Hash;
@@ -18,19 +18,21 @@ pub struct BitcoinDecision {
     commit_len: u8,
     block_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>, u64)>,
     chain_tail: VecDeque<Hash>,
-    notify: Notify,
+    _notify: Notify,
     first_block_seen: bool,
+    miners_blk_cnt: HashMap<NodeId, usize>,
 }
 
 impl BitcoinDecision {
-    pub fn new(id: NodeId, config: BitcoinConfig) -> Self {
+    pub fn new(id: NodeId, config: BitcoinBasicConfig) -> Self {
         Self {
             id,
             commit_len: config.commit_depth,
             block_pool: HashMap::new(),
             chain_tail: VecDeque::new(),
-            notify: Notify::new(),
+            _notify: Notify::new(),
             first_block_seen: false,
+            miners_blk_cnt: HashMap::new(),
         }
     }
 }
@@ -114,7 +116,7 @@ impl Decision for BitcoinDecision {
             if self.chain_tail.len() > self.commit_len as usize {
                 return Ok(());
             }
-            self.notify.notified().await;
+            self._notify.notified().await;
         }
     }
 
@@ -122,10 +124,25 @@ impl Decision for BitcoinDecision {
         match self.chain_tail.pop_front() {
             Some(blk_hash) => {
                 let (blk, _, height) = self.block_pool.get(&blk_hash).unwrap();
+                let miner = match &blk.header {
+                    BlockHeader::Bitcoin { proposer, .. } => proposer,
+                    _ => unreachable!(),
+                };
+                let blk_cnt = self.miners_blk_cnt.entry(*miner).or_insert(0);
+                *blk_cnt += 1;
                 Ok((*height, blk.txns.clone()))
             }
             None => unreachable!(),
         }
+    }
+
+    async fn timeout(&self) -> Result<(), CopycatError> {
+        self._notify.notified().await;
+        unreachable!();
+    }
+
+    async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
+        unreachable!();
     }
 
     async fn handle_peer_msg(
@@ -136,5 +153,7 @@ impl Decision for BitcoinDecision {
         unreachable!("Bitcoin consensus can be done locally")
     }
 
-    fn report(&mut self) {}
+    fn report(&mut self) {
+        pf_info!(self.id; "miner blk count: {:?}", self.miners_blk_cnt);
+    }
 }

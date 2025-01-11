@@ -1,69 +1,105 @@
-use std::collections::{HashMap, HashSet};
-
-use clap::ValueEnum;
-
 use crate::protocol::ChainType;
 use crate::utils::CopycatError;
-use crate::{parsed_config, DissemPattern, NodeId};
+use crate::{DissemPattern, NodeId};
 
-#[derive(Clone, Debug)]
-pub enum Config {
+use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::BufReader;
+
+use default_fields::DefaultFields;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ChainConfig {
     Dummy { config: DummyConfig },
     Bitcoin { config: BitcoinConfig },
     Avalanche { config: AvalancheConfig },
     ChainReplication { config: ChainReplicationConfig },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NodeConfig {
+    pub chain_config: ChainConfig,
+    pub max_concurrency: Option<usize>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
 pub struct DummyConfig {
-    pub txn_dissem: String,
-    pub blk_dissem: String,
+    #[serde(default = "DummyConfig::get_default_txn_dissem")]
+    pub txn_dissem: DissemPattern,
+    #[serde(default = "DummyConfig::get_default_blk_dissem")]
+    pub blk_dissem: DissemPattern,
 }
 
 impl Default for DummyConfig {
     fn default() -> Self {
         Self {
-            txn_dissem: String::from("broadcast"),
-            blk_dissem: String::from("broadcast"),
+            txn_dissem: DissemPattern::Broadcast,
+            blk_dissem: DissemPattern::Broadcast,
         }
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct BitcoinConfig {
-    pub difficulty: u8,
-    pub compute_power: f64,
-    pub commit_depth: u8,
-    pub txn_dissem: String,
-    pub blk_dissem: String,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum BitcoinConfig {
+    Basic { config: BitcoinBasicConfig },
+    Eager { config: BitcoinBasicConfig },
 }
 
-impl Default for BitcoinConfig {
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
+pub struct BitcoinBasicConfig {
+    #[serde(default = "BitcoinBasicConfig::get_default_difficulty")]
+    pub difficulty: u8,
+    #[serde(default = "BitcoinBasicConfig::get_default_commit_depth")]
+    pub commit_depth: u8,
+    #[serde(default = "BitcoinBasicConfig::get_default_txn_dissem")]
+    pub txn_dissem: DissemPattern,
+    #[serde(default = "BitcoinBasicConfig::get_default_blk_dissem")]
+    pub blk_dissem: DissemPattern,
+}
+
+impl Default for BitcoinBasicConfig {
     fn default() -> Self {
         Self {
             difficulty: 25,
-            compute_power: 1.0,
             commit_depth: 6,
-            txn_dissem: String::from("gossip"),
-            blk_dissem: String::from("gossip"),
+            txn_dissem: DissemPattern::Gossip,
+            blk_dissem: DissemPattern::Gossip,
         }
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct AvalancheConfig {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum AvalancheConfig {
+    Basic { config: AvalancheBasicConfig },
+    Blizzard { config: AvalancheBasicConfig }, //https://arxiv.org/pdf/2401.02811
+    VoteNo { config: AvalancheVoteNoConfig },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
+pub struct AvalancheBasicConfig {
+    #[serde(default = "AvalancheBasicConfig::get_default_blk_len")]
     pub blk_len: usize,
+    #[serde(default = "AvalancheBasicConfig::get_default_k")]
     pub k: usize,
+    #[serde(default = "AvalancheBasicConfig::get_default_alpha")]
     pub alpha: f64,
+    #[serde(default = "AvalancheBasicConfig::get_default_beta1")]
     pub beta1: u64,
+    #[serde(default = "AvalancheBasicConfig::get_default_beta2")]
     pub beta2: u64,
+    #[serde(default = "AvalancheBasicConfig::get_default_proposal_timeout_secs")]
     pub proposal_timeout_secs: f64,
+    #[serde(default = "AvalancheBasicConfig::get_default_vote_timeout")]
+    pub vote_timeout: f64,
+    #[serde(default = "AvalancheBasicConfig::get_default_max_inflight_blk")]
     pub max_inflight_blk: usize,
-    pub txn_dissem: String,
+    #[serde(default = "AvalancheBasicConfig::get_default_txn_dissem")]
+    pub txn_dissem: DissemPattern,
 }
 
 // https://arxiv.org/pdf/1906.08936.pdf
-impl Default for AvalancheConfig {
+impl Default for AvalancheBasicConfig {
     fn default() -> Self {
         Self {
             blk_len: 40,
@@ -72,15 +108,21 @@ impl Default for AvalancheConfig {
             beta1: 11,
             beta2: 150,
             proposal_timeout_secs: 5.0,
+            vote_timeout: 5.0,
             max_inflight_blk: 40, // 40 * blk_len ~ 1800 txns / blk (bitcoin)
-            txn_dissem: String::from("broadcast"),
+            txn_dissem: DissemPattern::Broadcast,
         }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AvalancheVoteNoConfig {}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
 pub struct ChainReplicationConfig {
+    #[serde(default = "ChainReplicationConfig::get_default_order")]
     pub order: Vec<NodeId>,
+    #[serde(default = "ChainReplicationConfig::get_default_blk_size")]
     pub blk_size: usize,
 }
 
@@ -93,52 +135,49 @@ impl Default for ChainReplicationConfig {
     }
 }
 
-impl Config {
-    pub fn from_str(chain_type: ChainType, input: Option<&str>) -> Result<Self, CopycatError> {
-        match chain_type {
-            ChainType::Dummy => Ok(Config::Dummy {
-                config: parsed_config!(input => DummyConfig; txn_dissem, blk_dissem)?,
-            }),
-            ChainType::Bitcoin => Ok(Config::Bitcoin {
-                config: parsed_config!(input => BitcoinConfig; difficulty, commit_depth, compute_power, txn_dissem, blk_dissem)?,
-            }),
-            ChainType::Avalanche => Ok(Config::Avalanche {
-                config: parsed_config!(input => AvalancheConfig; blk_len, k, alpha, beta1, beta2, proposal_timeout_secs, max_inflight_blk, txn_dissem)?,
-            }),
-            ChainType::ChainReplication => Ok(Config::ChainReplication {
-                config: parsed_config!(input => ChainReplicationConfig; order, blk_size)?,
-            }),
-        }
-    }
-
-    pub fn validate(&mut self, topology: &HashMap<NodeId, HashSet<NodeId>>) {
-        match self {
-            Config::Dummy { .. } => {}
-            Config::Bitcoin { .. } => {}
-            Config::Avalanche { config } => {
-                let min_neighbors = topology
-                    .iter()
-                    .map(|(_, neighbors)| neighbors.len())
-                    .min()
-                    .unwrap();
-                let max_voters = min_neighbors + 1;
-                if config.k > max_voters {
-                    log::warn!("not enough neighbors, setting k to {max_voters} instead");
-                    config.k = max_voters;
-                }
-                if config.alpha <= 0.5 {
-                    log::warn!(
-                        "alpha has to be greater than 0.5 to ensure majority vote, setting to 0.51"
-                    );
-                    config.alpha = 0.51
+impl NodeConfig {
+    pub fn validate(&mut self, neighbors: &HashSet<NodeId>, all_nodes: &HashSet<NodeId>) {
+        // TODO: validate dissem pattern as well
+        match &mut self.chain_config {
+            ChainConfig::Dummy { .. } => {}
+            ChainConfig::Bitcoin { .. } => {}
+            ChainConfig::Avalanche { config } => {
+                match config {
+                    AvalancheConfig::Basic { config } => {
+                        let max_voters = neighbors.len() + 1; // including self
+                        if config.k > max_voters {
+                            log::warn!("not enough neighbors, setting k to {max_voters} instead");
+                            config.k = max_voters;
+                        }
+                        if config.alpha <= 0.5 {
+                            log::warn!(
+                                "alpha has to be greater than 0.5 to ensure majority vote, setting to 0.51"
+                            );
+                            config.alpha = 0.51
+                        }
+                    }
+                    AvalancheConfig::Blizzard { config } => {
+                        let max_voters = neighbors.len() + 1; // including self
+                        if config.k > max_voters {
+                            log::warn!("not enough neighbors, setting k to {max_voters} instead");
+                            config.k = max_voters;
+                        }
+                        if config.alpha <= 0.5 {
+                            log::warn!(
+                                "alpha has to be greater than 0.5 to ensure majority vote, setting to 0.51"
+                            );
+                            config.alpha = 0.51
+                        }
+                    }
+                    AvalancheConfig::VoteNo { .. } => {} // do nothing
                 }
             }
-            Config::ChainReplication { config } => {
+            ChainConfig::ChainReplication { config } => {
                 let mut on_chain = HashSet::new();
                 let mut valid = true;
                 // make sure that nodes on chain are valid
                 for node in config.order.iter() {
-                    if topology.contains_key(node) && !on_chain.contains(node) {
+                    if all_nodes.contains(node) && !on_chain.contains(node) {
                         on_chain.insert(*node);
                     } else {
                         valid = false;
@@ -146,67 +185,108 @@ impl Config {
                     }
                 }
                 if !valid {
-                    let valid_order = topology.keys().cloned().collect();
+                    let mut valid_order: Vec<NodeId> = all_nodes.iter().cloned().collect();
+                    valid_order.sort();
                     log::warn!("invalid order, setting to {valid_order:?} instead");
                     config.order = valid_order;
-                }
-                // make sure that all nodes are included in the chain
-                let mut all_nodes: Vec<&u64> = topology.keys().into_iter().collect();
-                all_nodes.sort();
-                for node in all_nodes.into_iter() {
-                    if !on_chain.contains(node) {
-                        config.order.push(*node)
+                } else {
+                    // make sure that all nodes are included in the chain
+                    for node in all_nodes.iter() {
+                        if !on_chain.contains(node) {
+                            config.order.push(*node)
+                        }
                     }
                 }
             }
         }
-        self.validate_dissem_patterns();
     }
+}
 
-    fn validate_dissem_patterns(&mut self) {
-        if let Err(e) = self.get_txn_dissem_inner() {
-            log::warn!("Invalid txn dissem pattern: {e}, restore to default");
-            match self {
-                Config::Dummy { config } => config.txn_dissem = String::from("broadcast"),
-                Config::Bitcoin { config } => config.txn_dissem = String::from("gossip"),
-                Config::Avalanche { config } => config.txn_dissem = String::from("broadcast"),
-                Config::ChainReplication { .. } => {}
-            }
-        }
-
-        if let Err(e) = self.get_blk_dissem_inner() {
-            log::warn!("Invalid blk dissem pattern: {e}, restore to default");
-            match self {
-                Config::Dummy { config } => config.blk_dissem = String::from("broadcast"),
-                Config::Bitcoin { config } => config.blk_dissem = String::from("gossip"),
-                Config::ChainReplication { .. } | Config::Avalanche { .. } => {}
-            }
-        }
-    }
-
-    fn get_txn_dissem_inner(&self) -> Result<DissemPattern, String> {
-        match self {
-            Config::Dummy { config } => DissemPattern::from_str(&config.txn_dissem, true),
-            Config::Bitcoin { config } => DissemPattern::from_str(&config.txn_dissem, true),
-            Config::Avalanche { config } => DissemPattern::from_str(&config.txn_dissem, true),
-            Config::ChainReplication { .. } => Ok(DissemPattern::Passthrough),
-        }
-    }
-
+impl ChainConfig {
     pub fn get_txn_dissem(&self) -> DissemPattern {
-        self.get_txn_dissem_inner().unwrap()
-    }
-
-    fn get_blk_dissem_inner(&self) -> Result<DissemPattern, String> {
         match self {
-            Config::Dummy { config } => DissemPattern::from_str(&config.blk_dissem, true),
-            Config::Bitcoin { config } => DissemPattern::from_str(&config.blk_dissem, true),
-            Config::Avalanche { .. } => Ok(DissemPattern::Sample),
-            Config::ChainReplication { .. } => Ok(DissemPattern::Linear),
+            ChainConfig::Dummy { config } => config.txn_dissem.clone(),
+            ChainConfig::Bitcoin { config } => match config {
+                BitcoinConfig::Basic { config } => config.txn_dissem.clone(),
+                BitcoinConfig::Eager { config } => config.txn_dissem.clone(),
+            },
+            ChainConfig::Avalanche { config } => match config {
+                AvalancheConfig::Basic { config } => config.txn_dissem.clone(),
+                AvalancheConfig::Blizzard { config } => config.txn_dissem.clone(),
+                AvalancheConfig::VoteNo { .. } => DissemPattern::Passthrough,
+            },
+            ChainConfig::ChainReplication { .. } => DissemPattern::Passthrough,
         }
     }
 
     pub fn get_blk_dissem(&self) -> DissemPattern {
-        self.get_blk_dissem_inner().unwrap()
+        match self {
+            ChainConfig::Dummy { config } => config.blk_dissem.clone(),
+            ChainConfig::Bitcoin { config } => match config {
+                BitcoinConfig::Basic { config } => config.blk_dissem.clone(),
+                BitcoinConfig::Eager { config } => config.blk_dissem.clone(),
+            },
+            ChainConfig::Avalanche { config } => match config {
+                AvalancheConfig::Basic { config } => DissemPattern::Sample {
+                    sample_size: config.k,
+                },
+                AvalancheConfig::Blizzard { config } => DissemPattern::Sample {
+                    sample_size: config.k,
+                },
+                AvalancheConfig::VoteNo { .. } => DissemPattern::Passthrough,
+            },
+            ChainConfig::ChainReplication { config } => DissemPattern::Linear {
+                order: config.order.clone(),
+            },
+        }
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct JsonConfigItem {
+    nodes: Vec<NodeId>,
+    config: serde_json::Value,
+    max_concurrency: Option<usize>,
+}
+
+type JsonConfig = Vec<JsonConfigItem>;
+
+pub fn parse_config_file(
+    path: &String,
+    chain_type: ChainType,
+) -> Result<HashMap<NodeId, NodeConfig>, CopycatError> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let config_json: JsonConfig = serde_json::from_reader(reader)?;
+
+    let mut config_map = HashMap::new();
+    for config_item in config_json {
+        println!(":?",);
+        let config = match chain_type {
+            ChainType::Dummy => ChainConfig::Dummy {
+                config: serde_json::from_value(config_item.config.clone())?,
+            },
+            ChainType::Bitcoin => ChainConfig::Bitcoin {
+                config: serde_json::from_value(config_item.config.clone())?,
+            },
+            ChainType::Avalanche => ChainConfig::Avalanche {
+                config: serde_json::from_value(config_item.config.clone())?,
+            },
+            ChainType::ChainReplication => ChainConfig::ChainReplication {
+                config: serde_json::from_value(config_item.config.clone())?,
+            },
+        };
+        println!("{:?}", config);
+        for node in config_item.nodes {
+            config_map.insert(
+                node,
+                NodeConfig {
+                    chain_config: config.clone(),
+                    max_concurrency: config_item.max_concurrency,
+                },
+            );
+        }
+    }
+
+    Ok(config_map)
 }

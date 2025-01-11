@@ -1,6 +1,6 @@
 /target/
 /tmp/
-*.json
+test_*.json
 .idea
 
 # perf data
@@ -11,5 +11,4 @@
 *.html
 *.pl
 *.data.old
-*.png
 .DS_Store

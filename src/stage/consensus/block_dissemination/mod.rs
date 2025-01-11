@@ -9,26 +9,29 @@ use sampling::SamplingBlockDissemination;
 
 mod linear;
 use linear::LinearBlockDissemination;
-use tokio_metrics::TaskMonitor;
 
-use crate::config::Config;
+mod passthrough;
+use passthrough::PassthroughBlockDissemination;
+
 use crate::consts::BLK_DISS_DELAY_INTERVAL;
 use crate::context::BlkCtx;
-use crate::get_report_timer;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::DissemPattern;
 use crate::stage::pass;
 use crate::utils::{CopycatError, NodeId};
+use crate::vcores::VCoreGroup;
+use crate::{get_report_timer, ChainConfig};
 
 use async_trait::async_trait;
 
-use std::sync::Arc;
-use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
-use tokio::time::{Duration, Instant};
-
 use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
+
+use tokio::sync::mpsc;
+use tokio::time::{Duration, Instant};
+use tokio_metrics::TaskMonitor;
 
 #[async_trait]
 trait BlockDissemination: Sync + Send {
@@ -37,33 +40,33 @@ trait BlockDissemination: Sync + Send {
 
 fn get_block_dissemination(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockDissemination> {
     match config.get_blk_dissem() {
         DissemPattern::Broadcast => Box::new(BroadcastBlockDissemination::new(id, peer_messenger)),
         DissemPattern::Gossip => Box::new(GossipBlockDissemination::new(id, peer_messenger)),
-        DissemPattern::Sample => {
-            Box::new(SamplingBlockDissemination::new(id, peer_messenger, config))
+        DissemPattern::Sample { sample_size } => Box::new(SamplingBlockDissemination::new(
+            id,
+            peer_messenger,
+            sample_size,
+        )),
+        DissemPattern::Linear { order } => {
+            Box::new(LinearBlockDissemination::new(id, peer_messenger, order))
         }
-        DissemPattern::Linear => {
-            Box::new(LinearBlockDissemination::new(id, peer_messenger, config))
+        DissemPattern::Passthrough => {
+            Box::new(PassthroughBlockDissemination::new(id, peer_messenger))
         }
-        DissemPattern::Passthrough => unimplemented!(),
     }
 }
 
 pub async fn block_dissemination_thread(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
-    mut new_block_recv: mpsc::Receiver<(
-        NodeId,
-        Vec<(Arc<Block>, Arc<BlkCtx>)>,
-        OwnedSemaphorePermit,
-    )>,
+    mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     block_ready_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
-    concurrency: Arc<Semaphore>,
+    core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "block dissemination stage starting...");
@@ -81,11 +84,19 @@ pub async fn block_dissemination_thread(
         tokio::select! {
             new_blk = new_block_recv.recv() => {
                 // for serializing blocks sent
-                let (src, new_tail, _permit) = match new_blk {
+                let (src, new_tail) = match new_blk {
                     Some(blk) => blk,
                     None => {
                         pf_error!(id; "new_block pipe closed unexpectedly");
                         return;
+                    }
+                };
+
+                let _permit = match core_group.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
                     }
                 };
 
@@ -115,7 +126,7 @@ pub async fn block_dissemination_thread(
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
                     // doing skipped compute cost
-                    let _permit = match concurrency.acquire().await {
+                    let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

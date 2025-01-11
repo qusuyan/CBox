@@ -16,11 +16,11 @@ pub type FlowGenId = u64;
 pub type ClientId = u64;
 
 pub struct Stats {
-    pub latency: f64,
     pub num_committed: u64,
     pub chain_length: u64,
     pub commit_confidence: f64,
     pub inflight_txns: usize,
+    pub latencies: Vec<f64>,
 }
 
 #[async_trait]
@@ -43,6 +43,7 @@ pub fn get_flow_gen(
     num_accounts: usize,
     max_inflight: usize,
     frequency: usize,
+    conflict_rate: f64,
     chain: ChainType,
     crypto: CryptoScheme,
 ) -> Box<dyn FlowGen> {
@@ -62,6 +63,7 @@ pub fn get_flow_gen(
             num_accounts,
             max_inflight,
             frequency,
+            conflict_rate,
             crypto,
         )),
         ChainType::ChainReplication => Box::new(ChainReplicationFlowGen::new(

@@ -11,7 +11,9 @@ use transaction::Txn;
 
 use std::sync::Arc;
 
-#[derive(Copy, Clone, Debug, clap::ValueEnum)]
+use crate::NodeId;
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, clap::ValueEnum)]
 pub enum ChainType {
     Dummy,
     Bitcoin,
@@ -19,12 +21,12 @@ pub enum ChainType {
     ChainReplication,
 }
 
-#[derive(Copy, Clone, Debug, clap::ValueEnum)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum DissemPattern {
     Broadcast,
     Gossip,
-    Sample,
-    Linear,
+    Sample { sample_size: usize },
+    Linear { order: Vec<NodeId> },
     Passthrough,
 }
 

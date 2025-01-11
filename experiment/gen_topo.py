@@ -6,6 +6,9 @@ import math
 import numpy as np
 
 def gen_topo(nodes, degree, skewness):
+    if degree >= len(nodes) - 1:
+        return all_to_all(nodes)
+
     if skewness <= 1:
         rng = lambda max: math.floor(np.random.uniform() * max)
     else:
@@ -30,7 +33,8 @@ def gen_topo(nodes, degree, skewness):
             samples.sort()
         return samples
 
-    edge_count = degree / 2 # since edges are undirected
+    # edge_count = degree / 2 # since edges are undirected
+    edge_count = degree
     edges = set()
     for (idx, node) in enumerate(nodes):
         neighbor_idx = {nidx + (nidx >= idx) for nidx in sampler(rng, edge_count, len(nodes) - 1)}
@@ -56,20 +60,27 @@ def gen_topo(nodes, degree, skewness):
                     unvisited_nodes.remove(src)
         compartments.append(connected)
 
-    while len(compartments) > 1:
-        graph1 = compartments.pop(0)
-        rand1 = math.floor(np.random.uniform() * len(graph1))
-        node1 = graph1[rand1]
+    for idx1 in range(len(compartments)):
+        for idx2 in range(idx1 + 1, len(compartments)):
+            graph1 = compartments[idx1]
+            graph2 = compartments[idx2]
 
-        graph2 = compartments.pop(0)
-        rand2 = math.floor(np.random.uniform() * len(graph2))
-        node2 = graph2[rand2]
+            rand1_1 = math.floor(np.random.uniform() * len(graph1))
+            node1_1 = graph1[rand1_1]
+            rand1_2 = math.floor(np.random.uniform() * len(graph2))
+            node1_2 = graph2[rand1_2]
+            edges.add((node1_1, node1_2) if node1_2 > node1_1 else (node1_2, node1_1))
 
-        edges.add((node1, node2) if node2 > node1 else (node2, node1))
-        graph1.extend(graph2)
-        compartments.append(graph1)
+            rand2_1 = math.floor(np.random.uniform() * len(graph1) - 1) + (rand2_1 >= rand1_1)
+            node2_1 = graph1[rand2_1]
+            rand2_2 = math.floor(np.random.uniform() * len(graph2) - 1) + (rand2_2 >= rand1_2)
+            node2_2 = graph2[rand2_2]
+            edges.add((node2_1, node2_2) if node2_2 > node2_1 else (node2_2, node2_1))
 
     return list(edges)
+
+def all_to_all(nodes):
+    return [(a, b) for a in nodes for b in nodes if a != b]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

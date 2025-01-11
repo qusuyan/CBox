@@ -2,16 +2,17 @@ mod dummy;
 use dummy::DummyCommit;
 use tokio_metrics::TaskMonitor;
 
-use crate::config::Config;
+use crate::config::ChainConfig;
 use crate::consts::COMMIT_DELAY_INTERVAL;
 use crate::protocol::transaction::Txn;
 use crate::stage::pass;
+use crate::vcores::VCoreGroup;
 use crate::{get_report_timer, CopycatError, NodeId};
 
 use async_trait::async_trait;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 use atomic_float::AtomicF64;
@@ -22,21 +23,21 @@ trait Commit: Sync + Send {
     async fn commit(&self, block: &Vec<Arc<Txn>>) -> Result<(), CopycatError>;
 }
 
-fn get_commit(_id: NodeId, config: Config) -> Box<dyn Commit> {
+fn get_commit(_id: NodeId, config: ChainConfig) -> Box<dyn Commit> {
     match config {
-        Config::Dummy { .. } => Box::new(DummyCommit::new()),
-        Config::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:
-        Config::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
-        Config::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:
+        ChainConfig::Dummy { .. } => Box::new(DummyCommit::new()),
+        ChainConfig::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:
+        ChainConfig::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
+        ChainConfig::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:
     }
 }
 
 pub async fn commit_thread(
     id: NodeId,
-    config: Config,
+    config: ChainConfig,
     mut commit_recv: mpsc::Receiver<(u64, Vec<Arc<Txn>>)>,
     executed_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
-    concurrency: Arc<Semaphore>,
+    core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "commit stage starting...");
@@ -53,7 +54,7 @@ pub async fn commit_thread(
         tokio::select! {
             new_batch = commit_recv.recv() => {
                 // commit transaction
-                let _permit = match concurrency.acquire().await {
+                let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
                         pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
@@ -89,7 +90,7 @@ pub async fn commit_thread(
                 let sleep_time = delay.load(Ordering::Relaxed);
                 if sleep_time > 0.05 {
                     // doing aggregated compute cost
-                    let _permit = match concurrency.acquire().await {
+                    let _permit = match core_group.acquire().await {
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);

@@ -19,31 +19,37 @@ cluster = [
   ["id", "@POS"],
   ["threads", "32"],
   ["mailbox_workers", "32"],
-  ["node_concurrency", "2"],
   ["chain_type", "bitcoin"],
   ["crypto", "dummy"],
   ["conn_multiply", "1"],
+  ["warmup_time", "10"],
   ["num_clients", "1"],
   ["clients_remainder", "0"],
   ["accounts", "10000"],
   ["max_inflight", "100000"],
   ["frequency", "0"],
+  ["conflict_rate", "0"],
   ["txn_span", "0"],
   ["disable_txn_dissem", "false"],
-  ["config", ""],
 ]
 date = []
-mailbox = [["buildtype", "release"], ["id", "@POS"], ["threads", "8"]]
+mailbox = [
+  ["buildtype", "release"],
+  ["id", "@POS"],
+  ["threads", "8"],
+  ["mailbox_workers", "32"],
+  ["conn_multiply", "1"],
+]
 node = [
   ["buildtype", "release"],
   ["machine_id", "@POS"],
   ["local_id", "0"],
   ["threads", "8"],
+  ["mailbox_workers", "32"],
   ["chain_type", "bitcoin"],
+  ["crypto", "dummy"],
   ["accounts", "10000"],
   ["max_inflight", "100000"],
   ["frequency", "0"],
-  ["dissem", "broadcast"],
   ["disable_txn_dissem", "false"],
-  ["config", ""],
 ]

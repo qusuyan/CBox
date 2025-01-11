@@ -1,5 +1,5 @@
 use super::{BlockManagement, CurBlockState};
-use crate::config::AvalancheConfig;
+use crate::config::AvalancheBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
@@ -53,7 +53,11 @@ pub struct AvalancheBlockManagement {
 }
 
 impl AvalancheBlockManagement {
-    pub fn new(id: NodeId, config: AvalancheConfig, peer_messenger: Arc<PeerMessenger>) -> Self {
+    pub fn new(
+        id: NodeId,
+        config: AvalancheBasicConfig,
+        peer_messenger: Arc<PeerMessenger>,
+    ) -> Self {
         let proposal_timeout = Duration::from_secs_f64(config.proposal_timeout_secs);
         Self {
             id,
@@ -77,7 +81,7 @@ impl AvalancheBlockManagement {
 }
 
 impl AvalancheBlockManagement {
-    fn validate_txn(&self, txn: &AvalancheTxn) -> Result<(bool, Vec<Hash>), CopycatError> {
+    fn validate_txn(&self, txn: &AvalancheTxn) -> Result<Result<bool, Vec<Hash>>, CopycatError> {
         match txn {
             AvalancheTxn::Send {
                 sender: txn_sender,
@@ -100,7 +104,7 @@ impl AvalancheBlockManagement {
 
                 if missing_deps.len() > 0 {
                     // we cannot reject the txn since the source utxo may not been received yet
-                    return Ok((true, missing_deps));
+                    return Ok(Err(missing_deps));
                 }
 
                 let mut input_value = 0;
@@ -108,11 +112,13 @@ impl AvalancheBlockManagement {
                     // add values together to find total input value
 
                     let value = match utxo {
-                        AvalancheTxn::Grant { out_utxo, receiver } => {
+                        AvalancheTxn::Grant {
+                            out_utxo, receiver, ..
+                        } => {
                             if receiver == txn_sender {
                                 out_utxo
                             } else {
-                                return Ok((false, vec![])); // utxo does not belong to sender
+                                return Ok(Ok(false)); // utxo does not belong to sender
                             }
                         }
                         AvalancheTxn::Send {
@@ -127,7 +133,7 @@ impl AvalancheBlockManagement {
                             } else if sender == txn_sender {
                                 remainder
                             } else {
-                                return Ok((false, vec![])); // utxo does not belong to sender
+                                return Ok(Ok(false)); // utxo does not belong to sender
                             }
                         }
                         AvalancheTxn::Noop { .. } | AvalancheTxn::PlaceHolder => {
@@ -139,7 +145,7 @@ impl AvalancheBlockManagement {
 
                 // check if the input values match output values
                 if input_value != txn_out_utxo + txn_remainder {
-                    return Ok((false, vec![])); // input and output utxo values do not match
+                    return Ok(Ok(false)); // input and output utxo values do not match
                 }
             }
             AvalancheTxn::Grant { .. } | AvalancheTxn::Noop { .. } => {
@@ -151,7 +157,7 @@ impl AvalancheBlockManagement {
             }
         }
 
-        Ok((true, vec![]))
+        Ok(Ok(true))
     }
 }
 
@@ -305,7 +311,7 @@ impl BlockManagement for AvalancheBlockManagement {
         let mut blk_txn_ctx = vec![];
 
         let mut blk_missing_deps = vec![];
-        let mut pending_txns = vec![];
+        let mut recheck_txn_idx = vec![];
 
         let mut pending_frontier = vec![];
 
@@ -319,7 +325,7 @@ impl BlockManagement for AvalancheBlockManagement {
                 blk_txn_ctx.push(txn_ctx.clone());
                 if let Some(dag_node) = self.txn_dag.get(&txn_hash) {
                     if dag_node.num_parents == 0 {
-                        self.dag_frontier.push_front(txn_hash);
+                        pending_frontier.push(txn_hash);
                     }
                 }
                 continue;
@@ -354,55 +360,43 @@ impl BlockManagement for AvalancheBlockManagement {
                 }
                 AvalancheTxn::Send { in_utxo, .. } => {
                     // verify validity
-                    let mut pending = false;
-                    let valid = {
-                        let (is_valid, txn_missing_deps) = self.validate_txn(avax_txn)?;
-                        pf_trace!(self.id; "Validating txn returned is_valid: {}, missing_deps: {:?}", is_valid, txn_missing_deps);
-                        if txn_missing_deps.len() > 0 {
+                    match self.validate_txn(avax_txn)? {
+                        Ok(is_valid) => {
                             if is_valid {
-                                // todo: add missing deps to the missing deps set of batch
-                                blk_missing_deps.extend(txn_missing_deps);
-                                pending_txns.push(idx);
-                                pending = true;
+                                // add to txn pool if valid
+                                self.txn_pool
+                                    .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
+                                let mut num_parents = 0;
+                                for parent in in_utxo.iter() {
+                                    if let Some(siblings) = self.txn_dag.get_mut(parent) {
+                                        siblings.children.insert(txn_hash);
+                                        num_parents += 1;
+                                    }
+                                }
+                                self.txn_dag.insert(
+                                    txn_hash,
+                                    DagNode {
+                                        num_parents,
+                                        children: HashSet::new(),
+                                    },
+                                );
+                                if num_parents == 0 {
+                                    pending_frontier.push(txn_hash);
+                                }
+                                (txn.clone(), txn_ctx.clone())
+                            } else {
+                                // otherwise put a place holder
+                                let txn = Txn::Avalanche {
+                                    txn: AvalancheTxn::PlaceHolder,
+                                };
+                                let txn_ctx = TxnCtx::from_txn(&txn)?;
+                                (Arc::new(txn), Arc::new(txn_ctx))
                             }
-                            false
-                        } else {
-                            is_valid
                         }
-                    };
-
-                    if valid {
-                        // add to txn pool if valid
-                        self.txn_pool
-                            .insert(txn_hash.clone(), (txn.clone(), txn_ctx.clone()));
-                        let mut num_parents = 0;
-                        for parent in in_utxo.iter() {
-                            if let Some(siblings) = self.txn_dag.get_mut(parent) {
-                                siblings.children.insert(txn_hash);
-                                num_parents += 1;
-                            }
-                        }
-                        self.txn_dag.insert(
-                            txn_hash,
-                            DagNode {
-                                num_parents,
-                                children: HashSet::new(),
-                            },
-                        );
-                        if num_parents == 0 {
-                            pending_frontier.push(txn_hash);
-                        }
-                        (txn.clone(), txn_ctx.clone())
-                    } else {
-                        if pending {
+                        Err(txn_missing_deps) => {
+                            blk_missing_deps.extend(txn_missing_deps);
+                            recheck_txn_idx.push(idx);
                             (txn.clone(), txn_ctx.clone())
-                        } else {
-                            // otherwise put a place holder
-                            let txn = Txn::Avalanche {
-                                txn: AvalancheTxn::PlaceHolder,
-                            };
-                            let txn_ctx = TxnCtx::from_txn(&txn)?;
-                            (Arc::new(txn), Arc::new(txn_ctx))
                         }
                     }
                 }
@@ -436,7 +430,7 @@ impl BlockManagement for AvalancheBlockManagement {
             // record the current results
             self.pending_blks.insert(
                 (proposer, blk_id, depth),
-                (filtered_txns, blk_txn_ctx, pending_txns),
+                (filtered_txns, blk_txn_ctx, recheck_txn_idx),
             );
 
             return Ok(vec![]);
@@ -463,8 +457,6 @@ impl BlockManagement for AvalancheBlockManagement {
 
                 if self.txn_pool.contains_key(&txn_hash) {
                     // txn has been validated before
-                    filtered_txns.push(txn.clone());
-                    blk_txn_ctx.push(txn_ctx.clone());
                     continue;
                 }
 
@@ -474,9 +466,8 @@ impl BlockManagement for AvalancheBlockManagement {
                 };
 
                 if let AvalancheTxn::Send { in_utxo, .. } = avax_txn {
-                    let (is_valid, dependency_list) = self.validate_txn(avax_txn)?;
                     // since we have already queried the peers
-                    let valid = is_valid && dependency_list.len() == 0;
+                    let valid = self.validate_txn(avax_txn)?.unwrap_or(false);
                     if !valid {
                         pf_warn!(self.id; "got invalid txn in batch {} from proposer {}", blk_id, proposer);
                         // replace with placeholder

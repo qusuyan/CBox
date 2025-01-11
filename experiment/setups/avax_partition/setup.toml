@@ -1,0 +1,36 @@
+[experiment]
+num_iterations = 3
+
+[parameters]
+chain-type = "avalanche"
+cluster-threads = 32
+conflict_rate = 1
+conn-multiply = 1
+correct-config = [
+  "blk_len=40+max_inflight_blk=40+k=10+beta1=4+beta2=4",
+  "blk_len=40+max_inflight_blk=40+k=10+beta1=8+beta2=8",
+  "blk_len=40+max_inflight_blk=40+k=10+beta1=16+beta2=16",
+  "blk_len=40+max_inflight_blk=40+k=10+beta1=24+beta2=24",
+  "blk_len=40+max_inflight_blk=40+k=10+beta1=32+beta2=32",
+  "blk_len=40+max_inflight_blk=40+k=10+beta1=64+beta2=64",
+  "blk_len=40+max_inflight_blk=40+k=10+beta1=96+beta2=96",
+  "blk_len=40+max_inflight_blk=40+k=10+beta1=128+beta2=128",
+  "blk_len=40+max_inflight_blk=40+k=10+beta1=160+beta2=160",
+]
+correct-type = ["Basic", "Blizzard"]
+crypto = "dummy-ecdsa"
+exp-prefix = "Avax-Partition/"
+exp-time = 310
+frequency = 1500
+machine-config = "setups/avax_partition/partition_machines.json"
+mailbox-workers = 16
+max-inflight-txns = 0
+network-config = "setups/avax_partition/partition_network.json"
+num-accounts = 160
+num-clients = 10
+num-faulty = 0
+num-machines = 1
+num-nodes = 40
+per-node-concurrency = 1
+topo-degree = 0
+txn-span = 1

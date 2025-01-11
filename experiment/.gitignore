@@ -2,6 +2,7 @@ cluster.toml
 results/*
 logs/*
 __pycache__/
+bench_*.json
 
 !logs/.gitkeep
 !results/.gitkeep

@@ -1,23 +1,23 @@
 use super::TxnValidation;
-use crate::config::AvalancheConfig;
+use crate::context::TxnCtx;
 use crate::protocol::crypto::Hash;
-use crate::transaction::{AvalancheTxn, Txn};
-use crate::{CopycatError, NodeId, TxnCtx};
+use crate::transaction::{BitcoinTxn, Txn};
+use crate::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-pub struct AvalancheTxnValidation {
+pub struct BitcoinTxnValidation {
     _id: NodeId,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
-    pending_txns: HashMap<Hash, HashMap<Hash, ((Arc<Txn>, Arc<TxnCtx>), HashSet<NodeId>)>>,
+    pending_txns: HashMap<Hash, HashMap<Hash, ((Arc<Txn>, Arc<TxnCtx>), NodeId)>>,
 }
 
-impl AvalancheTxnValidation {
-    pub fn new(id: NodeId, _config: AvalancheConfig) -> Self {
-        AvalancheTxnValidation {
+impl BitcoinTxnValidation {
+    pub fn new(id: NodeId) -> Self {
+        BitcoinTxnValidation {
             _id: id,
             txn_pool: HashMap::new(),
             pending_txns: HashMap::new(),
@@ -26,7 +26,7 @@ impl AvalancheTxnValidation {
 
     fn validate_inner(
         &mut self,
-        srcs: HashSet<NodeId>,
+        src: NodeId,
         txn: Arc<Txn>,
         ctx: Arc<TxnCtx>,
     ) -> Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))> {
@@ -37,12 +37,12 @@ impl AvalancheTxnValidation {
             return vec![];
         }
 
-        let avax_txn = match txn.as_ref() {
-            Txn::Avalanche { txn } => txn,
+        let btc_txn = match txn.as_ref() {
+            Txn::Bitcoin { txn } => txn,
             _ => unreachable!(),
         };
 
-        match self.validate_txn(avax_txn) {
+        match self.validate_txn(btc_txn) {
             Ok(valid) => {
                 if !valid {
                     return vec![];
@@ -54,10 +54,9 @@ impl AvalancheTxnValidation {
                         .pending_txns
                         .entry(missing_dep)
                         .or_insert(HashMap::new());
-                    let dissem_instances = siblings.entry(txn_hash);
-                    dissem_instances
-                        .and_modify(|(_, set)| set.extend(srcs.iter()))
-                        .or_insert(((txn.clone(), ctx.clone()), srcs.clone()));
+                    siblings
+                        .entry(txn_hash)
+                        .or_insert(((txn.clone(), ctx.clone()), src));
                 }
 
                 // Do not enqueue the txn yet since it might be invalid
@@ -70,10 +69,7 @@ impl AvalancheTxnValidation {
 
         // add txn to returned vector
         let mut valid_offsprings = vec![];
-        valid_offsprings.extend(
-            srcs.into_iter()
-                .map(|src| (src, (txn.clone(), ctx.clone()))),
-        );
+        valid_offsprings.push((src, (txn.clone(), ctx.clone())));
 
         // add any pending childrens
         if let Some(children) = self.pending_txns.remove(&txn_hash) {
@@ -85,9 +81,9 @@ impl AvalancheTxnValidation {
         valid_offsprings
     }
 
-    fn validate_txn(&self, avax_txn: &AvalancheTxn) -> Result<bool, Vec<Hash>> {
-        match avax_txn {
-            AvalancheTxn::Send {
+    fn validate_txn(&self, btc_txn: &BitcoinTxn) -> Result<bool, Vec<Hash>> {
+        match btc_txn {
+            BitcoinTxn::Send {
                 sender,
                 in_utxo,
                 out_utxo,
@@ -99,7 +95,7 @@ impl AvalancheTxnValidation {
                 for in_utxo_hash in in_utxo.iter() {
                     match self.txn_pool.get(in_utxo_hash) {
                         Some((txn, _)) => match txn.as_ref() {
-                            Txn::Avalanche { txn } => in_utxo_txns.push(txn),
+                            Txn::Bitcoin { txn } => in_utxo_txns.push(txn),
                             _ => unreachable!(),
                         },
                         None => missing_deps.push(in_utxo_hash.clone()),
@@ -116,14 +112,21 @@ impl AvalancheTxnValidation {
                 for utxo in in_utxo_txns.into_iter() {
                     // add values together to find total input value
                     let value = match utxo {
-                        AvalancheTxn::Grant { out_utxo, receiver } => {
+                        BitcoinTxn::Grant { out_utxo, receiver } => {
                             if receiver == sender {
                                 out_utxo
                             } else {
                                 return Ok(false); // utxo does not belong to sender
                             }
                         }
-                        AvalancheTxn::Send {
+                        BitcoinTxn::Incentive { out_utxo, receiver } => {
+                            if receiver == sender {
+                                out_utxo
+                            } else {
+                                return Ok(false); // utxo does not belong to sender
+                            }
+                        }
+                        BitcoinTxn::Send {
                             sender: parent_txn_sender,
                             receiver: parent_txn_recver,
                             out_utxo: parent_txn_out_utxo,
@@ -138,9 +141,6 @@ impl AvalancheTxnValidation {
                                 return Ok(false); // utxo does not belong to sender
                             }
                         }
-                        AvalancheTxn::Noop { .. } | AvalancheTxn::PlaceHolder => {
-                            unreachable!();
-                        }
                     };
                     input_value += value;
                 }
@@ -152,11 +152,11 @@ impl AvalancheTxnValidation {
 
                 Ok(true)
             }
-            AvalancheTxn::Grant { .. } => {
+            BitcoinTxn::Grant { .. } => {
                 // grant txns are always correct
                 Ok(true)
             }
-            AvalancheTxn::PlaceHolder | AvalancheTxn::Noop { .. } => {
+            BitcoinTxn::Incentive { .. } => {
                 // this are generated for protocol and hence will not come from clients
                 unreachable!();
             }
@@ -165,7 +165,7 @@ impl AvalancheTxnValidation {
 }
 
 #[async_trait]
-impl TxnValidation for AvalancheTxnValidation {
+impl TxnValidation for BitcoinTxnValidation {
     async fn validate(
         &mut self,
         txn_batch: Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>,
@@ -173,9 +173,7 @@ impl TxnValidation for AvalancheTxnValidation {
         let mut correct_txns = vec![];
 
         for (src, (txn, ctx)) in txn_batch {
-            let mut srcs = HashSet::new();
-            srcs.insert(src);
-            correct_txns.extend(self.validate_inner(srcs, txn, ctx));
+            correct_txns.extend(self.validate_inner(src, txn, ctx));
         }
 
         Ok(correct_txns)

@@ -9,7 +9,7 @@ import json
 file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
 deliver_regex = "Worker (\d) \(([\d]+)->([\d]+)\): message get delivered later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
 arrive_regex = "Worker (\d) \(([\d]+)->([\d]+)\): message arrived later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
-msgs_sent_recv_regex = "copycat::peers: \(([\d]+)\) In the last minute: ([\d]+) msgs sent and ([\d]+) msgs recved"
+msgs_sent_recv_regex = "copycat::peers::peers: \(([\d]+)\) In the last minute: ([\d]+) msgs sent and ([\d]+) msgs recved"
 
 
 def parse_msg_delay(log_dir, line_ranges = {}):
@@ -105,9 +105,12 @@ def parse_msg_delay(log_dir, line_ranges = {}):
     msgs_sent_total = sum(msgs_sent.values())
     msgs_recv_total = sum(msgs_recv.values())
 
+    arrive_late_chance = arrive_late_count / msgs_recv_total if msgs_recv_total > 0 else 0
+    deliver_late_chance = deliver_late_count / msgs_recv_total if msgs_recv_total > 0 else 0
+
     return {"msgs_sent": msgs_sent_total, "msgs_recv": msgs_recv_total, 
-            "arrive_late_count": arrive_late_count, "arrive_late_chance": arrive_late_count / msgs_sent_total, "arrive_late_ms": arrive_late_avg,
-            "deliver_late_count": deliver_late_count, "deliver_late_chance": deliver_late_count / msgs_recv_total, "deliver_late_ms": deliver_late_avg}
+            "arrive_late_count": arrive_late_count, "arrive_late_chance": arrive_late_chance, "arrive_late_ms": arrive_late_avg,
+            "deliver_late_count": deliver_late_count, "deliver_late_chance": deliver_late_chance, "deliver_late_ms": deliver_late_avg}
 
 
 if __name__ == "__main__":

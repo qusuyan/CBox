@@ -4,7 +4,6 @@ import json, time, sys, signal, os
 from datetime import datetime
 
 import pandas as pd
-import math
 
 from dist_make import Cluster, Configuration, Experiment
 from dist_make.logging import MetaLogger
@@ -14,6 +13,7 @@ from gen_topo import gen_topo
 from msg_delay import parse_msg_delay
 from sched_stats import parse_sched_stats
 from get_log_lines import get_log_lines
+from gen_validator_config import gen_validator_configs
 
 ENGINE = "home-runner"
 SETUP_TIME = 10
@@ -49,7 +49,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     logger = MetaLogger(exp.log_dir)
     logger.print(f'Running benchmark on with parameters: {params}')
 
-    exp_name = f"experiment-{exp.uid}"
+    exp_name = f'{params["exp-prefix"]}experiment-{exp.uid}'
     os.makedirs(f"./results/{exp_name}")
     with open(f"./results/{exp_name}/config.json", "w") as f:
         json.dump(params, f, indent=2)
@@ -65,37 +65,66 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     nodes = []
 
     addrs = exp_machines.get_addrs()
-    machine_config = {}
-    for (idx, addr) in enumerate(addrs):
-        base = idx << 12
-        curr_machine_num_nodes = num_nodes_per_machine + (1 if num_nodes_remainder > idx else 0)
-        node_list = [base + id for id in range(curr_machine_num_nodes)]
-        machine_config[idx] = {
-            "addr": f"{addr}:15500",
-            "node_list": node_list,
+    if params["machine-config"] == "":
+        machine_config = {}
+        for (idx, addr) in enumerate(addrs):
+            base = idx << 12
+            curr_machine_num_nodes = num_nodes_per_machine + (1 if num_nodes_remainder > idx else 0)
+            node_list = [base + id for id in range(curr_machine_num_nodes)]
+            machine_config[idx] = {
+                "addr": f"{addr}:15500",
+                "node_list": node_list,
+            }
+            nodes.append(node_list)
+        machine_config_file = "bench_machines.json"
+        with open(machine_config_file, "w") as f:
+            json.dump(machine_config, f)
+    else:
+        machine_config_file = params["machine-config"]
+        with open(machine_config_file, "r") as f:
+            machine_config = json.load(f)
+            for machine in machine_config.values():
+                nodes.append(machine["node_list"])
+
+    if params["network-config"] == "":
+        network_config = {
+            "default_delay_millis": params["network-delay"],
+            "default_bandwidth": params["network-bw"],
+            "pipes": []
         }
-        nodes.append(node_list)
-    with open("bench_machines.json", "w") as f:
-        json.dump(machine_config, f)
+        network_config_file = "bench_network.json"
+        with open(network_config_file, "w") as f:
+            json.dump(network_config, f)
+    else:
+        network_config_file = params["network-config"]
 
-    network_config = {
-        "default_delay_millis": params["network-delay"],
-        "default_bandwidth": params["network-bw"],
-        "pipes": []
-    }
-    with open("bench_network.json", "w") as f:
-        json.dump(network_config, f)
-
-    # generate random network topology
     full_node_list = [node for tup in zip(*nodes) for node in tup]
-    edges = gen_topo(full_node_list, params["topo-degree"], params["topo-skewness"])
-    with open("bench_topo.json", "w") as f:
-        json.dump(edges, f)
+
+    if params["topo-config"] == "":
+        # generate random network topology
+        degree = len(full_node_list) - 1 if params["topo-degree"] == 0 else params["topo-degree"]
+        edges = gen_topo(full_node_list, degree, params["topo-skewness"])
+        topo_config_file = "bench_topo.json"
+        with open(topo_config_file, "w") as f:
+            json.dump(edges, f)
+    else:
+        topo_config_file = params["topo-config"]
+
+    if params["validator-config"] == "":
+        # generate validator configs
+        validator_configs = gen_validator_configs(full_node_list, params["num-faulty"], params["correct-type"], params["faulty-type"], 
+                                                params["correct-config"], params["faulty-config"], params["per-node-concurrency"])
+        validator_config_file = "bench_validators.json"
+        with open(validator_config_file, "w") as f:
+            json.dump(validator_configs, f)
+    else:
+        validator_config_file = params["validator-config"]
 
     for addr in addrs: 
-        cluster.copy_to(addr, "bench_machines.json", f'{cluster.workdir}/bench_machines.json')
-        cluster.copy_to(addr, "bench_network.json", f'{cluster.workdir}/bench_network.json')
-        cluster.copy_to(addr, "bench_topo.json", f'{cluster.workdir}/bench_topo.json')
+        cluster.copy_to(addr, machine_config_file, f'{cluster.workdir}/bench_machines.json')
+        cluster.copy_to(addr, network_config_file, f'{cluster.workdir}/bench_network.json')
+        cluster.copy_to(addr, topo_config_file, f'{cluster.workdir}/bench_topo.json')
+        cluster.copy_to(addr, validator_config_file, f'{cluster.workdir}/bench_validators.json')
 
     # compute 
     num_flow_gen = params["num-machines"]
@@ -107,29 +136,32 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     clients_remainder = params["num-clients"] % params["num-machines"]
 
     if params["single-process-cluster"]:
-        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox_workers"], params["per-node-concurrency"], params["chain-type"], 
-                    params["crypto"], params["conn_multiply"], clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["txn-span"], 
-                    params["disable-txn-dissem"], params["config"]]
+        run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox-workers"], params["chain-type"], 
+                    params["crypto"], params["conn-multiply"], SETUP_TIME, clients_per_machine, clients_remainder, num_accounts, 
+                    max_inflight, frequency, params["conflict_rate"], params["txn-span"], params["disable-txn-dissem"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
         # start mailbox
-        mailbox_task = exp_machines.run_background(config, "mailbox", args=[params["build-type"], "@POS", params["mailbox-threads"],], engine=ENGINE, verbose=verbose)
+        mailbox_task = exp_machines.run_background(config, "mailbox", args=[params["build-type"], "@POS", params["mailbox-threads"], 
+                                                                            params["mailbox-workers"], params["conn-multiply"]], 
+                                                   engine=ENGINE, verbose=verbose)
         tasks.append(mailbox_task)
 
         time.sleep(5)
 
         for local_id in range(num_nodes_per_machine):
-            run_args = [params["build-type"], "@POS", local_id, params["node-threads"], params["chain-type"], 
-                        num_accounts, max_inflight, frequency, params["dissem"], params["disable-txn-dissem"], params["config"]]
+            run_args = [params["build-type"], "@POS", local_id, params["node-threads"], params["mailbox-workers"], params["chain-type"], 
+                        params["crypto"], num_accounts, max_inflight, frequency, params["disable-txn-dissem"]]
             node_task = exp_machines.run_background(config, "node", args=run_args, engine=ENGINE, verbose=verbose)
             tasks.append(node_task)
 
         # remaining nodes
-        run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["node-threads"], params["chain-type"], 
-                    num_accounts, max_inflight, frequency, params["dissem"], params["disable-txn-dissem"], params["config"]]
+        run_args = [params["build-type"], "@POS", num_nodes_per_machine, params["node-threads"], params["mailbox-workers"], 
+                    params["chain-type"], params["crypto"], num_accounts, max_inflight, frequency, params["disable-txn-dissem"]]
         if num_nodes_remainder > 0:
-            remainder_task = exp_machines.run_background(config, "node", args=run_args, num_machines = num_nodes_remainder, engine=ENGINE, verbose=verbose)
+            remainder_task = exp_machines.run_background(config, "node", args=run_args, num_machines = num_nodes_remainder, 
+                                                         engine=ENGINE, verbose=verbose)
             tasks.append(remainder_task)
 
     # wait for timeout
@@ -142,31 +174,35 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         addr = machine["addr"].split(":")[0]
         if params["single-process-cluster"]:
             stats_file = f"copycat_cluster_{machine_id}.csv"
-            files.append((addr, stats_file))
+            lat_file = f"copycat_cluster_{machine_id}_lat.csv"
+            files.append((addr, (stats_file, lat_file)))
         else:
             for node in machine_id["node_list"]:
                 stats_file = f"copycat_node_{node}.csv"
-                files.append((addr, stats_file))
+                lat_file = f"copycat_node_{node}_lat.csv"
+                files.append((addr, (stats_file, lat_file)))
     print(files)
 
     stats = { "peak_tput": 0 }
     cumulative = {"tput": 0, "cpu_util": 0}
     start_rt = None
     end_rt = None
-    for (addr, stats_file) in files:
+    for (addr, (stats_file, lat_file)) in files:
         cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
+        cluster.copy_from(addr, f"/tmp/{lat_file}", f"./results/{exp_name}/{lat_file}")
         df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
-        first_commit = df["Avg Latency (s)"].ne(0).idxmax()
+        lat = pd.read_csv(f"./results/{exp_name}/{lat_file}")
+        first_commit = df["Throughput (txn/s)"].ne(0).idxmax()
         last_record = (df["Available Memory"] > 3e8).idxmin()  # 300 MB
         last_record = last_record if last_record > 0 else df.shape[0]
         df = df.iloc[first_commit:last_record]
-        avg_latency = df["Avg Latency (s)"].mean()
+        avg_latency = lat["Latency (s)"].mean()
         df = df.loc[df["Runtime (s)"] > avg_latency + SETUP_TIME]
-        df = df.iloc[1::]   # skip the first record
-        start = int(df.iloc[0]["Runtime (s)"])
-        end = int(df.iloc[-1]["Runtime (s)"])
-        start_rt = start if start_rt is None else max(start_rt, start)
-        end_rt = end if end_rt is None else min(end_rt, end)
+        df = df.iloc[1::] if df.shape[0] > 0 else df   # skip the first record
+        start = int(df.iloc[0]["Runtime (s)"]) if df.shape[0] > 0 else None
+        end = int(df.iloc[-1]["Runtime (s)"]) if df.shape[0] > 0 else None
+        start_rt = start if start_rt is None else start_rt if start is None else max(start_rt, start)
+        end_rt = end if end_rt is None else end_rt if end is None else min(end_rt, end)
         stats["peak_tput"] = max(stats["peak_tput"], df.loc[:, 'Throughput (txn/s)'].max())
         cumulative["tput"] += df['Throughput (txn/s)'].mean()
         cumulative["cpu_util"] += df['Avg CPU Usage'].mean()
@@ -175,7 +211,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     stats["avg_cpu"] = cumulative["cpu_util"] / len(files)
     
     # TODO: parse only logs corresponding to specific range of experiment time
-    log_dir = f"./logs/{exp_name}"
+    log_dir = exp.log_dir
     log_line_ranges = get_log_lines(log_dir, start_rt, end_rt)
     msg_delay = parse_msg_delay(log_dir, line_ranges=log_line_ranges)
     stats["arrive_late_chance"] = msg_delay["arrive_late_chance"]
@@ -218,16 +254,26 @@ if __name__ == "__main__":
         "num-accounts": 10000,
         "max-inflight-txns": 100000,
         "frequency": 0,
+        "conflict_rate": 0,
         "txn-span": 1,
-        "config": "",
-        "topo-degree": 3,
+        "num-faulty": 0,
+        "correct-type": "",
+        "faulty-type": "",
+        "correct-config": "",
+        "faulty-config": "",
+        "topo-degree": 0,
         "topo-skewness": 0.0, # uniform
         "disable-txn-dissem": False,
         "crypto": "dummy",
         "single-process-cluster": True,
-        "conn_multiply": 1,
+        "conn-multiply": 1,
         "per-node-concurrency": 2,
-        "mailbox_workers": 40,
+        "mailbox-workers": 40,
+        "machine-config": "",
+        "network-config": "",
+        "topo-config": "",
+        "validator-config": "",
+        "exp-prefix": "",
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)
