@@ -15,7 +15,7 @@ bliz_df = df.loc[df["correct-type"] == "Blizzard"]
 avax_color = "cornflowerblue"
 bliz_color = "crimson"
 
-fig, ax = plt.subplots(figsize=(4.2, 2.4))
+fig, ax = plt.subplots(figsize=(3, 2.4))
 ax.plot(bliz_df["num-faulty"], bliz_df[("avg_tput", "mean")] / 1000, "s-", color=bliz_color, label="Blizzard")
 ax.plot(avax_df["num-faulty"], avax_df[("avg_tput", "mean")] / 1000, "o-", color=avax_color, label="Avalanche")
 ax.set_ylim((0, 3.6))
