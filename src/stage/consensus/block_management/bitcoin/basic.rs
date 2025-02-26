@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 pub struct BitcoinBlockManagement {
     id: NodeId,
+    blk_size: usize,
     delay: Arc<AtomicF64>,
     core_group: Arc<VCoreGroup>,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
@@ -36,7 +37,7 @@ pub struct BitcoinBlockManagement {
     pending_txns: VecDeque<Hash>,
     block_under_construction: Vec<Hash>,
     merkle_root: Option<DummyMerkleTree>,
-    block_size: usize,
+    cur_block_size: usize,
     new_utxo: HashSet<(Hash, PubKey)>,
     utxo_spent: HashSet<(Hash, PubKey)>,
     pow_time: Option<(Instant, f64)>, // for debugging
@@ -55,6 +56,7 @@ impl BitcoinBlockManagement {
     ) -> Self {
         Self {
             id,
+            blk_size: config.blk_size,
             delay,
             core_group,
             txn_pool: HashMap::new(),
@@ -65,7 +67,7 @@ impl BitcoinBlockManagement {
             pending_txns: VecDeque::new(),
             block_under_construction: vec![],
             merkle_root: None,
-            block_size: 0,
+            cur_block_size: 0,
             new_utxo: HashSet::new(),
             utxo_spent: HashSet::new(),
             pow_time: None,
@@ -118,7 +120,7 @@ impl BitcoinBlockManagement {
             "POW takes {} sec; p: {}, u: {}, x: {}, block size: {}, block len: {}",
             pow_time,
             p, u, x,
-            self.block_size,
+            self.cur_block_size,
             self.block_under_construction.len(),
         );
         pow_time
@@ -221,7 +223,7 @@ impl BlockManagement for BitcoinBlockManagement {
         // if block is not full yet, try adding new txns
         let blk_full = loop {
             // block is large enough
-            if self.block_size > 0x100000 {
+            if self.cur_block_size > self.blk_size {
                 break CurBlockState::Full;
             }
 
@@ -277,7 +279,7 @@ impl BlockManagement for BitcoinBlockManagement {
                             if *remainder > 0 {
                                 self.new_utxo.insert((txn_hash.clone(), sender.clone()));
                             }
-                            self.block_size += txn.get_size();
+                            self.cur_block_size += txn.get_size();
                             modified = true;
                         } else {
                             self.pending_txns.push_back(txn_hash); // some dependencies might be missing, retry later
@@ -287,7 +289,7 @@ impl BlockManagement for BitcoinBlockManagement {
                         // bypass double spending check
                         self.block_under_construction.push(txn_hash.clone());
                         self.new_utxo.insert((txn_hash.clone(), receiver.clone()));
-                        self.block_size += txn.get_size();
+                        self.cur_block_size += txn.get_size();
                         modified = true;
                     }
                     BitcoinTxn::Incentive { .. } => unreachable!(),
@@ -340,7 +342,7 @@ impl BlockManagement for BitcoinBlockManagement {
 
         let header = BlockHeader::Bitcoin {
             proposer: self.id,
-            prev_hash: self.chain_tail.clone(),
+            parent_id: self.chain_tail.clone(),
             merkle_root: self.merkle_root.clone().unwrap().get_root(), // TODO
             nonce: 1, // use nonce = 1 to indicate valid pow
         };
@@ -372,13 +374,13 @@ impl BlockManagement for BitcoinBlockManagement {
             block.txns.get_size(),
             block.get_size(),
             block.txns.len(),
-            self.block_size,
+            self.cur_block_size,
             self.pending_txns.len(),
             block.header,
         );
         self.merkle_root = None;
         self.pow_time = None;
-        self.block_size = 0;
+        self.cur_block_size = 0;
 
         Ok((block, block_ctx))
     }
@@ -394,13 +396,13 @@ impl BlockManagement for BitcoinBlockManagement {
             return Ok(vec![]);
         }
 
-        let (merkle_root, prev_hash, nonce) = match &block.header {
+        let (merkle_root, parent_id, nonce) = match &block.header {
             BlockHeader::Bitcoin {
                 merkle_root,
-                prev_hash,
+                parent_id,
                 nonce,
                 ..
-            } => (merkle_root, prev_hash, nonce),
+            } => (merkle_root, parent_id, nonce),
             _ => unreachable!(),
         };
 
@@ -443,10 +445,10 @@ impl BlockManagement for BitcoinBlockManagement {
         process_illusion(verification_timeout, &self.delay).await;
 
         // height of block in the chain or 0 if the height is unknown because we have not seen its parent yet
-        let blk_height = if prev_hash.is_zero() {
+        let blk_height = if parent_id.is_zero() {
             1u64
         } else {
-            match self.block_pool.get(prev_hash) {
+            match self.block_pool.get(parent_id) {
                 Some((_, _, parent_height)) => {
                     if *parent_height > 0 {
                         parent_height + 1
@@ -463,7 +465,7 @@ impl BlockManagement for BitcoinBlockManagement {
 
         if blk_height == 0 {
             // we are missing an ancestor, adding it to orphan blocks
-            match self.orphan_blocks.entry(*prev_hash) {
+            match self.orphan_blocks.entry(*parent_id) {
                 Occupied(mut entry) => {
                     entry.get_mut().insert(block_hash);
                 }
@@ -473,13 +475,13 @@ impl BlockManagement for BitcoinBlockManagement {
             }
 
             // find the missing ancestor and send a request for it
-            let mut parent = prev_hash;
+            let mut parent = parent_id;
             loop {
                 assert!(!parent.is_zero());
                 if let Some((block, _, height)) = self.block_pool.get(parent) {
                     assert!(*height == 0);
                     parent = match &block.header {
-                        BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+                        BlockHeader::Bitcoin { parent_id, .. } => parent_id,
                         _ => unreachable!(),
                     }
                 } else {
@@ -507,7 +509,7 @@ impl BlockManagement for BitcoinBlockManagement {
             self.update_orphans_and_return_tail(block_hash, blk_height);
         let (new_tail_block, new_tail_ctx, _) = self.block_pool.get(&new_tail).unwrap();
         let new_tail_parent = match &new_tail_block.header {
-            BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+            BlockHeader::Bitcoin { parent_id, .. } => parent_id,
             _ => unreachable!(),
         };
 
@@ -534,7 +536,7 @@ impl BlockManagement for BitcoinBlockManagement {
             assert!(new_tail_ancester_height == *parent_height);
             new_chain.push((parent.clone(), ctx.clone()));
             new_tail_ancester = match &parent.header {
-                BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+                BlockHeader::Bitcoin { parent_id, .. } => parent_id,
                 _ => unreachable!(),
             };
             new_tail_ancester_height -= 1;
@@ -558,11 +560,11 @@ impl BlockManagement for BitcoinBlockManagement {
             old_chain.push((old_tail_parent.clone(), old_tail_ctx.clone()));
 
             new_tail_ancester = match &new_tail_parent.header {
-                BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+                BlockHeader::Bitcoin { parent_id, .. } => parent_id,
                 _ => unreachable!(),
             };
             old_tail_ancester = match &old_tail_parent.header {
-                BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+                BlockHeader::Bitcoin { parent_id, .. } => parent_id,
                 _ => unreachable!(),
             };
         }
@@ -730,7 +732,7 @@ impl BlockManagement for BitcoinBlockManagement {
         self.pow_time = None;
         self.pending_txns
             .extend(&mut self.block_under_construction.drain(0..));
-        self.block_size = 0;
+        self.cur_block_size = 0;
         self.utxo_spent.clear();
         self.new_utxo.clear();
         self.chain_tail = new_tail;
@@ -871,7 +873,7 @@ mod bitcoin_block_management_test {
         let blk1 = Arc::new(Block {
             header: BlockHeader::Bitcoin {
                 proposer: 0,
-                prev_hash: Hash::zero(),
+                parent_id: Hash::zero(),
                 merkle_root: Hash::zero(),
                 nonce: 1,
             },
@@ -913,7 +915,7 @@ mod bitcoin_block_management_test {
         let blk2 = Arc::new(Block {
             header: BlockHeader::Bitcoin {
                 proposer: 0,
-                prev_hash: Hash::zero(),
+                parent_id: Hash::zero(),
                 merkle_root: Hash::one(),
                 nonce: 1,
             },
@@ -962,7 +964,7 @@ mod bitcoin_block_management_test {
         let blk3 = Arc::new(Block {
             header: BlockHeader::Bitcoin {
                 proposer: 0,
-                prev_hash: blk2_ctx.id,
+                parent_id: blk2_ctx.id,
                 merkle_root: Hash::zero(),
                 nonce: 1,
             },
@@ -1015,7 +1017,7 @@ mod bitcoin_block_management_test {
         let blk4 = Arc::new(Block {
             header: BlockHeader::Bitcoin {
                 proposer: 0,
-                prev_hash: blk3_ctx.id,
+                parent_id: blk3_ctx.id,
                 merkle_root: Hash::zero(),
                 nonce: 1,
             },

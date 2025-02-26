@@ -1,11 +1,14 @@
-mod bitcoin;
-pub use bitcoin::BitcoinTxn;
-
 mod dummy;
 pub use dummy::DummyTxn;
 
+mod bitcoin;
+pub use bitcoin::BitcoinTxn;
+
 mod avalanche;
 pub use avalanche::AvalancheTxn;
+
+mod diem;
+pub use diem::DiemTxn;
 
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
@@ -20,6 +23,7 @@ pub enum Txn {
     Dummy { txn: DummyTxn },
     Bitcoin { txn: BitcoinTxn },
     Avalanche { txn: AvalancheTxn },
+    Diem { txn: DiemTxn },
 }
 
 impl Txn {
@@ -28,6 +32,7 @@ impl Txn {
             Txn::Dummy { txn } => txn.compute_id(),
             Txn::Bitcoin { txn } => txn.compute_id(),
             Txn::Avalanche { txn } => txn.compute_id(),
+            Txn::Diem { txn } => txn.compute_id(),
         }
     }
 
@@ -36,6 +41,7 @@ impl Txn {
             Txn::Dummy { txn } => txn.validate(crypto),
             Txn::Bitcoin { txn } => txn.validate(crypto),
             Txn::Avalanche { txn } => txn.validate(crypto),
+            Txn::Diem { txn } => txn.validate(crypto),
         }
     }
 }
@@ -46,6 +52,7 @@ impl GetSize for Txn {
             Txn::Dummy { txn } => txn.get_size(),
             Txn::Avalanche { txn } => txn.get_size(),
             Txn::Bitcoin { txn } => BitcoinTxn::get_size(&txn),
+            Txn::Diem { txn } => DiemTxn::get_size(&txn),
         }
     }
 }

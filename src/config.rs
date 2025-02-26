@@ -48,6 +48,8 @@ pub enum BitcoinConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
 pub struct BitcoinBasicConfig {
+    #[serde(default = "BitcoinBasicConfig::get_default_blk_size")]
+    pub blk_size: usize,
     #[serde(default = "BitcoinBasicConfig::get_default_difficulty")]
     pub difficulty: u8,
     #[serde(default = "BitcoinBasicConfig::get_default_commit_depth")]
@@ -61,6 +63,7 @@ pub struct BitcoinBasicConfig {
 impl Default for BitcoinBasicConfig {
     fn default() -> Self {
         Self {
+            blk_size: 0x100000,
             difficulty: 25,
             commit_depth: 6,
             txn_dissem: DissemPattern::Gossip,
@@ -90,8 +93,8 @@ pub struct AvalancheBasicConfig {
     pub beta2: u64,
     #[serde(default = "AvalancheBasicConfig::get_default_proposal_timeout_secs")]
     pub proposal_timeout_secs: f64,
-    #[serde(default = "AvalancheBasicConfig::get_default_vote_timeout")]
-    pub vote_timeout: f64,
+    #[serde(default = "AvalancheBasicConfig::get_default_vote_timeout_secs")]
+    pub vote_timeout_secs: f64,
     #[serde(default = "AvalancheBasicConfig::get_default_max_inflight_blk")]
     pub max_inflight_blk: usize,
     #[serde(default = "AvalancheBasicConfig::get_default_txn_dissem")]
@@ -108,7 +111,7 @@ impl Default for AvalancheBasicConfig {
             beta1: 11,
             beta2: 150,
             proposal_timeout_secs: 5.0,
-            vote_timeout: 5.0,
+            vote_timeout_secs: 5.0,
             max_inflight_blk: 40, // 40 * blk_len ~ 1800 txns / blk (bitcoin)
             txn_dissem: DissemPattern::Broadcast,
         }
@@ -131,6 +134,29 @@ impl Default for ChainReplicationConfig {
         Self {
             order: vec![],
             blk_size: 0x100000,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
+pub struct DiemConfig {
+    #[serde(default = "DiemConfig::get_default_blk_size")]
+    pub blk_size: usize,
+    #[serde(default = "DiemConfig::get_default_proposal_timeout_secs")]
+    pub proposal_timeout_secs: f64,
+    #[serde(default = "DiemConfig::get_default_vote_timeout_secs")]
+    pub vote_timeout_secs: f64,
+    #[serde(default = "DiemConfig::get_default_txn_dissem")]
+    pub txn_dissem: DissemPattern,
+}
+
+impl Default for DiemConfig {
+    fn default() -> Self {
+        Self {
+            blk_size: 0x100000,
+            proposal_timeout_secs: 5.0,
+            vote_timeout_secs: 5.0,
+            txn_dissem: DissemPattern::Broadcast,
         }
     }
 }

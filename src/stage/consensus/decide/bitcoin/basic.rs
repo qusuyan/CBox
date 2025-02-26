@@ -47,15 +47,15 @@ impl Decision for BitcoinDecision {
         // find height of first block
         let (ancester_hash, first_block_height) = match new_tail.first() {
             Some((blk, _)) => {
-                let prev_hash = match &blk.header {
-                    BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+                let parent_id = match &blk.header {
+                    BlockHeader::Bitcoin { parent_id, .. } => parent_id,
                     _ => unreachable!(),
                 };
-                if prev_hash.is_zero() {
-                    (prev_hash, 1u64) // first block of chain
+                if parent_id.is_zero() {
+                    (parent_id, 1u64) // first block of chain
                 } else {
-                    match self.block_pool.get(prev_hash) {
-                        Some((_, _, height)) => (prev_hash, height + 1),
+                    match self.block_pool.get(parent_id) {
+                        Some((_, _, height)) => (parent_id, height + 1),
                         None => unimplemented!(),
                     }
                 }

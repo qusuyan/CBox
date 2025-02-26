@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use super::crypto::sha256;
+use super::crypto::{sha256, threshold_signature::SignComb, Signature};
 use crate::protocol::transaction::Txn;
 use crate::NodeId;
 use crate::{protocol::crypto::Hash, CopycatError};
@@ -17,7 +17,7 @@ pub enum BlockHeader {
     Dummy,
     Bitcoin {
         proposer: NodeId,
-        prev_hash: Hash, // vec![] if first block of chain
+        parent_id: Hash, // vec![] if first block of chain
         merkle_root: Hash,
         nonce: u32, // https://en.bitcoin.it/wiki/Nonce
     },
@@ -31,6 +31,16 @@ pub enum BlockHeader {
     },
     ChainReplication {
         blk_id: Hash,
+    },
+    Diem {
+        proposer: NodeId,
+        round: u64,
+        parent_id: Hash,
+        parent_round: u64,
+        payload_hash: Hash,
+        state_id: Hash,
+        qc: SignComb,
+        proposer_signature: Signature,
     },
 }
 
@@ -56,6 +66,18 @@ impl BlockHeader {
                 Ok(sha256(&serialized_header)?)
             }
             BlockHeader::ChainReplication { blk_id } => Ok(*blk_id),
+            BlockHeader::Diem {
+                proposer,
+                round,
+                payload_hash,
+                parent_id,
+                qc,
+                ..
+            } => {
+                let serialized =
+                    bincode::serialize(&(proposer, round, payload_hash, parent_id, qc))?;
+                Ok(sha256(&serialized)?)
+            }
         }
     }
 }

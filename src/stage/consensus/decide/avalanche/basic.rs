@@ -7,7 +7,7 @@ use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::MsgType;
 use crate::transaction::{AvalancheTxn, Txn};
 use crate::utils::time_queue::TimeQueue;
-use crate::{CopycatError, SignatureScheme, NodeId};
+use crate::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 
@@ -85,7 +85,7 @@ impl AvalancheDecision {
         let (_, sk) = crypto_scheme.gen_key_pair(id.into());
         let vote_thresh = (config.k as f64 * config.alpha).ceil() as usize;
         pf_info!(id; "vote threshold is {}", vote_thresh);
-        let vote_timeout = Duration::from_secs_f64(config.vote_timeout);
+        let vote_timeout = Duration::from_secs_f64(config.vote_timeout_secs);
 
         Self {
             id,
