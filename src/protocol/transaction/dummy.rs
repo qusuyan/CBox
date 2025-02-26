@@ -1,5 +1,5 @@
 use crate::protocol::crypto::{Hash, PubKey, Signature};
-use crate::{CopycatError, CryptoScheme};
+use crate::{CopycatError, SignatureScheme};
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -21,7 +21,7 @@ impl DummyTxn {
         self.content.len() + self.signature.len() + 64
     }
 
-    pub fn validate(&self, crypto: CryptoScheme) -> Result<(bool, f64), CopycatError> {
+    pub fn validate(&self, crypto: SignatureScheme) -> Result<(bool, f64), CopycatError> {
         crypto.verify(&self.pub_key, &self.content, &self.signature)
     }
 }

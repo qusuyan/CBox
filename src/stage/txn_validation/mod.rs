@@ -10,7 +10,7 @@ use crate::context::TxnCtx;
 use crate::get_report_timer;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
-use crate::protocol::CryptoScheme;
+use crate::protocol::SignatureScheme;
 use crate::stage::{pass, process_illusion};
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
@@ -50,7 +50,7 @@ fn get_txn_validation(id: NodeId, config: ChainConfig) -> Box<dyn TxnValidation>
 pub async fn txn_validation_thread(
     id: NodeId,
     config: ChainConfig,
-    crypto_scheme: CryptoScheme,
+    crypto_scheme: SignatureScheme,
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
     validated_txn_send: mpsc::Sender<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,

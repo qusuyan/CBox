@@ -14,13 +14,13 @@ pub fn gen_key_pair(seed: u64) -> (PubKey, PrivKey) {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let signing_key = SigningKey::random(&mut rng);
     let verifying_key = VerifyingKey::from(&signing_key);
-    let sk_bytes: PubKey = signing_key.to_bytes().iter().map(|x| *x).collect();
-    let vk_bytes: PrivKey = verifying_key.to_sec1_bytes();
+    let sk_bytes: PrivKey = signing_key.to_bytes().iter().map(|x| *x).collect();
+    let vk_bytes: PubKey = verifying_key.to_sec1_bytes().to_vec();
     (vk_bytes, sk_bytes)
 }
 
 pub fn sign(privkey: &PrivKey, input: &[u8]) -> Result<(Signature, f64), CopycatError> {
-    let signing_key = SigningKey::from_bytes(privkey.as_ref().into())?;
+    let signing_key = SigningKey::from_bytes(privkey.as_slice().into())?;
     let signature: k256::ecdsa::Signature = signing_key.sign(input);
     Ok((signature.to_vec(), 0f64))
 }

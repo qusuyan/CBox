@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{BitcoinTxn, Txn};
-use copycat::{CopycatError, CryptoScheme, NodeId};
+use copycat::{CopycatError, SignatureScheme, NodeId};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -27,7 +27,7 @@ pub struct BitcoinFlowGen {
     batch_frequency: usize,
     batch_size: usize,
     next_batch_time: Instant,
-    crypto: CryptoScheme,
+    crypto: SignatureScheme,
     client_list: Vec<ClientId>,
     utxos: HashMap<ClientId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
     accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
@@ -44,7 +44,7 @@ impl BitcoinFlowGen {
         num_accounts: usize,
         max_inflight: usize,
         frequency: usize,
-        crypto: CryptoScheme,
+        crypto: SignatureScheme,
     ) -> Self {
         let accounts_per_node = if client_list.len() == 0 {
             0

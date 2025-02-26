@@ -11,7 +11,7 @@ use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::crypto::Hash;
-use crate::{CopycatError, CryptoScheme};
+use crate::{CopycatError, SignatureScheme};
 
 // TODO: for better accuracy, we should implement GetSize manually so that message size
 // matches the size after marshalling.
@@ -31,7 +31,7 @@ impl Txn {
         }
     }
 
-    pub fn validate(&self, crypto: CryptoScheme) -> Result<(bool, f64), CopycatError> {
+    pub fn validate(&self, crypto: SignatureScheme) -> Result<(bool, f64), CopycatError> {
         match self {
             Txn::Dummy { txn } => txn.validate(crypto),
             Txn::Bitcoin { txn } => txn.validate(crypto),

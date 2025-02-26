@@ -1,7 +1,7 @@
 pub mod block;
 pub mod crypto;
 
-pub use crypto::CryptoScheme;
+pub use crypto::signature::SignatureScheme;
 pub mod transaction;
 
 use block::Block;

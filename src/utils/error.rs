@@ -23,11 +23,13 @@ macro_rules! impl_from_error {
 }
 
 impl_from_error!(mailbox_client::MailboxError);
-impl_from_error!(tokio::task::JoinError);
 impl_from_error!(bincode::Error);
 impl_from_error!(toml::de::Error);
 impl_from_error!(std::io::Error);
+impl_from_error!(std::num::TryFromIntError);
 impl_from_error!(serde_json::Error);
+impl_from_error!(tokio::task::JoinError);
 impl_from_error!(tokio::sync::mpsc::error::SendError<Vec<u8>>);
 impl_from_error!(tokio::sync::AcquireError);
 impl_from_error!(k256::ecdsa::Error);
+impl_from_error!(frost_secp256k1::Error);

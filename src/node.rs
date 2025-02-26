@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::config::ChainConfig;
 use crate::peers::PeerMessenger;
 use crate::protocol::transaction::Txn;
-use crate::protocol::{ChainType, CryptoScheme};
+use crate::protocol::{ChainType, SignatureScheme};
 use crate::stage::commit::commit_thread;
 use crate::stage::consensus::block_dissemination::block_dissemination_thread;
 use crate::stage::consensus::block_management::block_management_thread;
@@ -41,8 +41,8 @@ impl Node {
         id: NodeId,
         num_mailbox_workers: usize,
         chain_type: ChainType,
-        txn_crpyto: CryptoScheme,
-        p2p_crypto: CryptoScheme,
+        txn_crpyto: SignatureScheme,
+        p2p_crypto: SignatureScheme,
         config: ChainConfig,
         dissem_txns: bool,
         neighbors: HashSet<NodeId>,

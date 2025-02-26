@@ -11,7 +11,7 @@ use super::Decision;
 use crate::config::AvalancheConfig;
 use crate::peers::PeerMessenger;
 use crate::protocol::crypto::Signature;
-use crate::{CryptoScheme, NodeId};
+use crate::{SignatureScheme, NodeId};
 
 use atomic_float::AtomicF64;
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ struct VoteMsg {
 
 pub fn new(
     id: NodeId,
-    crypto_scheme: CryptoScheme,
+    crypto_scheme: SignatureScheme,
     config: AvalancheConfig,
     peer_messenger: Arc<PeerMessenger>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,

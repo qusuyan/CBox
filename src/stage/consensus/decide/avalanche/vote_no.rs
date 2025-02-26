@@ -6,7 +6,7 @@ use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::PrivKey;
 use crate::protocol::MsgType;
 use crate::transaction::Txn;
-use crate::{CopycatError, CryptoScheme, NodeId};
+use crate::{CopycatError, SignatureScheme, NodeId};
 
 use async_trait::async_trait;
 
@@ -19,7 +19,7 @@ use tokio::time::Duration;
 
 pub struct AvalancheVoteNoDecision {
     id: NodeId,
-    crypto_scheme: CryptoScheme,
+    crypto_scheme: SignatureScheme,
     sk: PrivKey,
     peer_messenger: Arc<PeerMessenger>,
     delay: Arc<AtomicF64>,
@@ -29,7 +29,7 @@ pub struct AvalancheVoteNoDecision {
 impl AvalancheVoteNoDecision {
     pub fn new(
         id: NodeId,
-        crypto_scheme: CryptoScheme,
+        crypto_scheme: SignatureScheme,
         _config: AvalancheVoteNoConfig,
         peer_messenger: Arc<PeerMessenger>,
         delay: Arc<AtomicF64>,

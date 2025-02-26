@@ -3,7 +3,7 @@ use mailbox::Mailbox;
 use copycat::log::colored_level;
 use copycat::{get_report_timer, get_timer_interval, parse_config_file, start_report_timer, Node};
 use copycat::{fully_connected_topology, get_topology};
-use copycat::{ChainType, CryptoScheme};
+use copycat::{ChainType, SignatureScheme};
 use copycat::protocol::MsgType;
 use copycat_flowgen::get_flow_gen;
 
@@ -56,7 +56,7 @@ struct CliArgs {
 
     /// Cryptography scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
-    crypto: CryptoScheme,
+    crypto: SignatureScheme,
 
     /// Number of clients
     #[arg(long, short = 'l')]

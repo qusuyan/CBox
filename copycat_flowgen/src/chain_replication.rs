@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use crate::ClientId;
 use copycat::protocol::crypto::{Hash, PubKey, Signature};
 use copycat::protocol::transaction::{DummyTxn, Txn};
-use copycat::{CopycatError, CryptoScheme, NodeId};
+use copycat::{CopycatError, SignatureScheme, NodeId};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -45,7 +45,7 @@ impl ChainReplicationFlowGen {
         txn_size: usize,
         max_inflight: usize,
         frequency: usize,
-        crypto: CryptoScheme,
+        crypto: SignatureScheme,
     ) -> Self {
         let (batch_size, batch_frequency) = if frequency == UNSET {
             (max_inflight, UNSET)

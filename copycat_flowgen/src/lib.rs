@@ -8,7 +8,7 @@ mod avalanche;
 use avalanche::AvalancheFlowGen;
 
 use async_trait::async_trait;
-use copycat::{transaction::Txn, ChainType, CopycatError, CryptoScheme, NodeId};
+use copycat::{transaction::Txn, ChainType, CopycatError, SignatureScheme, NodeId};
 
 use std::sync::Arc;
 
@@ -45,7 +45,7 @@ pub fn get_flow_gen(
     frequency: usize,
     conflict_rate: f64,
     chain: ChainType,
-    crypto: CryptoScheme,
+    crypto: SignatureScheme,
 ) -> Box<dyn FlowGen> {
     match chain {
         ChainType::Dummy => todo!(),

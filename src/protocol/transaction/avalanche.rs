@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     protocol::crypto::{sha256, Hash, PubKey, Signature},
-    CopycatError, CryptoScheme,
+    CopycatError, SignatureScheme,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -42,7 +42,7 @@ impl AvalancheTxn {
         Ok(id)
     }
 
-    pub fn validate(&self, crypto: CryptoScheme) -> Result<(bool, f64), CopycatError> {
+    pub fn validate(&self, crypto: SignatureScheme) -> Result<(bool, f64), CopycatError> {
         match self {
             AvalancheTxn::Send {
                 sender,

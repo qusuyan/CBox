@@ -1,9 +1,6 @@
 mod basic;
 use basic::BitcoinBlockManagement;
 
-mod eager;
-use eager::BitcoinEagerBlockManagement;
-
 use super::{BlockManagement, CurBlockState};
 use crate::config::BitcoinConfig;
 use crate::peers::PeerMessenger;
@@ -31,12 +28,6 @@ pub fn new(
             core_group,
             peer_messenger,
         )),
-        BitcoinConfig::Eager { config } => Box::new(BitcoinEagerBlockManagement::new(
-            id,
-            config,
-            delay,
-            core_group,
-            peer_messenger,
-        )),
+        BitcoinConfig::Eager { .. } => todo!(),
     }
 }

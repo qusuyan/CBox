@@ -3,7 +3,8 @@ use crate::config::BitcoinBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::{DummyMerkleTree, Hash, PubKey};
+use crate::protocol::crypto::vector_snark::DummyMerkleTree;
+use crate::protocol::crypto::{Hash, PubKey};
 use crate::protocol::transaction::{BitcoinTxn, Txn};
 use crate::protocol::MsgType;
 use crate::stage::process_illusion;
@@ -839,7 +840,7 @@ mod bitcoin_block_management_test {
         let txn1_1 = Arc::new(Txn::Bitcoin {
             txn: BitcoinTxn::Grant {
                 out_utxo: 10,
-                receiver: Box::new([1]),
+                receiver: vec![1],
             },
         });
         let txn1_1_id = txn1_1.compute_id()?;
@@ -847,16 +848,16 @@ mod bitcoin_block_management_test {
         let txn1_2 = Arc::new(Txn::Bitcoin {
             txn: BitcoinTxn::Grant {
                 out_utxo: 10,
-                receiver: Box::new([2]),
+                receiver: vec![2],
             },
         });
         let txn1_2_id = txn1_2.compute_id()?;
 
         let txn1_3 = Arc::new(Txn::Bitcoin {
             txn: BitcoinTxn::Send {
-                sender: Box::new([1]),
+                sender: vec![1],
                 in_utxo: vec![txn1_1_id],
-                receiver: Box::new([2]),
+                receiver: vec![2],
                 out_utxo: 10,
                 remainder: 0,
                 sender_signature: vec![],
@@ -923,16 +924,16 @@ mod bitcoin_block_management_test {
         let txn3_1 = Arc::new(Txn::Bitcoin {
             txn: BitcoinTxn::Grant {
                 out_utxo: 10,
-                receiver: Box::new([5]),
+                receiver: vec![5],
             },
         });
         let txn3_1_id = txn3_1.compute_id()?;
 
         let txn3_2 = Arc::new(Txn::Bitcoin {
             txn: BitcoinTxn::Send {
-                sender: Box::new([2]),
+                sender: vec![2],
                 in_utxo: vec![txn1_2_id],
-                receiver: Box::new([3]),
+                receiver: vec![3],
                 out_utxo: 10,
                 remainder: 0,
                 sender_signature: vec![],
@@ -945,9 +946,9 @@ mod bitcoin_block_management_test {
 
         let txn3_3 = Arc::new(Txn::Bitcoin {
             txn: BitcoinTxn::Send {
-                sender: Box::new([5]),
+                sender: vec![5],
                 in_utxo: vec![txn3_1_id],
-                receiver: Box::new([4]),
+                receiver: vec![4],
                 out_utxo: 10,
                 remainder: 0,
                 sender_signature: vec![],
@@ -971,9 +972,9 @@ mod bitcoin_block_management_test {
 
         let txn4_1 = Arc::new(Txn::Bitcoin {
             txn: BitcoinTxn::Send {
-                sender: Box::new([2]),
+                sender: vec![2],
                 in_utxo: vec![txn1_3_id],
-                receiver: Box::new([5]),
+                receiver: vec![5],
                 out_utxo: 10,
                 remainder: 0,
                 sender_signature: vec![],
@@ -985,9 +986,9 @@ mod bitcoin_block_management_test {
 
         let txn4_2 = Arc::new(Txn::Bitcoin {
             txn: BitcoinTxn::Send {
-                sender: Box::new([3]),
+                sender: vec![3],
                 in_utxo: vec![txn3_2_id],
-                receiver: Box::new([5]),
+                receiver: vec![5],
                 out_utxo: 10,
                 remainder: 0,
                 sender_signature: vec![],
@@ -999,9 +1000,9 @@ mod bitcoin_block_management_test {
 
         let txn4_3 = Arc::new(Txn::Bitcoin {
             txn: BitcoinTxn::Send {
-                sender: Box::new([4]),
+                sender: vec![4],
                 in_utxo: vec![txn3_3_id],
-                receiver: Box::new([3]),
+                receiver: vec![3],
                 out_utxo: 10,
                 remainder: 0,
                 sender_signature: vec![],

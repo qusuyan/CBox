@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{AvalancheTxn, Txn};
-use copycat::{CopycatError, CryptoScheme, NodeId};
+use copycat::{CopycatError, SignatureScheme, NodeId};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -27,7 +27,7 @@ pub struct AvalancheFlowGen {
     batch_size: usize,
     conflict_rate: f64,
     next_batch_time: Instant,
-    crypto: CryptoScheme,
+    crypto: SignatureScheme,
     client_list: Vec<ClientId>,
     utxos: HashMap<ClientId, Vec<(usize, Hash, u64)>>, // (utxo_owner_idx, txn_hash, utxo_value)
     accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
@@ -53,7 +53,7 @@ impl AvalancheFlowGen {
         max_inflight: usize,
         frequency: usize,
         conflict_rate: f64,
-        crypto: CryptoScheme,
+        crypto: SignatureScheme,
     ) -> Self {
         let accounts_per_node = if client_list.len() == 0 {
             0

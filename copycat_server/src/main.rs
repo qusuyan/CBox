@@ -1,7 +1,7 @@
 use copycat::log::colored_level;
 use copycat::parse_config_file;
 use copycat::{get_neighbors, get_report_timer, start_report_timer};
-use copycat::{ChainType, CryptoScheme, Node};
+use copycat::{ChainType, SignatureScheme, Node};
 use copycat_flowgen::get_flow_gen;
 
 use std::collections::HashSet;
@@ -33,7 +33,7 @@ struct CliArgs {
 
     /// Cryptography scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
-    crypto: CryptoScheme,
+    crypto: SignatureScheme,
 
     /// Number of user accounts for flow generation
     #[arg(long, short = 'a', default_value = "10000")]

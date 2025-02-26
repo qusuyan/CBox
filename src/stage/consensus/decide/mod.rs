@@ -16,7 +16,7 @@ use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 use crate::{config::ChainConfig, peers::PeerMessenger};
-use crate::{get_report_timer, CryptoScheme};
+use crate::{get_report_timer, SignatureScheme};
 
 use async_trait::async_trait;
 
@@ -44,7 +44,7 @@ trait Decision: Sync + Send {
 
 fn get_decision(
     id: NodeId,
-    crypto_scheme: CryptoScheme,
+    crypto_scheme: SignatureScheme,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
@@ -69,7 +69,7 @@ fn get_decision(
 
 pub async fn decision_thread(
     id: NodeId,
-    crypto_scheme: CryptoScheme,
+    crypto_scheme: SignatureScheme,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     mut peer_consensus_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,

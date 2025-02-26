@@ -16,7 +16,7 @@ use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
-use crate::protocol::CryptoScheme;
+use crate::protocol::SignatureScheme;
 use crate::stage::{pass, process_illusion};
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
@@ -88,7 +88,7 @@ fn get_blk_creation(
 pub async fn block_management_thread(
     id: NodeId,
     config: ChainConfig,
-    crypto_scheme: CryptoScheme,
+    crypto_scheme: SignatureScheme,
     mut peer_blk_recv: mpsc::Receiver<(NodeId, Arc<Block>)>,
     mut peer_blk_req_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     // mut peer_blk_resp_recv: mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,

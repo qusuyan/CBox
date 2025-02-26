@@ -7,7 +7,7 @@ use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::MsgType;
 use crate::transaction::{AvalancheTxn, Txn};
 use crate::utils::time_queue::TimeQueue;
-use crate::{CopycatError, CryptoScheme, NodeId};
+use crate::{CopycatError, SignatureScheme, NodeId};
 
 use async_trait::async_trait;
 
@@ -36,7 +36,7 @@ struct DagNode {
 
 pub struct BlizzardDecision {
     id: NodeId,
-    crypto_scheme: CryptoScheme,
+    crypto_scheme: SignatureScheme,
     k: usize,
     vote_thresh: usize,
     beta1: u64,
@@ -74,7 +74,7 @@ pub struct BlizzardDecision {
 impl BlizzardDecision {
     pub fn new(
         id: NodeId,
-        crypto_scheme: CryptoScheme,
+        crypto_scheme: SignatureScheme,
         config: AvalancheBasicConfig,
         peer_messenger: Arc<PeerMessenger>,
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
