@@ -13,7 +13,6 @@ members = [
 resolver = "2"
 
 [dependencies]
-async-scoped = {version = "0.9.0", features = ["use-tokio"]}
 async-trait = "0.1.74"
 atomic_float = "1.0.0"
 bincode = "1.3.3"

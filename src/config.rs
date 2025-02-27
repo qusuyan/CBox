@@ -15,6 +15,7 @@ pub enum ChainConfig {
     Bitcoin { config: BitcoinConfig },
     Avalanche { config: AvalancheConfig },
     ChainReplication { config: ChainReplicationConfig },
+    Diem { config: DiemConfig },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -224,6 +225,7 @@ impl NodeConfig {
                     }
                 }
             }
+            ChainConfig::Diem { .. } => {}
         }
     }
 }
@@ -242,6 +244,7 @@ impl ChainConfig {
                 AvalancheConfig::VoteNo { .. } => DissemPattern::Passthrough,
             },
             ChainConfig::ChainReplication { .. } => DissemPattern::Passthrough,
+            ChainConfig::Diem { config } => config.txn_dissem.clone(),
         }
     }
 
@@ -264,6 +267,7 @@ impl ChainConfig {
             ChainConfig::ChainReplication { config } => DissemPattern::Linear {
                 order: config.order.clone(),
             },
+            ChainConfig::Diem { .. } => DissemPattern::Broadcast,
         }
     }
 }

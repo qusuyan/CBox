@@ -1,8 +1,7 @@
-mod dummy;
-use dummy::DummyDecision;
-
 mod avalanche;
 mod bitcoin;
+mod diem;
+mod dummy;
 
 mod chain_replication;
 use chain_replication::ChainReplicationDecision;
@@ -51,7 +50,7 @@ fn get_decision(
     delay: Arc<AtomicF64>,
 ) -> Box<dyn Decision> {
     match config {
-        ChainConfig::Dummy { .. } => Box::new(DummyDecision::new()),
+        ChainConfig::Dummy { .. } => Box::new(dummy::DummyDecision::new()),
         ChainConfig::Bitcoin { config } => bitcoin::new(id, config),
         ChainConfig::Avalanche { config } => avalanche::new(
             id,
@@ -64,6 +63,14 @@ fn get_decision(
         ChainConfig::ChainReplication { .. } => {
             Box::new(ChainReplicationDecision::new(id, config, peer_messenger))
         }
+        ChainConfig::Diem { config } => Box::new(diem::DiemDecision::new(
+            id,
+            crypto_scheme,
+            config,
+            peer_messenger,
+            pmaker_feedback_send,
+            delay,
+        )),
     }
 }
 

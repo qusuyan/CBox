@@ -1,8 +1,7 @@
-mod dummy;
-use dummy::DummyBlockManagement;
-
 mod avalanche;
 mod bitcoin;
+mod diem;
+mod dummy;
 
 mod chain_replication;
 use chain_replication::ChainReplicationBlockManagement;
@@ -74,7 +73,7 @@ fn get_blk_creation(
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
     match config {
-        ChainConfig::Dummy { .. } => Box::new(DummyBlockManagement::new()),
+        ChainConfig::Dummy { .. } => Box::new(dummy::DummyBlockManagement::new()),
         ChainConfig::Bitcoin { config } => {
             bitcoin::new(id, config, delay, core_group, peer_messenger)
         }
@@ -82,6 +81,12 @@ fn get_blk_creation(
         ChainConfig::ChainReplication { config } => {
             Box::new(ChainReplicationBlockManagement::new(id, config))
         }
+        ChainConfig::Diem { config } => Box::new(diem::DiemBlockManagement::new(
+            id,
+            config,
+            delay,
+            peer_messenger,
+        )),
     }
 }
 

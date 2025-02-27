@@ -1,8 +1,7 @@
-mod dummy;
-use dummy::DummyTxnValidation;
-
 mod avalanche;
 mod bitcoin;
+mod diem;
+mod dummy;
 
 use crate::config::ChainConfig;
 use crate::consts::{TXN_BATCH_DELAY_INTERVAL, TXN_BATCH_INTERVAL};
@@ -40,10 +39,11 @@ trait TxnValidation: Send + Sync {
 fn get_txn_validation(id: NodeId, config: ChainConfig) -> Box<dyn TxnValidation> {
     match config {
         ChainConfig::Dummy { .. } | ChainConfig::ChainReplication { .. } => {
-            Box::new(DummyTxnValidation::new(id))
+            Box::new(dummy::DummyTxnValidation::new(id))
         }
         ChainConfig::Bitcoin { config } => bitcoin::new(id, config),
         ChainConfig::Avalanche { config } => avalanche::new(id, config),
+        ChainConfig::Diem { config } => Box::new(diem::DiemTxnValidation::new(id, config)),
     }
 }
 

@@ -29,6 +29,7 @@ fn get_commit(_id: NodeId, config: ChainConfig) -> Box<dyn Commit> {
         ChainConfig::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:
+        ChainConfig::Diem { .. } => Box::new(DummyCommit::new()),    // TODO:
     }
 }
 

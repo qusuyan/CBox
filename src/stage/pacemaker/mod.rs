@@ -2,8 +2,10 @@ mod dummy;
 use dummy::DummyPacemaker;
 
 mod fixed_inflight_blk;
-use fixed_inflight_blk::FixedInflightBlkPaceMaker;
-use tokio_metrics::TaskMonitor;
+use fixed_inflight_blk::FixedInflightBlkPacemaker;
+
+mod diem;
+use diem::DiemPacemaker;
 
 use crate::config::AvalancheConfig;
 use crate::consts::PACE_DELAY_INTERVAL;
@@ -18,6 +20,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
+use tokio_metrics::TaskMonitor;
 
 use atomic_float::AtomicF64;
 use std::sync::atomic::Ordering;
@@ -31,23 +34,24 @@ trait Pacemaker: Sync + Send {
 }
 
 fn get_pacemaker(
-    _id: NodeId,
+    id: NodeId,
     config: ChainConfig,
-    _peer_messenger: Arc<PeerMessenger>,
+    peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn Pacemaker> {
     match config {
         ChainConfig::Dummy { .. } => Box::new(DummyPacemaker::new()),
         ChainConfig::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO
         ChainConfig::Avalanche { config } => match config {
             AvalancheConfig::Basic { config } => {
-                Box::new(FixedInflightBlkPaceMaker::new(config.max_inflight_blk))
+                Box::new(FixedInflightBlkPacemaker::new(config.max_inflight_blk))
             }
             AvalancheConfig::Blizzard { config } => {
-                Box::new(FixedInflightBlkPaceMaker::new(config.max_inflight_blk))
+                Box::new(FixedInflightBlkPacemaker::new(config.max_inflight_blk))
             }
             AvalancheConfig::VoteNo { .. } => Box::new(DummyPacemaker::new()),
         },
         ChainConfig::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,
+        ChainConfig::Diem { .. } => Box::new(DiemPacemaker::new(id, peer_messenger)),
     }
 }
 
