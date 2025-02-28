@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::config::ChainConfig;
 use crate::peers::PeerMessenger;
 use crate::protocol::transaction::Txn;
-use crate::protocol::{ChainType, SignatureScheme};
+use crate::protocol::SignatureScheme;
 use crate::stage::commit::commit_thread;
 use crate::stage::consensus::block_dissemination::block_dissemination_thread;
 use crate::stage::consensus::block_management::block_management_thread;
@@ -39,16 +39,15 @@ pub struct Node {
 impl Node {
     pub async fn init(
         id: NodeId,
-        num_mailbox_workers: usize,
-        chain_type: ChainType,
         txn_crpyto: SignatureScheme,
         p2p_crypto: SignatureScheme,
         config: ChainConfig,
         dissem_txns: bool,
+        num_mailbox_workers: usize,
         neighbors: HashSet<NodeId>,
         max_concurrency: Option<usize>,
     ) -> Result<(Self, mpsc::Receiver<(u64, Vec<Arc<Txn>>)>), CopycatError> {
-        pf_trace!(id; "starting: {:?}", chain_type);
+        pf_trace!(id; "starting: {:?}", config);
 
         // let state = Arc::new(ChainState::new(chain_type));
         let max_concurrency = max_concurrency.unwrap_or(Semaphore::MAX_PERMITS);

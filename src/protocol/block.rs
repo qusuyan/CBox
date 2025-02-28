@@ -7,9 +7,13 @@ use std::{
     sync::Arc,
 };
 
-use super::crypto::{sha256, threshold_signature::SignComb, Signature};
-use crate::protocol::transaction::Txn;
+use super::types::diem::QuorumCert;
+use super::{
+    crypto::{sha256, Signature},
+    types::diem::{DiemBlock, TimeCert},
+};
 use crate::NodeId;
+use crate::{context::TxnCtx, protocol::transaction::Txn};
 use crate::{protocol::crypto::Hash, CopycatError};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -33,20 +37,31 @@ pub enum BlockHeader {
         blk_id: Hash,
     },
     Diem {
-        proposer: NodeId,
-        round: u64,
-        parent_id: Hash,
-        parent_round: u64,
-        payload_hash: Hash,
-        state_id: Hash,
-        qc: SignComb,
-        proposer_signature: Signature,
+        // block data
+        block: DiemBlock,
+        // proposal message
+        last_round_tc: Option<TimeCert>,
+        high_commit_qc: QuorumCert,
+        signature: Signature,
     },
 }
 
-impl BlockHeader {
-    pub fn compute_id(&self) -> Result<Hash, CopycatError> {
-        match self {
+// TODO: for better accuracy, we should implement GetSize manually so that message size
+// matches the size after marshalling.
+impl GetSize for BlockHeader {}
+
+#[derive(Clone, Serialize, Deserialize, GetSize)]
+pub struct Block {
+    pub header: BlockHeader,
+    pub txns: Vec<Arc<Txn>>,
+}
+
+impl Block {
+    pub fn compute_id(
+        header: &BlockHeader,
+        txn_ctx: &Vec<Arc<TxnCtx>>,
+    ) -> Result<Hash, CopycatError> {
+        match &header {
             BlockHeader::Dummy => {
                 let mut rng = thread_rng();
                 let mut rand = [0u8; 32];
@@ -62,34 +77,13 @@ impl BlockHeader {
                 Ok(Hash { 0: raw })
             }
             BlockHeader::Bitcoin { .. } => {
-                let serialized_header = bincode::serialize(self)?;
+                let serialized_header = bincode::serialize(&header)?;
                 Ok(sha256(&serialized_header)?)
             }
             BlockHeader::ChainReplication { blk_id } => Ok(*blk_id),
-            BlockHeader::Diem {
-                proposer,
-                round,
-                payload_hash,
-                parent_id,
-                qc,
-                ..
-            } => {
-                let serialized =
-                    bincode::serialize(&(proposer, round, payload_hash, parent_id, qc))?;
-                Ok(sha256(&serialized)?)
-            }
+            BlockHeader::Diem { block, .. } => block.compute_id(txn_ctx),
         }
     }
-}
-
-// TODO: for better accuracy, we should implement GetSize manually so that message size
-// matches the size after marshalling.
-impl GetSize for BlockHeader {}
-
-#[derive(Clone, Serialize, Deserialize, GetSize)]
-pub struct Block {
-    pub header: BlockHeader,
-    pub txns: Vec<Arc<Txn>>,
 }
 
 impl Debug for Block {

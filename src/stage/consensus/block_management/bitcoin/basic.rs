@@ -218,8 +218,9 @@ impl BlockManagement for BitcoinBlockManagement {
         // let start_time = Instant::now();
 
         let mut modified = false;
-        let mut execution_delay = Duration::from_secs(0);
+        let mut execution_delay = 0f64;
 
+        let orig_blk_len = self.block_under_construction.len();
         // if block is not full yet, try adding new txns
         let blk_full = loop {
             // block is large enough
@@ -242,7 +243,7 @@ impl BlockManagement for BitcoinBlockManagement {
                         receiver,
                         out_utxo,
                         remainder,
-                        script_runtime,
+                        script_runtime_sec,
                         script_succeed,
                         ..
                     } => {
@@ -262,7 +263,7 @@ impl BlockManagement for BitcoinBlockManagement {
 
                         // execute the script if the txn is valid
                         if valid {
-                            execution_delay += *script_runtime;
+                            execution_delay += *script_runtime_sec;
                             if !script_succeed {
                                 valid = false;
                             }
@@ -299,9 +300,10 @@ impl BlockManagement for BitcoinBlockManagement {
         };
 
         if modified || self.pow_time.is_none() {
-            let (merkle_root, timeout) = DummyMerkleTree::new(self.block_under_construction.len())?;
+            let mut merkle_tree = DummyMerkleTree::new();
+            let timeout = merkle_tree.append(self.block_under_construction.len() - orig_blk_len)?;
             execution_delay += timeout;
-            self.merkle_root = Some(merkle_root);
+            self.merkle_root = Some(merkle_tree);
             process_illusion(execution_delay, &self.delay).await;
             let pow_start_time = Instant::now();
             let pow_time = self.get_pow_time_secs();
@@ -407,7 +409,7 @@ impl BlockManagement for BitcoinBlockManagement {
         };
 
         // hash verification
-        let mut verification_timeout = Duration::from_secs_f64(HEADER_HASH_TIME);
+        let mut verification_timeout = HEADER_HASH_TIME;
         if *nonce != 1 {
             process_illusion(verification_timeout, &self.delay).await;
             return Ok(vec![]); // invalid POW
@@ -630,7 +632,7 @@ impl BlockManagement for BitcoinBlockManagement {
         // reverse the new tail so that it goes in order
         new_chain.reverse();
 
-        let mut total_exec_time = Duration::from_secs(0);
+        let mut total_exec_time = 0f64;
         // apply transactions of the new chain and check if this chain is valid
         let mut new_utxos = undo_utxo_spent;
         let mut utxos_spent = undo_new_utxo;
@@ -661,7 +663,7 @@ impl BlockManagement for BitcoinBlockManagement {
                             utxos_spent.insert(utxo);
                         } else {
                             // pf_debug!(self.id; "double spending - in utxo ({}): {}, in utxo_spent ({}): {}, in new_utxos ({}): {}", self.utxo.len(), self.utxo.contains(&utxo), utxos_spent.len(), utxos_spent.contains(&utxo), new_utxos.len(), new_utxos.contains(&utxo));
-                            tokio::time::sleep(total_exec_time).await;
+                            tokio::time::sleep(Duration::from_secs_f64(total_exec_time)).await;
                             pf_debug!(self.id; "double spending detected with block {}", new_tail_ctx.id);
                             return Ok(vec![]);
                         }
@@ -670,14 +672,14 @@ impl BlockManagement for BitcoinBlockManagement {
 
                 // execute the txn script
                 if let BitcoinTxn::Send {
-                    script_runtime,
+                    script_runtime_sec,
                     script_succeed,
                     ..
                 } = bitcoin_txn
                 {
-                    total_exec_time += *script_runtime;
+                    total_exec_time += *script_runtime_sec;
                     if !script_succeed {
-                        tokio::time::sleep(total_exec_time).await;
+                        tokio::time::sleep(Duration::from_secs_f64(total_exec_time)).await;
                         pf_debug!(self.id; "script exec failed with block {}", new_tail_ctx.id);
                         return Ok(vec![]);
                     }
@@ -746,8 +748,8 @@ impl BlockManagement for BitcoinBlockManagement {
         self.pending_txns
             .retain(|txn_hash| !txns_applied.contains(txn_hash));
 
-        tokio::time::sleep(total_exec_time).await;
-        pf_debug!(self.id; "validation complete, execution takes {:?}", total_exec_time);
+        tokio::time::sleep(Duration::from_secs_f64(total_exec_time)).await;
+        pf_debug!(self.id; "validation complete, execution takes {} secs", total_exec_time);
         Ok(new_chain)
     }
 
@@ -797,7 +799,7 @@ impl BlockManagement for BitcoinBlockManagement {
 
 #[cfg(test)]
 mod bitcoin_block_management_test {
-    use std::{sync::Arc, time::Duration};
+    use std::sync::Arc;
 
     use atomic_float::AtomicF64;
 
@@ -864,7 +866,7 @@ mod bitcoin_block_management_test {
                 remainder: 0,
                 sender_signature: vec![],
                 script_bytes: 400,
-                script_runtime: Duration::from_millis(1),
+                script_runtime_sec: 1f64,
                 script_succeed: true,
             },
         });
@@ -940,7 +942,7 @@ mod bitcoin_block_management_test {
                 remainder: 0,
                 sender_signature: vec![],
                 script_bytes: 400,
-                script_runtime: Duration::from_millis(1),
+                script_runtime_sec: 1f64,
                 script_succeed: true,
             },
         });
@@ -955,7 +957,7 @@ mod bitcoin_block_management_test {
                 remainder: 0,
                 sender_signature: vec![],
                 script_bytes: 400,
-                script_runtime: Duration::from_millis(1),
+                script_runtime_sec: 1f64,
                 script_succeed: true,
             },
         });
@@ -981,7 +983,7 @@ mod bitcoin_block_management_test {
                 remainder: 0,
                 sender_signature: vec![],
                 script_bytes: 400,
-                script_runtime: Duration::from_millis(1),
+                script_runtime_sec: 1f64,
                 script_succeed: true,
             },
         });
@@ -995,7 +997,7 @@ mod bitcoin_block_management_test {
                 remainder: 0,
                 sender_signature: vec![],
                 script_bytes: 400,
-                script_runtime: Duration::from_millis(1),
+                script_runtime_sec: 1f64,
                 script_succeed: true,
             },
         });
@@ -1009,7 +1011,7 @@ mod bitcoin_block_management_test {
                 remainder: 0,
                 sender_signature: vec![],
                 script_bytes: 400,
-                script_runtime: Duration::from_millis(1),
+                script_runtime_sec: 1f64,
                 script_succeed: true,
             },
         });

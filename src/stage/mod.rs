@@ -12,11 +12,11 @@ use std::sync::atomic::Ordering;
 
 async fn pass() {}
 
-async fn process_illusion(timeout: Duration, delay: &AtomicF64) {
-    if timeout.as_millis() < 1 {
+async fn process_illusion(timeout: f64, delay: &AtomicF64) {
+    if timeout < 0.001 {
         // tokio sleep granularity is 1 ms
-        delay.fetch_add(timeout.as_secs_f64(), Ordering::Relaxed);
+        delay.fetch_add(timeout, Ordering::Relaxed);
     } else {
-        tokio::time::sleep(timeout).await;
+        tokio::time::sleep(Duration::from_secs_f64(timeout)).await;
     }
 }

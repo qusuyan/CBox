@@ -235,18 +235,17 @@ pub async fn block_management_thread(
                 };
 
                 pf_debug!(id; "got from {} new block {:?}, computing its context...", src, new_block);
-                match new_block.header.compute_id() {
-                    Ok(blk_id) => {
-                        if blks_seen.contains(&blk_id) {
-                            continue;
-                        } else {
-                            blks_seen.insert(blk_id);
-                        }
-                    }
+                let blk_ctx = match BlkCtx::from_blk(&new_block) {
+                    Ok(ctx) => ctx,
                     Err(e) => {
-                        pf_error!(id; "failed to compute blk_)id: {:?}", e);
+                        pf_error!(id; "failed to compute blk_context: {:?}", e);
                         continue;
                     }
+                };
+                if blks_seen.contains(&blk_ctx.id) {
+                    continue;
+                } else {
+                    blks_seen.insert(blk_ctx.id);
                 }
 
                 let blk_sender = pending_blk_sender.clone();
@@ -260,14 +259,6 @@ pub async fn block_management_thread(
                         Ok(permit) => permit,
                         Err(e) => {
                             pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            return;
-                        }
-                    };
-
-                    let blk_ctx = match BlkCtx::from_blk(&new_block) {
-                        Ok(ctx) => ctx,
-                        Err(e) => {
-                            pf_error!(id; "failed to compute blk_context: {:?}", e);
                             return;
                         }
                     };
@@ -300,7 +291,7 @@ pub async fn block_management_thread(
                         }
                     }
 
-                    process_illusion(Duration::from_secs_f64(verification_time), &delay_pool).await;
+                    process_illusion(verification_time, &delay_pool).await;
                     drop(_permit);
 
                     if !blk_valid {

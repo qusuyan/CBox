@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{BitcoinTxn, Txn};
-use copycat::{CopycatError, SignatureScheme, NodeId};
+use copycat::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -175,7 +175,7 @@ impl FlowGen for BitcoinFlowGen {
                         remainder,
                         sender_signature,
                         script_bytes: 400,
-                        script_runtime: Duration::from_millis(1),
+                        script_runtime_sec: Duration::from_millis(1),
                         script_succeed: true,
                     },
                 });

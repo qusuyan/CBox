@@ -207,7 +207,7 @@ pub async fn txn_validation_thread(
                         correct_txns.push((src, (txn, txn_ctx)));
                     }
 
-                    process_illusion(Duration::from_secs_f64(verification_time), &delay_pool).await;
+                    process_illusion(verification_time, &delay_pool).await;
 
                     if let Err(e) = txn_sender.send(correct_txns).await {
                         pf_error!(id; "failed to send to pending_txns pipe: {:?}", e);

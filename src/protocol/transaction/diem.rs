@@ -1,13 +1,11 @@
 use crate::protocol::crypto::{sha256, Hash, PubKey, Signature};
 use crate::{CopycatError, SignatureScheme};
 
-use std::time::Duration;
-
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
 // https://github.com/diem/diem/blob/latest/types/src/transaction/mod.rs
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DiemTxn {
     Txn {
         sender: u64, // address
@@ -31,12 +29,12 @@ pub enum DiemTxn {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiemPayload {
-    script_bytes: usize,
-    script_runtime: Duration,
-    script_succeed: bool,
-    distinct_writes: u64,
+    pub script_bytes: usize,
+    pub script_runtime_sec: f64,
+    pub script_succeed: bool,
+    pub distinct_writes: usize,
 }
 
 impl DiemTxn {

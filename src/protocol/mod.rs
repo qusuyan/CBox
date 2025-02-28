@@ -1,8 +1,9 @@
 pub mod block;
 pub mod crypto;
+pub mod transaction;
+pub mod types;
 
 pub use crypto::signature::SignatureScheme;
-pub mod transaction;
 
 use block::Block;
 use get_size::GetSize;

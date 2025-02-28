@@ -269,12 +269,11 @@ fn main() {
             let node_config = node_config_map.remove(&node_id).unwrap();
             let result = Node::init(
                 node_id,
-                args.num_mailbox_workers,
-                args.chain,
                 txn_crypto,
                 p2p_crypto,
                 node_config.chain_config,
                 !args.disable_txn_dissem,
+                args.num_mailbox_workers,
                 topology.remove(&node_id).unwrap_or(HashSet::new()),
                 node_config.max_concurrency,
             ).await;

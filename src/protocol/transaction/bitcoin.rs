@@ -6,9 +6,7 @@ use crate::{
     CopycatError, SignatureScheme,
 };
 
-use tokio::time::Duration;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BitcoinTxn {
     Incentive {
         out_utxo: u64,
@@ -22,7 +20,7 @@ pub enum BitcoinTxn {
         remainder: u64,              // how much money left
         sender_signature: Signature, // signature of sender
         script_bytes: u64,           // size of the script
-        script_runtime: Duration,    // how long does it take to run the script
+        script_runtime_sec: f64,     // how long does it take to run the script
         script_succeed: bool,        // if the script should fail
     },
     // used only for setup

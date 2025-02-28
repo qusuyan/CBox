@@ -4,7 +4,7 @@ use crate::{CopycatError, SignatureScheme};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DummyTxn {
     pub id: Hash,
     pub content: Arc<Vec<u8>>,

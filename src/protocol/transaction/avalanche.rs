@@ -7,7 +7,7 @@ use crate::{
     CopycatError, SignatureScheme,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AvalancheTxn {
     Send {
         sender: PubKey,              // who the sender is

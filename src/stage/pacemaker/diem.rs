@@ -15,6 +15,10 @@ impl DiemPacemaker {
     pub fn new(id: NodeId, peer_messenger: Arc<PeerMessenger>) -> Self {
         Self { id, peer_messenger }
     }
+
+    pub fn get_leader(round: u64) -> NodeId {
+        todo!();
+    }
 }
 
 #[async_trait]

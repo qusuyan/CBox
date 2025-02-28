@@ -1,7 +1,7 @@
 use copycat::log::colored_level;
 use copycat::parse_config_file;
 use copycat::{get_neighbors, get_report_timer, start_report_timer};
-use copycat::{ChainType, SignatureScheme, Node};
+use copycat::{ChainType, Node, SignatureScheme};
 use copycat_flowgen::get_flow_gen;
 
 use std::collections::HashSet;
@@ -135,12 +135,11 @@ pub fn main() {
     runtime.block_on(async {
         let (node, mut executed): (Node, _) = match Node::init(
             id,
-            args.num_mailbox_workers,
-            args.chain,
             args.crypto,
             args.crypto,
             config.chain_config,
             !args.disable_txn_dissem,
+            args.num_mailbox_workers,
             neighbors,
             config.max_concurrency,
         )

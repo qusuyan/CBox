@@ -6,7 +6,9 @@ use crate::CopycatError;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-#[derive(Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TxnCtx {
     pub id: Hash,
 }
@@ -25,12 +27,12 @@ impl TxnCtx {
 
 impl BlkCtx {
     pub fn from_blk(block: &Block) -> Result<Self, CopycatError> {
-        let blk_id = block.header.compute_id()?;
-
         let mut txn_ctx = vec![];
         for txn in block.txns.iter() {
             txn_ctx.push(Arc::new(TxnCtx::from_txn(txn)?));
         }
+
+        let blk_id = Block::compute_id(&block.header, &txn_ctx)?;
 
         Ok(BlkCtx {
             id: blk_id,
@@ -42,7 +44,7 @@ impl BlkCtx {
         header: &BlockHeader,
         txn_ctx: Vec<Arc<TxnCtx>>,
     ) -> Result<Self, CopycatError> {
-        let blk_id = header.compute_id()?;
+        let blk_id = Block::compute_id(header, &txn_ctx)?;
 
         Ok(BlkCtx {
             id: blk_id,
