@@ -34,8 +34,8 @@ struct VoteMsg {
 
 pub struct DiemDecision {
     id: NodeId,
-    proposal_timeout_secs: f64,
-    vote_timeout_secs: f64,
+    _proposal_timeout_secs: f64, // TODO
+    _vote_timeout_secs: f64,     // TODO
     blk_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>, u64)>,
     commit_queue: HashMap<u64, Hash>,
     next_commit_height: u64,
@@ -50,7 +50,7 @@ pub struct DiemDecision {
     all_nodes: Vec<NodeId>,
     peer_messenger: Arc<PeerMessenger>,
     signature_scheme: SignatureScheme,
-    peer_pks: HashMap<NodeId, PubKey>,
+    _peer_pks: HashMap<NodeId, PubKey>,
     sk: PrivKey,
     threshold_signature: Arc<dyn ThresholdSignature>,
     //
@@ -85,8 +85,8 @@ impl DiemDecision {
 
         Self {
             id,
-            proposal_timeout_secs: config.proposal_timeout_secs,
-            vote_timeout_secs: config.vote_timeout_secs,
+            _proposal_timeout_secs: config.proposal_timeout_secs,
+            _vote_timeout_secs: config.vote_timeout_secs,
             blk_pool: HashMap::new(),
             commit_queue: HashMap::new(),
             next_commit_height: 2,
@@ -99,7 +99,7 @@ impl DiemDecision {
             peer_messenger,
             all_nodes,
             signature_scheme,
-            peer_pks,
+            _peer_pks: peer_pks,
             sk,
             threshold_signature,
             pmaker_feedback_send,

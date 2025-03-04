@@ -41,7 +41,7 @@ pub struct DiemBlockManagement {
     last_tc: Option<Option<TimeCert>>, // outer option indicates if should start new round
     // p2p communication
     all_nodes: Vec<NodeId>,
-    peer_messenger: Arc<PeerMessenger>,
+    _peer_messenger: Arc<PeerMessenger>,
     signature_scheme: SignatureScheme,
     peer_pks: HashMap<NodeId, PubKey>,
     sk: PrivKey,
@@ -76,7 +76,7 @@ impl DiemBlockManagement {
             id,
             blk_size: config.blk_size,
             delay,
-            peer_messenger,
+            _peer_messenger: peer_messenger,
             txn_pool: HashMap::new(),
             accounts: HashMap::new(),
             state_merkle: HashMap::new(),
@@ -229,6 +229,18 @@ impl BlockManagement for DiemBlockManagement {
         let mut blk_size = 0usize;
         let mut speculative_exec_time = 0f64;
         let mut speculative_exec_distinct_writes = 0usize;
+        let mut speculative_exec_distinct_inserts = 0usize;
+
+        // speculative execute
+        let mut merkle_tree = if self.high_qc.vote_info.blk_id == GENESIS_VOTE_INFO.blk_id {
+            DummyMerkleTree::new()
+        } else {
+            match self.state_merkle.get(&self.high_qc.vote_info.blk_id) {
+                Some(merkle_tree) => merkle_tree.clone(),
+                None => todo!(), // wait for dependency
+            }
+        };
+
         loop {
             let next_txn_id = match self.pending_txns.pop_front() {
                 Some(txn) => txn,
@@ -284,6 +296,7 @@ impl BlockManagement for DiemBlockManagement {
                     }
                     Entry::Vacant(e) => {
                         e.insert((receiver_key.clone(), *amount)); // TODO: move to speculative exec, do not change actual state yet
+                        speculative_exec_distinct_inserts += 1; // TODO
                     }
                 },
             }
@@ -293,17 +306,9 @@ impl BlockManagement for DiemBlockManagement {
             blk_size += txn_size;
         }
 
-        // speculative execute
-        let mut merkle_tree = if self.high_qc.vote_info.blk_id == GENESIS_VOTE_INFO.blk_id {
-            DummyMerkleTree::new()
-        } else {
-            match self.state_merkle.get(&self.high_qc.vote_info.blk_id) {
-                Some(merkle_tree) => merkle_tree.clone(),
-                None => todo!(), // wait for dependency
-            }
-        };
-        let dur = merkle_tree.append(speculative_exec_distinct_writes)?;
-        process_illusion(dur + speculative_exec_time, &self.delay).await;
+        let append_dur = merkle_tree.append(speculative_exec_distinct_inserts)?;
+        let update_dur = merkle_tree.update(speculative_exec_distinct_writes)?;
+        process_illusion(append_dur + update_dur + speculative_exec_time, &self.delay).await;
 
         // build block
         let diem_blk = DiemBlock {
@@ -408,6 +413,16 @@ impl BlockManagement for DiemBlockManagement {
         // TODO: speculative exec
         let mut speculative_exec_time = 0f64;
         let mut speculative_exec_distinct_writes = 0usize;
+        let mut speculative_exec_distinct_inserts = 0usize;
+
+        let mut merkle_tree = if diem_blk.qc.vote_info.blk_id == GENESIS_VOTE_INFO.blk_id {
+            DummyMerkleTree::new()
+        } else {
+            match self.state_merkle.get(&diem_blk.qc.vote_info.blk_id) {
+                Some(merkle_tree) => merkle_tree.clone(),
+                None => todo!(), // TODO: missing depending blocks
+            }
+        };
 
         for txn in &block.txns {
             let diem_txn = match txn.as_ref() {
@@ -425,16 +440,16 @@ impl BlockManagement for DiemBlockManagement {
                 } => {
                     let (_, sender_balance) = match self.accounts.get(sender) {
                         Some(account) => account,
-                        None => unreachable!(), // unknown sender - should not happen
+                        None => return Ok(vec![]), // invalid txn - unknown sender
                     };
 
                     if sender_balance < max_gas_amount {
-                        continue; // invalid txn - not enough balance
+                        return Ok(vec![]); // invalid txn - not enough balance
                     }
 
                     speculative_exec_time += payload.script_runtime_sec;
                     if !payload.script_succeed {
-                        continue; // invalid txn
+                        return Ok(vec![]); // invalid txn
                     }
                     speculative_exec_distinct_writes += payload.distinct_writes;
                 }
@@ -452,21 +467,15 @@ impl BlockManagement for DiemBlockManagement {
                     }
                     Entry::Vacant(e) => {
                         e.insert((receiver_key.clone(), *amount)); // TODO: move to speculative exec, do not change actual state yet
+                        speculative_exec_distinct_inserts += 1; // TODO
                     }
                 },
             }
         }
 
-        let mut merkle_tree = if diem_blk.qc.vote_info.blk_id == GENESIS_VOTE_INFO.blk_id {
-            DummyMerkleTree::new()
-        } else {
-            match self.state_merkle.get(&diem_blk.qc.vote_info.blk_id) {
-                Some(merkle_tree) => merkle_tree.clone(),
-                None => todo!(), // TODO: missing depending blocks
-            }
-        };
-        let dur = merkle_tree.append(speculative_exec_distinct_writes)?;
-        process_illusion(dur + speculative_exec_time, &self.delay).await;
+        let append_dur = merkle_tree.append(speculative_exec_distinct_inserts)?;
+        let update_dur = merkle_tree.update(speculative_exec_distinct_writes)?;
+        process_illusion(append_dur + update_dur + speculative_exec_time, &self.delay).await;
         if !merkle_tree.verify_root(&diem_blk.state_id)? {
             return Ok(vec![]); // speculative exec results do not match
         }
@@ -484,8 +493,8 @@ impl BlockManagement for DiemBlockManagement {
 
     async fn handle_peer_blk_req(
         &mut self,
-        peer: NodeId,
-        msg: Vec<u8>,
+        _peer: NodeId,
+        _msg: Vec<u8>,
     ) -> Result<(), CopycatError> {
         todo!()
     }

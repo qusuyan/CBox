@@ -9,18 +9,18 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 pub struct DiemPacemaker {
-    id: NodeId,
+    _id: NodeId,
     pending_qcs: VecDeque<Vec<u8>>,
-    peer_messenger: Arc<PeerMessenger>,
+    _peer_messenger: Arc<PeerMessenger>, // TODO
     _notify: Notify,
 }
 
 impl DiemPacemaker {
     pub fn new(id: NodeId, peer_messenger: Arc<PeerMessenger>) -> Self {
         Self {
-            id,
+            _id: id,
             pending_qcs: VecDeque::new(),
-            peer_messenger,
+            _peer_messenger: peer_messenger,
             _notify: Notify::new(),
         }
     }
@@ -53,7 +53,7 @@ impl Pacemaker for DiemPacemaker {
         Ok(())
     }
 
-    async fn handle_peer_msg(&mut self, src: NodeId, msg: Vec<u8>) -> Result<(), CopycatError> {
+    async fn handle_peer_msg(&mut self, _src: NodeId, _msg: Vec<u8>) -> Result<(), CopycatError> {
         todo!()
     }
 }
