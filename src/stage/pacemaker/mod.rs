@@ -4,7 +4,7 @@ use dummy::DummyPacemaker;
 mod fixed_inflight_blk;
 use fixed_inflight_blk::FixedInflightBlkPacemaker;
 
-mod diem;
+pub mod diem;
 use diem::DiemPacemaker;
 
 use crate::config::AvalancheConfig;

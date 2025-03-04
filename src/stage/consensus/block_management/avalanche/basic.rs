@@ -292,6 +292,7 @@ impl BlockManagement for AvalancheBlockManagement {
 
     async fn validate_block(
         &mut self,
+        _src: NodeId,
         block: Arc<Block>,
         blk_ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {

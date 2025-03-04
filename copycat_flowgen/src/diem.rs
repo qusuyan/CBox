@@ -1,14 +1,15 @@
 use super::{FlowGen, Stats};
 use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
-use copycat::protocol::transaction::{BitcoinTxn, Txn};
+use copycat::transaction::DiemPayload;
+use copycat::transaction::{DiemTxn, Txn};
 use copycat::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 use rand::Rng;
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
@@ -22,22 +23,21 @@ struct ChainInfo {
     total_committed: u64, // includes false commits
 }
 
-pub struct BitcoinFlowGen {
+pub struct DiemFlowGen {
     max_inflight: usize,
     batch_frequency: usize,
     batch_size: usize,
     next_batch_time: Instant,
     crypto: SignatureScheme,
     client_list: Vec<ClientId>,
-    utxos: HashMap<ClientId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
-    accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
+    accounts: HashMap<ClientId, Vec<(u64, (PubKey, PrivKey), u64, u64)>>, // addr, (pk, sk), seqno, balance
     in_flight: HashMap<Hash, Instant>,
     chain_info: HashMap<NodeId, ChainInfo>,
     latencies: Vec<f64>,
     _notify: Notify,
 }
 
-impl BitcoinFlowGen {
+impl DiemFlowGen {
     pub fn new(
         id: FlowGenId,
         client_list: Vec<ClientId>,
@@ -53,26 +53,23 @@ impl BitcoinFlowGen {
         };
 
         let mut accounts = HashMap::new();
-        let mut utxos = HashMap::new();
         let mut i = 0u64;
         for client in client_list.iter() {
             for _ in 0..accounts_per_node as u64 {
                 let seed = (id << 32) | i;
                 i += 1;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
-                utxos
-                    .entry(*client)
-                    .or_insert(HashMap::new())
-                    .insert(pubkey.clone(), VecDeque::new());
-                accounts
-                    .entry(*client)
-                    .or_insert(vec![])
-                    .push((pubkey, privkey));
+                accounts.entry(*client).or_insert(vec![]).push((
+                    seed,
+                    (pubkey, privkey),
+                    0u64,
+                    0u64,
+                ));
             }
         }
 
         let (batch_size, batch_frequency) = if frequency == UNSET {
-            (max_inflight, UNSET)
+            (std::cmp::min(max_inflight, 3000), UNSET)
         } else if frequency < MAX_BATCH_FREQ {
             (1, frequency)
         } else {
@@ -86,7 +83,6 @@ impl BitcoinFlowGen {
             next_batch_time: Instant::now(),
             crypto,
             client_list,
-            utxos,
             accounts,
             in_flight: HashMap::new(),
             latencies: vec![],
@@ -97,19 +93,19 @@ impl BitcoinFlowGen {
 }
 
 #[async_trait]
-impl FlowGen for BitcoinFlowGen {
+impl FlowGen for DiemFlowGen {
     async fn setup_txns(&mut self) -> Result<Vec<(ClientId, Arc<Txn>)>, CopycatError> {
         let mut txns = Vec::new();
-        for (node, utxo_map) in self.utxos.iter_mut() {
-            for (account, utxos) in utxo_map.iter_mut() {
-                let txn = Txn::Bitcoin {
-                    txn: BitcoinTxn::Grant {
-                        out_utxo: 100,
-                        receiver: account.clone(),
+        for (node, accounts) in self.accounts.iter_mut() {
+            for (account_addr, (pk, _), _, balance) in accounts.iter_mut() {
+                let txn = Txn::Diem {
+                    txn: DiemTxn::Grant {
+                        receiver: *account_addr,
+                        receiver_key: pk.clone(),
+                        amount: 10,
                     },
                 };
-                let hash = txn.compute_id()?;
-                utxos.push_back((hash, 100));
+                *balance += 10;
                 txns.push((*node, Arc::new(txn)));
             }
         }
@@ -143,56 +139,57 @@ impl FlowGen for BitcoinFlowGen {
         };
         for _ in 0..batch_size {
             let node = self.client_list[rand::random::<usize>() % self.client_list.len()];
-            let accounts = self.accounts.get(&node).unwrap();
-            let utxos = self.utxos.get_mut(&node).unwrap();
+            let accounts = self.accounts.get_mut(&node).unwrap();
+            let sender_idx = rand::random::<usize>() % accounts.len();
+            let (sender_addr, (sender_pk, sender_sk), sender_seq_no, _) =
+                accounts.get_mut(sender_idx).unwrap();
+            *sender_seq_no += 1;
 
-            let (sender, remainder, recver, out_utxo, txn) = loop {
-                let sender = rand::random::<usize>() % accounts.len();
-                let mut receiver = rand::random::<usize>() % (accounts.len() - 1);
-                if receiver >= sender {
-                    receiver += 1; // avoid sending to self
-                }
+            let data = (
+                *sender_addr,
+                *sender_seq_no,
+                DiemPayload {
+                    script_bytes: 400,
+                    script_runtime_sec: 0f64,
+                    script_succeed: true,
+                    distinct_writes: 3,
+                },
+                5,
+                0,
+                "XUS".to_owned(),
+                1611792876,
+                4,
+            );
+            let serialized = bincode::serialize(&data)?;
+            let (signature, _) = self.crypto.sign(&sender_sk, &serialized)?;
+            let (
+                sender,
+                seqno,
+                payload,
+                max_gas_amount,
+                gas_unit_price,
+                gas_currency_code,
+                expiration_timestamp_secs,
+                chain_id,
+            ) = data;
 
-                let (sender_pk, sender_sk) = accounts.get(sender).unwrap();
-                let (recver_pk, _) = accounts.get(receiver).unwrap();
-                let sender_utxos = utxos.get_mut(sender_pk).unwrap();
-                if sender_utxos.is_empty() {
-                    continue; // retry
-                }
+            let txn = Arc::new(Txn::Diem {
+                txn: DiemTxn::Txn {
+                    sender, // address
+                    seqno,
+                    payload,
+                    max_gas_amount,
+                    gas_unit_price,
+                    gas_currency_code,
+                    expiration_timestamp_secs,
+                    chain_id,
+                    sender_key: sender_pk.clone(),
+                    signature,
+                },
+            });
 
-                let (in_utxo_raw, amount) = sender_utxos.pop_front().unwrap();
-                let in_utxo = vec![in_utxo_raw];
-                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-                let (sender_signature, _) = self.crypto.sign(sender_sk, &serialized_in_utxo)?;
-                let out_utxo = std::cmp::min(amount, 10);
-                let remainder = amount - out_utxo;
-                let txn = Arc::new(Txn::Bitcoin {
-                    txn: BitcoinTxn::Send {
-                        sender: sender_pk.clone(),
-                        in_utxo,
-                        receiver: recver_pk.clone(),
-                        out_utxo,
-                        remainder,
-                        sender_signature,
-                        script_bytes: 400,
-                        script_runtime_sec: 1f64,
-                        script_succeed: true,
-                    },
-                });
-                break (sender_pk, remainder, recver_pk, out_utxo, txn);
-            };
-
-            let txn_hash = txn.compute_id()?;
-            if remainder > 0 {
-                let sender_utxos = utxos.get_mut(sender).unwrap();
-                sender_utxos.push_back((txn_hash.clone(), remainder));
-            }
-            if out_utxo > 0 {
-                let recver_utxos = utxos.get_mut(recver).unwrap();
-                recver_utxos.push_back((txn_hash.clone(), out_utxo));
-            }
-
-            self.in_flight.insert(txn_hash, Instant::now());
+            let txn_id = txn.compute_id()?;
+            self.in_flight.insert(txn_id, Instant::now());
             batch.push((node, txn));
         }
 
@@ -218,7 +215,7 @@ impl FlowGen for BitcoinFlowGen {
         let chain_info = match self.chain_info.entry(node) {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => e.insert(ChainInfo {
-                chain_length: 0,
+                chain_length: 1,
                 txn_count: HashMap::new(),
                 total_committed: 0,
             }),
@@ -252,7 +249,7 @@ impl FlowGen for BitcoinFlowGen {
             .values()
             .map(|info| {
                 let num_committed = if info.chain_length > 0 {
-                    (1..info.chain_length + 1)
+                    (2..info.chain_length + 1)
                         .map(|height| info.txn_count.get(&height).unwrap())
                         .sum()
                 } else {

@@ -1,7 +1,8 @@
+use copycat::protocol::crypto::threshold_signature::ThresholdSignatureScheme;
 use mailbox::Mailbox;
 
 use copycat::log::colored_level;
-use copycat::{get_report_timer, get_timer_interval, parse_config_file, start_report_timer, Node};
+use copycat::{get_report_timer, get_timer_interval, parse_config_file, start_report_timer, Node, NodeId};
 use copycat::{fully_connected_topology, get_topology};
 use copycat::{ChainType, SignatureScheme};
 use copycat::protocol::MsgType;
@@ -129,6 +130,7 @@ impl CliArgs {
 
 fn main() {
     let mut args = CliArgs::parse();
+    let threshold_signature_scheme = ThresholdSignatureScheme::Dummy;
     args.validate();
 
     let id = args.id;
@@ -146,7 +148,6 @@ fn main() {
     log::info!("{:?}", args);
 
     let txn_crypto = args.crypto;
-    let p2p_crypto = args.crypto;
 
     // get mailbox parameters
     let machine_config_path = args.machine_config;
@@ -159,7 +160,7 @@ fn main() {
     };
     let local_nodes = machine_list[&id].node_list.clone();
 
-    let nodes: HashSet<u64> = machine_list
+    let nodes: HashSet<NodeId> = machine_list
         .iter()
         .flat_map(|(_, mailbox::config::Machine { addr: _, node_list })| node_list.clone())
         .collect();
@@ -194,6 +195,13 @@ fn main() {
         node_config.validate(topology.get(id).unwrap(), &nodes);
     };
     log::info!("Node configs: {:?}", node_config_map);
+
+    let majority = nodes.len() / 3 * 2 + 1;
+    let mut threshold_signature_quorum = threshold_signature_scheme.to_threshold_signature(
+        &nodes,
+        majority.try_into().unwrap(),
+        0,
+    ).expect("failed to generate threshold signature");
 
     // get flow generation metrics
     let txn_span = args.txn_span;
@@ -255,10 +263,9 @@ fn main() {
         };
 
         // start nodes
-        let (combine_tx, mut combine_rx) = mpsc::channel(0x1000000);
         let mut node_map = HashMap::new();
+        let (executed_send, mut executed_recv) = mpsc::channel(0x1000000);
         // let mut node_rt = HashMap::new();
-        let mut redirect_handles = HashMap::new();
         for node_id in local_nodes.clone() {
             // let rt = Builder::new_multi_thread()
             //     .enable_all()
@@ -267,17 +274,20 @@ fn main() {
             //     .build()
             //     .expect("Creating new runtime failed");
             let node_config = node_config_map.remove(&node_id).unwrap();
-            let result = Node::init(
+            let p2p_crypto = args.crypto.gen_p2p_signature(node_id, nodes.iter());
+            let threshold_signature = threshold_signature_quorum.remove(&node_id).unwrap();
+            let node = match Node::init(
                 node_id,
                 txn_crypto,
                 p2p_crypto,
+                threshold_signature,
                 node_config.chain_config,
                 !args.disable_txn_dissem,
                 args.num_mailbox_workers,
                 topology.remove(&node_id).unwrap_or(HashSet::new()),
                 node_config.max_concurrency,
-            ).await;
-            let (node, mut executed): (Node, _) = match result {
+                executed_send.clone(),
+            ).await {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("failed to start node: {e:?}");
@@ -285,25 +295,6 @@ fn main() {
                 }
             };
             node_map.insert(node_id, node);
-            // node_rt.insert(node_id, rt);
-
-            let tx = combine_tx.clone();
-            let redirect_handle = tokio::spawn(async move {
-                loop {
-                    match executed.recv().await {
-                        Some(msg) => {
-                            if let Err(e) = tx.send((node_id, msg)).await {
-                                log::error!("Node {id} redirecting executed pipe failed: {e:?}")
-                            }
-                        }
-                        None => {
-                            log::error!("Node {id} executed pipe closed unexpectedly");
-                            return;
-                        }
-                    };
-                }
-            });
-            redirect_handles.insert(node_id, redirect_handle);
         }
 
         // run flowgen
@@ -373,7 +364,7 @@ fn main() {
                     }
                 }
 
-                committed_txn = combine_rx.recv() => {
+                committed_txn = executed_recv.recv() => {
                     let (node, (height, txn_batch)) = match committed_txn {
                         Some(txn) => txn,
                         None => {

@@ -4,7 +4,8 @@ use crate::{CopycatError, NodeId};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 use frost_secp256k1 as frost;
 
@@ -24,7 +25,11 @@ pub struct FrostThresholdSignature {
 }
 
 impl FrostThresholdSignature {
-    pub fn new(me: NodeId, nodes: Vec<NodeId>, k: u16, seed: u64) -> Result<Self, CopycatError> {
+    pub fn setup(
+        nodes: &HashSet<NodeId>,
+        k: u16,
+        seed: u64,
+    ) -> Result<HashMap<NodeId, Arc<dyn ThresholdSignature>>, CopycatError> {
         let n = nodes.len().try_into()?;
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
@@ -33,10 +38,10 @@ impl FrostThresholdSignature {
             .map(|node| frost::Identifier::derive(&node.to_le_bytes()).map(|id| (*node, id)))
             .collect::<Result<BTreeMap<NodeId, frost::Identifier>, frost::Error>>()?;
         let ids: Vec<frost::Identifier> = node_id_map.values().cloned().collect();
-        let my_id = node_id_map.get(&me).ok_or(CopycatError(String::from(
-            "Current node ID not in the node ID list",
-        )))?;
-        let id_node_map = node_id_map.iter().map(|(node, id)| (*id, *node)).collect();
+        let id_node_map = node_id_map
+            .iter()
+            .map(|(node, id)| (*id, *node))
+            .collect::<BTreeMap<_, _>>();
 
         let (signing_shares, verifying_key) = frost::keys::generate_with_dealer(
             n,
@@ -53,33 +58,39 @@ impl FrostThresholdSignature {
             signing_keys.insert(id, (key_package, nonce));
             commitments.insert(id, commitment);
         }
-        let (signing_key, nonce) = signing_keys.remove(my_id).unwrap();
 
-        Ok(Self {
-            me,
-            node_id_map,
-            id_node_map,
-            signing_key,
-            verifying_key,
-            nonce,
-            commitments,
-        })
+        let mut quorum: HashMap<u64, Arc<dyn ThresholdSignature>> = HashMap::new();
+        for (node, id) in node_id_map.iter() {
+            let (signing_key, nonce) = signing_keys.remove(id).unwrap();
+            let scheme = Self {
+                me: *node,
+                node_id_map: node_id_map.clone(),
+                id_node_map: id_node_map.clone(),
+                signing_key,
+                verifying_key: verifying_key.clone(),
+                nonce,
+                commitments: commitments.clone(),
+            };
+            quorum.insert(*node, Arc::new(scheme));
+        }
+
+        Ok(quorum)
     }
 }
 
 impl ThresholdSignature for FrostThresholdSignature {
-    fn sign(&self, input: &[u8]) -> Result<SignPart, CopycatError> {
+    fn sign(&self, input: &[u8]) -> Result<(SignPart, f64), CopycatError> {
         let signing_package = frost::SigningPackage::new(self.commitments.clone(), input);
         let signature_share =
             frost::round2::sign(&signing_package, &self.nonce, &self.signing_key)?;
-        Ok(signature_share.serialize())
+        Ok((signature_share.serialize(), 0f64))
     }
 
     fn aggregate(
         &self,
         input: &[u8],
         parts: &mut HashMap<NodeId, SignPart>,
-    ) -> Result<SignComb, CopycatError> {
+    ) -> Result<(Option<SignComb>, f64), CopycatError> {
         // let signing_package = frost::SigningPackage::new(self.commitments.clone(), input);
         let mut signature_shares = BTreeMap::new();
         let mut invalid_list = vec![];
@@ -120,7 +131,7 @@ impl ThresholdSignature for FrostThresholdSignature {
         print!("{:?}", signature_shares);
 
         match frost::aggregate(&signing_package, &signature_shares, &self.verifying_key) {
-            Ok(signature) => Ok(signature.serialize()?),
+            Ok(signature) => Ok((Some(signature.serialize()?), 0f64)),
             Err(e) => match e {
                 frost::Error::InvalidSecretShare {
                     culprit: Some(culprit),
@@ -132,7 +143,7 @@ impl ThresholdSignature for FrostThresholdSignature {
                         }
                         None => pf_error!(self.me; "Unexpected identifier found"),
                     };
-                    Err(e.into())
+                    Ok((None, 0f64))
                 }
                 frost::Error::InvalidSignatureShare { culprit } => {
                     println!("Invalid signature share {:?}", culprit);
@@ -142,7 +153,7 @@ impl ThresholdSignature for FrostThresholdSignature {
                         }
                         None => pf_error!(self.me; "Unexpected identifier found"),
                     };
-                    Err(e.into())
+                    Ok((None, 0f64))
                 }
                 frost::Error::InvalidProofOfKnowledge { culprit } => {
                     match self.id_node_map.get(&culprit) {
@@ -152,19 +163,27 @@ impl ThresholdSignature for FrostThresholdSignature {
                         }
                         None => pf_error!(self.me; "Unexpected identifier found"),
                     };
-                    Err(e.into())
+                    Ok((None, 0f64))
                 }
                 _ => Err(e.into()),
             },
         }
     }
 
-    fn verify(&self, input: &[u8], signature: &SignComb) -> Result<(), CopycatError> {
+    fn verify(&self, input: &[u8], signature: &SignComb) -> Result<(bool, f64), CopycatError> {
         let deserialized_signature = frost::Signature::deserialize(signature)?;
-        Ok(self
+        let valid = match self
             .verifying_key
             .verifying_key()
-            .verify(&input, &deserialized_signature)?)
+            .verify(&input, &deserialized_signature)
+        {
+            Ok(()) => true,
+            Err(e) => {
+                pf_warn!(self.me; "Invalid signature: {:?}", e);
+                false
+            }
+        };
+        Ok((valid, 0f64))
     }
 }
 
@@ -172,19 +191,20 @@ impl ThresholdSignature for FrostThresholdSignature {
 mod frost_threshold_signature_test {
 
     use super::FrostThresholdSignature;
-    use super::ThresholdSignature;
     use crate::CopycatError;
 
     use bincode;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn test_frost_threshold_signature() -> Result<(), CopycatError> {
         let message = bincode::serialize("test message content")?;
 
-        let scheme0 = FrostThresholdSignature::new(0, vec![0, 1, 2, 3, 4], 3, 241241)?;
-        let scheme2 = FrostThresholdSignature::new(2, vec![0, 1, 2, 3, 4], 3, 241241)?;
-        let scheme3 = FrostThresholdSignature::new(3, vec![0, 1, 2, 3, 4], 3, 241241)?;
+        let nodes = HashSet::from_iter(0..5);
+        let mut schemes = FrostThresholdSignature::setup(&nodes, 3, 241241)?;
+        let scheme0 = schemes.remove(&0).unwrap();
+        let scheme2 = schemes.remove(&2).unwrap();
+        let scheme3 = schemes.remove(&3).unwrap();
 
         let part0 = scheme0.sign(&message)?;
         let part2 = scheme2.sign(&message)?;

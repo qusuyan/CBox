@@ -33,10 +33,7 @@ impl AvalancheTxn {
     pub fn compute_id(&self) -> Result<Hash, CopycatError> {
         let id = match self {
             AvalancheTxn::PlaceHolder => U256::zero(),
-            _ => {
-                let serialized = bincode::serialize(self)?;
-                sha256(&serialized)?
-            }
+            _ => sha256(&self)?,
         };
 
         Ok(id)

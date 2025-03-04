@@ -76,10 +76,7 @@ impl Block {
                 let raw = [0u64, *depth as u64, *proposer, *id];
                 Ok(Hash { 0: raw })
             }
-            BlockHeader::Bitcoin { .. } => {
-                let serialized_header = bincode::serialize(&header)?;
-                Ok(sha256(&serialized_header)?)
-            }
+            BlockHeader::Bitcoin { .. } => Ok(sha256(&header)?),
             BlockHeader::ChainReplication { blk_id } => Ok(*blk_id),
             BlockHeader::Diem { block, .. } => block.compute_id(txn_ctx),
         }

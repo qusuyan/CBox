@@ -2,8 +2,10 @@ mod dummy;
 mod dummy_ecdsa;
 mod ecdsa;
 
+use std::collections::HashMap;
+
 use super::{PrivKey, PubKey, Signature};
-use crate::CopycatError;
+use crate::{CopycatError, NodeId};
 
 #[derive(Copy, Clone, Debug, clap::ValueEnum)]
 pub enum SignatureScheme {
@@ -11,6 +13,8 @@ pub enum SignatureScheme {
     DummyECDSA,
     ECDSA,
 }
+
+pub type P2PSignature = (SignatureScheme, HashMap<NodeId, PubKey>, PrivKey);
 
 impl SignatureScheme {
     pub fn gen_key_pair(&self, seed: u64) -> (PubKey, PrivKey) {
@@ -40,5 +44,20 @@ impl SignatureScheme {
             SignatureScheme::DummyECDSA => dummy_ecdsa::verify(pubkey, input, signature),
             SignatureScheme::ECDSA => ecdsa::verify(pubkey, input, signature),
         }
+    }
+
+    pub fn gen_p2p_signature<'a>(
+        self,
+        me: NodeId,
+        peers: impl Iterator<Item = &'a NodeId>,
+    ) -> P2PSignature {
+        let (pk, sk) = self.gen_key_pair(me as u64);
+        let mut pubkeys = HashMap::new();
+        pubkeys.insert(me, pk);
+        for peer in peers {
+            let (pk, _) = self.gen_key_pair(*peer as u64);
+            pubkeys.insert(*peer, pk);
+        }
+        (self, pubkeys, sk)
     }
 }

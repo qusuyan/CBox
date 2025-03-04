@@ -5,9 +5,11 @@ use crate::{
 };
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+use lazy_static::lazy_static;
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct VoteInfo {
     pub blk_id: Hash,
     pub round: u64,
@@ -18,18 +20,17 @@ pub struct VoteInfo {
 
 impl VoteInfo {
     pub fn compute_id(&self) -> Result<Hash, CopycatError> {
-        let serialized = bincode::serialize(self)?;
-        sha256(&serialized)
+        sha256(&self)
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct LedgerCommitInfo {
     pub commit_state_id: Option<Hash>,
     pub vote_info_hash: Hash,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct QuorumCert {
     pub vote_info: VoteInfo,
     pub commit_info: LedgerCommitInfo,
@@ -60,8 +61,37 @@ impl DiemBlock {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TimeoutInfo {
+    pub round: u64,
+    pub high_qc: QuorumCert,
+    pub sender: NodeId,
+    pub signature: Signature,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimeCert {
     pub round: u64,
-    pub tmo_high_qc_rounds: Vec<u64>,
-    pub tmo_signatures: SignComb,
+    pub tmo_high_qc_rounds: HashMap<NodeId, u64>,
+    pub tmo_signatures: HashMap<NodeId, Signature>,
+}
+
+lazy_static! {
+    pub static ref GENESIS_VOTE_INFO: VoteInfo = VoteInfo {
+        blk_id: Hash::one(),
+        round: 1,
+        parent_id: Hash::zero(),
+        parent_round: 0,
+        exec_state_hash: Hash::zero(),
+    };
+    pub static ref GENESIS_COMMIT_INFO: LedgerCommitInfo = LedgerCommitInfo {
+        commit_state_id: None,
+        vote_info_hash: GENESIS_VOTE_INFO.compute_id().unwrap(),
+    };
+    pub static ref GENESIS_QC: QuorumCert = QuorumCert {
+        vote_info: GENESIS_VOTE_INFO.clone(),
+        commit_info: GENESIS_COMMIT_INFO.clone(),
+        signatures: SignComb::new(),
+        author: 0,
+        author_signature: Signature::new(),
+    };
 }

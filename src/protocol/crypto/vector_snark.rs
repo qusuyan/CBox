@@ -38,6 +38,10 @@ impl DummyMerkleTree {
         self.root
     }
 
+    pub fn verify_root(&self, &_expected_root: &Hash) -> Result<bool, CopycatError> {
+        Ok(true)
+    }
+
     pub fn verify(_expected_root: &Hash, num_elem: usize) -> Result<(bool, f64), CopycatError> {
         let mut merkle_tree = DummyMerkleTree::new();
         let dur = merkle_tree.append(num_elem)?;

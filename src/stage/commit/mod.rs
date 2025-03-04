@@ -37,7 +37,7 @@ pub async fn commit_thread(
     id: NodeId,
     config: ChainConfig,
     mut commit_recv: mpsc::Receiver<(u64, Vec<Arc<Txn>>)>,
-    executed_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
+    executed_send: mpsc::Sender<(NodeId, (u64, Vec<Arc<Txn>>))>,
     core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
@@ -71,7 +71,7 @@ pub async fn commit_thread(
                     }
                 };
 
-                pf_debug!(id; "got new txn batch ({})", txn_batch.len());
+                pf_debug!(id; "got new txn batch at height {} ({} txns)", height, txn_batch.len());
 
                 if let Err(e) = commit_stage.commit(&txn_batch).await {
                     pf_error!(id; "failed to commit: {:?}", e);
@@ -80,7 +80,7 @@ pub async fn commit_thread(
 
                 drop(_permit);
 
-                if let Err(e) = executed_send.send((height, txn_batch)).await {
+                if let Err(e) = executed_send.send((id, (height, txn_batch))).await {
                     pf_error!(id; "failed to send committed txns: {:?}", e);
                     continue;
                 }

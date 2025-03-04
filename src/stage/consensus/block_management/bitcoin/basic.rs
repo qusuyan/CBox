@@ -389,6 +389,7 @@ impl BlockManagement for BitcoinBlockManagement {
 
     async fn validate_block(
         &mut self,
+        _src: NodeId,
         block: Arc<Block>,
         blk_ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
@@ -1036,19 +1037,19 @@ mod bitcoin_block_management_test {
         );
 
         println!("Validating block 1: {}", blk1_ctx.id);
-        let result1 = stage.validate_block(blk1, blk1_ctx).await?;
+        let result1 = stage.validate_block(0, blk1, blk1_ctx).await?;
         assert!(result1.len() == 1);
 
         println!("Validating block 2: {}", blk2_ctx.id);
-        let result2 = stage.validate_block(blk2, blk2_ctx).await?;
+        let result2 = stage.validate_block(0, blk2, blk2_ctx).await?;
         assert!(result2.len() == 0);
 
         println!("Validating block 3: {}", blk3_ctx.id);
-        let result3 = stage.validate_block(blk3, blk3_ctx).await?;
+        let result3 = stage.validate_block(0, blk3, blk3_ctx).await?;
         assert!(result3.len() == 2);
 
         println!("Validating block 4: {}", blk4_ctx.id);
-        let result4 = stage.validate_block(blk4, blk4_ctx).await?;
+        let result4 = stage.validate_block(0, blk4, blk4_ctx).await?;
         assert!(result4.len() == 1);
 
         Ok(())

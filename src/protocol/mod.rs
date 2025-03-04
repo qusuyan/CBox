@@ -20,6 +20,7 @@ pub enum ChainType {
     Bitcoin,
     Avalanche,
     ChainReplication,
+    Diem,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

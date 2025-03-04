@@ -305,6 +305,9 @@ pub fn parse_config_file(
             ChainType::ChainReplication => ChainConfig::ChainReplication {
                 config: serde_json::from_value(config_item.config.clone())?,
             },
+            ChainType::Diem => ChainConfig::Diem {
+                config: serde_json::from_value(config_item.config.clone())?,
+            },
         };
         println!("{:?}", config);
         for node in config_item.nodes {

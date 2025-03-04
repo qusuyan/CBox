@@ -13,6 +13,8 @@ use crate::context::{BlkCtx, TxnCtx};
 use crate::get_report_timer;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
+use crate::protocol::crypto::signature::P2PSignature;
+use crate::protocol::crypto::threshold_signature::ThresholdSignature;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::protocol::SignatureScheme;
@@ -50,6 +52,7 @@ trait BlockManagement: Sync + Send {
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError>;
     async fn validate_block(
         &mut self,
+        src: NodeId,
         block: Arc<Block>,
         ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError>;
@@ -67,6 +70,8 @@ trait BlockManagement: Sync + Send {
 
 fn get_blk_creation(
     id: NodeId,
+    p2p_signature: P2PSignature,
+    threshold_signature: Arc<dyn ThresholdSignature>,
     config: ChainConfig,
     delay: Arc<AtomicF64>,
     core_group: Arc<VCoreGroup>,
@@ -83,6 +88,8 @@ fn get_blk_creation(
         }
         ChainConfig::Diem { config } => Box::new(diem::DiemBlockManagement::new(
             id,
+            p2p_signature,
+            threshold_signature,
             config,
             delay,
             peer_messenger,
@@ -93,7 +100,9 @@ fn get_blk_creation(
 pub async fn block_management_thread(
     id: NodeId,
     config: ChainConfig,
-    crypto_scheme: SignatureScheme,
+    txn_scheme: SignatureScheme,
+    p2p_signature: P2PSignature,
+    threshold_signature: Arc<dyn ThresholdSignature>,
     mut peer_blk_recv: mpsc::Receiver<(NodeId, Arc<Block>)>,
     mut peer_blk_req_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     // mut peer_blk_resp_recv: mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,
@@ -112,6 +121,8 @@ pub async fn block_management_thread(
 
     let mut block_management_stage = get_blk_creation(
         id,
+        p2p_signature,
+        threshold_signature,
         config,
         delay.clone(),
         core_group.clone(),
@@ -207,7 +218,7 @@ pub async fn block_management_thread(
 
                 drop(_permit);
 
-                pf_debug!(id; "proposing new block {:?}", new_blk);
+                pf_debug!(id; "proposing new block ({}): {:?}", new_blk_ctx.id, new_blk);
                 blk_state = CurBlockState::Working;
                 self_blks_sent += 1;
                 self_txns_sent += new_blk.txns.len();
@@ -272,7 +283,7 @@ pub async fn block_management_thread(
                         let valid = if let Some(r) = txns_validated.get(&txn_ctx.id) {
                             *r.value()
                         } else {
-                            let (valid, vtime) = match txn.validate(crypto_scheme) {
+                            let (valid, vtime) = match txn.validate(txn_scheme) {
                                 Ok(validity) => validity,
                                 Err(e) => {
                                     pf_error!(id; "txn validation failed: {:?}", e);
@@ -325,7 +336,7 @@ pub async fn block_management_thread(
                 peer_blks_recv += 1;
                 peer_txns_recv += peer_blk.txns.len();
                 pf_debug!(id; "Validating block ({:?}, {:?})", peer_blk, peer_blk_ctx);
-                let new_tail = match block_management_stage.validate_block(peer_blk, peer_blk_ctx).await {
+                let new_tail = match block_management_stage.validate_block(src, peer_blk.clone(), peer_blk_ctx.clone()).await {
                     Ok(new_tail) => new_tail,
                     Err(e) => {
                         pf_error!(id; "failed to validate block: {:?}", e);
@@ -335,6 +346,7 @@ pub async fn block_management_thread(
 
                 if new_tail.is_empty() {
                     // don't need to change anything
+                    pf_debug!(id; "block {} is invalid {:?}", peer_blk_ctx.id, peer_blk);
                     continue;
                 }
 

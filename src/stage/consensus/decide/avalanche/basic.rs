@@ -3,6 +3,7 @@ use crate::config::AvalancheBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
+use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::MsgType;
 use crate::transaction::{AvalancheTxn, Txn};
@@ -37,7 +38,7 @@ struct DagNode {
 
 pub struct AvalancheDecision {
     id: NodeId,
-    crypto_scheme: SignatureScheme,
+    signature_scheme: SignatureScheme,
     k: usize,
     vote_thresh: usize,
     beta1: u64,
@@ -58,7 +59,7 @@ pub struct AvalancheDecision {
     _notify: Notify,
     // for p2p comm
     peer_messenger: Arc<PeerMessenger>,
-    neighbor_pks: HashMap<NodeId, PubKey>,
+    peer_pks: HashMap<NodeId, PubKey>,
     sk: PrivKey,
     // control loop
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
@@ -75,21 +76,20 @@ pub struct AvalancheDecision {
 impl AvalancheDecision {
     pub fn new(
         id: NodeId,
-        crypto_scheme: SignatureScheme,
+        p2p_signature: P2PSignature,
         config: AvalancheBasicConfig,
         peer_messenger: Arc<PeerMessenger>,
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
         delay: Arc<AtomicF64>,
     ) -> Self {
-        // pk can be generated deterministically on demand
-        let (_, sk) = crypto_scheme.gen_key_pair(id.into());
+        let (signature_scheme, peer_pks, sk) = p2p_signature;
         let vote_thresh = (config.k as f64 * config.alpha).ceil() as usize;
         pf_info!(id; "vote threshold is {}", vote_thresh);
         let vote_timeout = Duration::from_secs_f64(config.vote_timeout_secs);
 
         Self {
             id,
-            crypto_scheme,
+            signature_scheme,
             k: config.k,
             vote_thresh,
             beta1: config.beta1,
@@ -107,7 +107,7 @@ impl AvalancheDecision {
             commit_queue: VecDeque::new(),
             _notify: Notify::new(),
             peer_messenger,
-            neighbor_pks: HashMap::new(),
+            peer_pks,
             sk,
             pmaker_feedback_send,
             is_strongly_preferred_calls: 0,
@@ -577,7 +577,7 @@ impl Decision for AvalancheDecision {
             // otherwise, send votes to peer that queries the block
             let msg_content = (blk_id, votes);
             let serialized_msg = &bincode::serialize(&msg_content)?;
-            let (signature, stime) = self.crypto_scheme.sign(&self.sk, serialized_msg)?;
+            let (signature, stime) = self.signature_scheme.sign(&self.sk, serialized_msg)?;
             let delay = self.delay.fetch_add(stime, Ordering::Relaxed);
             let vote_msg = VoteMsg {
                 round: msg_content.0,
@@ -640,16 +640,16 @@ impl Decision for AvalancheDecision {
             return Ok(());
         }
 
-        let peer_pk = self.neighbor_pks.entry(src).or_insert_with(|| {
-            let (pk, _) = self.crypto_scheme.gen_key_pair(src.into());
-            pk
-        });
+        let peer_pk = match self.peer_pks.get(&src) {
+            Some(pk) => pk,
+            None => return Ok(()), // ignore unknown peers
+        };
 
         let content = (msg.round, msg.votes);
         let serialized_content = bincode::serialize(&content)?;
         let (blk_id, votes) = content;
         let (valid, vtime) =
-            self.crypto_scheme
+            self.signature_scheme
                 .verify(&peer_pk, &serialized_content, &msg.signature)?;
         self.delay.fetch_add(vtime, Ordering::Relaxed);
         if valid {

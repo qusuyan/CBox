@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use crate::config::ChainConfig;
 use crate::peers::PeerMessenger;
+use crate::protocol::crypto::signature::P2PSignature;
+use crate::protocol::crypto::threshold_signature::ThresholdSignature;
 use crate::protocol::transaction::Txn;
 use crate::protocol::SignatureScheme;
 use crate::stage::commit::commit_thread;
@@ -39,14 +41,16 @@ pub struct Node {
 impl Node {
     pub async fn init(
         id: NodeId,
-        txn_crpyto: SignatureScheme,
-        p2p_crypto: SignatureScheme,
+        txn_signature: SignatureScheme,
+        p2p_signature: P2PSignature,
+        threshold_signature: Arc<dyn ThresholdSignature>,
         config: ChainConfig,
         dissem_txns: bool,
         num_mailbox_workers: usize,
         neighbors: HashSet<NodeId>,
         max_concurrency: Option<usize>,
-    ) -> Result<(Self, mpsc::Receiver<(u64, Vec<Arc<Txn>>)>), CopycatError> {
+        executed_send: mpsc::Sender<(NodeId, (u64, Vec<Arc<Txn>>))>,
+    ) -> Result<Self, CopycatError> {
         pf_trace!(id; "starting: {:?}", config);
 
         // let state = Arc::new(ChainState::new(chain_type));
@@ -74,14 +78,13 @@ impl Node {
         let (block_ready_send, block_ready_recv) = mpsc::channel(0x1000000);
         let (pmaker_feedback_send, pmaker_feedback_recv) = mpsc::channel(0x1000000);
         let (commit_send, commit_recv) = mpsc::channel(0x1000000);
-        let (executed_send, executed_recv) = mpsc::channel(0x1000000);
 
         let _txn_validation_monitor = TaskMonitor::new();
         let _txn_validation_handle =
             tokio::spawn(_txn_validation_monitor.instrument(txn_validation_thread(
                 id,
                 config.clone(),
-                txn_crpyto,
+                txn_signature,
                 req_recv,
                 peer_txn_recv,
                 validated_txn_send,
@@ -121,7 +124,9 @@ impl Node {
             block_management_thread(
                 id,
                 config.clone(),
-                txn_crpyto,
+                txn_signature,
+                p2p_signature.clone(),
+                threshold_signature.clone(),
                 peer_blk_recv,
                 peer_blk_req_recv,
                 // peer_blk_resp_recv,
@@ -151,7 +156,8 @@ impl Node {
         let _decision_monitor = TaskMonitor::new();
         let _decision_handle = tokio::spawn(_decision_monitor.instrument(decision_thread(
             id,
-            p2p_crypto,
+            p2p_signature,
+            threshold_signature,
             config.clone(),
             peer_messenger.clone(),
             peer_consensus_recv,
@@ -174,22 +180,19 @@ impl Node {
 
         pf_info!(id; "stages started");
 
-        Ok((
-            Self {
-                id,
-                req_send,
-                core_group: vcores,
-                _peer_messenger: peer_messenger,
-                _txn_validation_handle,
-                _txn_dissemination_handle,
-                _pacemaker_handle,
-                _block_management_handle,
-                _block_dissemination_handle,
-                _decision_handle,
-                _commit_handle,
-            },
-            executed_recv,
-        ))
+        Ok(Self {
+            id,
+            req_send,
+            core_group: vcores,
+            _peer_messenger: peer_messenger,
+            _txn_validation_handle,
+            _txn_dissemination_handle,
+            _pacemaker_handle,
+            _block_management_handle,
+            _block_dissemination_handle,
+            _decision_handle,
+            _commit_handle,
+        })
     }
 
     // pub async fn wait_completion(self) -> Result<(), CopycatError> {

@@ -9,7 +9,8 @@ use k256::ecdsa::{
     SigningKey, VerifyingKey,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 pub struct ECDSAThresholdSignature {
     me: NodeId,
@@ -19,41 +20,48 @@ pub struct ECDSAThresholdSignature {
 }
 
 impl ECDSAThresholdSignature {
-    pub fn new(me: NodeId, nodes: Vec<NodeId>, k: u16, seed: u64) -> Result<Self, CopycatError> {
+    pub fn setup(
+        nodes: &HashSet<NodeId>,
+        k: u16,
+        seed: u64,
+    ) -> Result<HashMap<NodeId, Arc<dyn ThresholdSignature>>, CopycatError> {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let mut pubkeys = HashMap::new();
         let mut privkeys = HashMap::new();
         for node in nodes {
             let signing_key = SigningKey::random(&mut rng);
             let verifying_key = VerifyingKey::from(&signing_key);
-            privkeys.insert(node, signing_key);
-            pubkeys.insert(node, verifying_key);
+            privkeys.insert(*node, signing_key);
+            pubkeys.insert(*node, verifying_key);
         }
 
-        let privkey = privkeys.remove(&me).ok_or(CopycatError(String::from(
-            "Current node ID not in the node ID list",
-        )))?;
+        let mut quorum: HashMap<u64, Arc<dyn ThresholdSignature>> = HashMap::new();
+        for node in nodes {
+            let privkey = privkeys.remove(node).unwrap();
+            let scheme = Self {
+                me: *node,
+                k,
+                pubkeys: pubkeys.clone(),
+                privkey,
+            };
+            quorum.insert(*node, Arc::new(scheme));
+        }
 
-        Ok(Self {
-            me,
-            k,
-            pubkeys,
-            privkey,
-        })
+        Ok(quorum)
     }
 }
 
 impl ThresholdSignature for ECDSAThresholdSignature {
-    fn sign(&self, input: &[u8]) -> Result<SignPart, CopycatError> {
+    fn sign(&self, input: &[u8]) -> Result<(SignPart, f64), CopycatError> {
         let signature: k256::ecdsa::Signature = self.privkey.sign(input);
-        Ok(signature.to_vec())
+        Ok((signature.to_vec(), 0f64))
     }
 
     fn aggregate(
         &self,
         input: &[u8],
         parts: &mut HashMap<NodeId, SignPart>,
-    ) -> Result<SignComb, CopycatError> {
+    ) -> Result<(Option<SignComb>, f64), CopycatError> {
         let mut invalid_list = vec![];
         for (node, part) in parts.iter() {
             let pubkey = match self.pubkeys.get(node) {
@@ -77,30 +85,36 @@ impl ThresholdSignature for ECDSAThresholdSignature {
         }
 
         if parts.len() < self.k as usize {
-            Err(CopycatError(String::from("Not enough valid shares")))
+            pf_warn!(self.me; "Not enough valid shares");
+            Ok((None, 0f64))
         } else {
-            Ok(bincode::serialize(parts)?)
+            Ok((Some(bincode::serialize(parts)?), 0f64))
         }
     }
 
-    fn verify(&self, input: &[u8], signature: &SignComb) -> Result<(), CopycatError> {
+    fn verify(&self, input: &[u8], signature: &SignComb) -> Result<(bool, f64), CopycatError> {
         let parts: HashMap<NodeId, SignPart> = bincode::deserialize(&signature)?;
         if parts.len() < self.k as usize {
-            return Err(CopycatError(String::from("Not enough valid shares")));
+            pf_warn!(self.me; "Not enough valid shares");
+            return Ok((false, 0f64));
         }
 
         for (node, part) in parts.iter() {
             let pubkey = match self.pubkeys.get(node) {
                 Some(key) => key,
                 None => {
-                    return Err(CopycatError(String::from("Unrecognized node")));
+                    pf_warn!(self.me; "Invalid signature share from Node {}: unknown node", node);
+                    return Ok((false, 0f64));
                 }
             };
             let signature: k256::ecdsa::Signature = k256::ecdsa::Signature::from_slice(part)?;
-            pubkey.verify(input, &signature)?;
+            if let Err(e) = pubkey.verify(input, &signature) {
+                pf_warn!(self.me; "Invalid signature share from Node {}: {:?}", node, e);
+                return Ok((false, 0f64));
+            }
         }
 
-        Ok(())
+        Ok((true, 0f64))
     }
 }
 
@@ -108,36 +122,37 @@ impl ThresholdSignature for ECDSAThresholdSignature {
 mod ecdsa_threshold_signature_test {
 
     use super::ECDSAThresholdSignature;
-    use super::ThresholdSignature;
     use crate::CopycatError;
 
     use bincode;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn test_ecdsa_threshold_signature() -> Result<(), CopycatError> {
         let message = bincode::serialize("test message content")?;
 
-        let scheme0 = ECDSAThresholdSignature::new(0, vec![0, 1, 2, 3, 4], 3, 241241)?;
-        let scheme2 = ECDSAThresholdSignature::new(2, vec![0, 1, 2, 3, 4], 3, 241241)?;
-        let scheme3 = ECDSAThresholdSignature::new(3, vec![0, 1, 2, 3, 4], 3, 241241)?;
+        let nodes = HashSet::from_iter(0..5);
+        let mut schemes = ECDSAThresholdSignature::setup(&nodes, 3, 241241)?;
+        let scheme0 = schemes.remove(&0).unwrap();
+        let scheme2 = schemes.remove(&2).unwrap();
+        let scheme3 = schemes.remove(&3).unwrap();
 
-        let part0 = scheme0.sign(&message)?;
-        let part2 = scheme2.sign(&message)?;
-        let part3 = scheme3.sign(&message)?;
+        let (part0, _) = scheme0.sign(&message)?;
+        let (part2, _) = scheme2.sign(&message)?;
+        let (part3, _) = scheme3.sign(&message)?;
 
         let mut parts = HashMap::new();
         parts.insert(0, part0);
         parts.insert(2, part2);
         parts.insert(3, part3);
 
-        let combined0 = scheme0.aggregate(&message, &mut parts)?;
-        let combined2 = scheme2.aggregate(&message, &mut parts)?;
-        let combined3 = scheme3.aggregate(&message, &mut parts)?;
+        let (combined0, _) = scheme0.aggregate(&message, &mut parts)?;
+        let (combined2, _) = scheme2.aggregate(&message, &mut parts)?;
+        let (combined3, _) = scheme3.aggregate(&message, &mut parts)?;
 
-        scheme0.verify(&message, &combined2)?;
-        scheme2.verify(&message, &combined3)?;
-        scheme3.verify(&message, &combined0)?;
+        scheme0.verify(&message, &combined2.unwrap())?;
+        scheme2.verify(&message, &combined3.unwrap())?;
+        scheme3.verify(&message, &combined0.unwrap())?;
 
         Ok(())
     }

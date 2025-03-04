@@ -9,13 +9,15 @@ use tokio_metrics::TaskMonitor;
 
 use crate::consts::DECIDE_DELAY_INTERVAL;
 use crate::context::BlkCtx;
+use crate::get_report_timer;
 use crate::protocol::block::Block;
+use crate::protocol::crypto::signature::P2PSignature;
+use crate::protocol::crypto::threshold_signature::ThresholdSignature;
 use crate::stage::pass;
 use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 use crate::{config::ChainConfig, peers::PeerMessenger};
-use crate::{get_report_timer, SignatureScheme};
 
 use async_trait::async_trait;
 
@@ -43,7 +45,8 @@ trait Decision: Sync + Send {
 
 fn get_decision(
     id: NodeId,
-    crypto_scheme: SignatureScheme,
+    p2p_signature: P2PSignature,
+    threshold_signature: Arc<dyn ThresholdSignature>,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
@@ -54,7 +57,7 @@ fn get_decision(
         ChainConfig::Bitcoin { config } => bitcoin::new(id, config),
         ChainConfig::Avalanche { config } => avalanche::new(
             id,
-            crypto_scheme,
+            p2p_signature,
             config,
             peer_messenger,
             pmaker_feedback_send,
@@ -65,7 +68,8 @@ fn get_decision(
         }
         ChainConfig::Diem { config } => Box::new(diem::DiemDecision::new(
             id,
-            crypto_scheme,
+            p2p_signature,
+            threshold_signature,
             config,
             peer_messenger,
             pmaker_feedback_send,
@@ -76,7 +80,8 @@ fn get_decision(
 
 pub async fn decision_thread(
     id: NodeId,
-    crypto_scheme: SignatureScheme,
+    p2p_signature: P2PSignature,
+    threshold_signature: Arc<dyn ThresholdSignature>,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     mut peer_consensus_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
@@ -93,7 +98,8 @@ pub async fn decision_thread(
 
     let mut decision_stage = get_decision(
         id,
-        crypto_scheme,
+        p2p_signature,
+        threshold_signature,
         config,
         peer_messenger,
         pmaker_feedback_send.clone(), // keep pmaker_feedback pipe around

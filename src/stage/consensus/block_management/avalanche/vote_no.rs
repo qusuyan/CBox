@@ -50,6 +50,7 @@ impl BlockManagement for AvalancheVoteNoBlockManagement {
 
     async fn validate_block(
         &mut self,
+        _src: NodeId,
         block: Arc<Block>,
         ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {

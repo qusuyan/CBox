@@ -1,5 +1,6 @@
 use copycat::log::colored_level;
 use copycat::parse_config_file;
+use copycat::protocol::crypto::threshold_signature::ThresholdSignatureScheme;
 use copycat::{get_neighbors, get_report_timer, start_report_timer};
 use copycat::{ChainType, Node, SignatureScheme};
 use copycat_flowgen::get_flow_gen;
@@ -8,6 +9,7 @@ use std::collections::HashSet;
 use std::io::Write;
 
 use tokio::runtime::Builder;
+use tokio::sync::mpsc;
 use tokio::time::Duration;
 
 use clap::Parser;
@@ -79,6 +81,7 @@ impl CliArgs {
 
 pub fn main() {
     let mut args = CliArgs::parse();
+    let threshold_signature_scheme = ThresholdSignatureScheme::Dummy;
     args.validate();
 
     let id = args.id;
@@ -102,10 +105,15 @@ pub fn main() {
         .build()
         .expect("Creating new runtime failed");
 
-    let config = parse_config_file(&args.config, args.chain)
-        .unwrap()
-        .remove(&id)
-        .unwrap();
+    let mut configs = parse_config_file(&args.config, args.chain).unwrap();
+    let all_nodes = configs.keys().cloned().collect::<HashSet<_>>();
+    let majority = all_nodes.len() / 3 * 2 + 1;
+    let p2p_signature = args.crypto.gen_p2p_signature(id, all_nodes.iter());
+    let mut threshold_signature_quorum = threshold_signature_scheme
+        .to_threshold_signature(&all_nodes, majority.try_into().unwrap(), 0)
+        .expect("failed to generate threshold signature");
+    let threshold_signature = threshold_signature_quorum.remove(&id).unwrap();
+    let config = configs.remove(&id).unwrap();
     log::info!("Node config: {:?}", config);
 
     let neighbors = if args.topology.is_empty() {
@@ -133,15 +141,18 @@ pub fn main() {
         .expect("write latency failed");
 
     runtime.block_on(async {
-        let (node, mut executed): (Node, _) = match Node::init(
+        let (executed_send, mut executed_recv) = mpsc::channel(0x100000);
+        let node = match Node::init(
             id,
             args.crypto,
-            args.crypto,
+            p2p_signature,
+            threshold_signature,
             config.chain_config,
             !args.disable_txn_dissem,
             args.num_mailbox_workers,
             neighbors,
             config.max_concurrency,
+            executed_send.clone(),
         )
         .await
         {
@@ -200,8 +211,8 @@ pub fn main() {
                     }
                 }
 
-                committed_txns = executed.recv() => {
-                    let (height, txns) = match committed_txns {
+                committed_txns = executed_recv.recv() => {
+                    let (_, (height, txns)) = match committed_txns {
                         Some(txns) => txns,
                         None => {
                             log::error!("executed pipe closed unexpectedly");

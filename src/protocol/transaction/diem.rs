@@ -39,8 +39,7 @@ pub struct DiemPayload {
 
 impl DiemTxn {
     pub fn compute_id(&self) -> Result<Hash, CopycatError> {
-        let serialized = bincode::serialize(self)?;
-        let id = sha256(&serialized)?;
+        let id = sha256(&self)?;
         Ok(id)
     }
 
