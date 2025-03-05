@@ -21,8 +21,11 @@ import pandas as pd
 # exp_dir = "results/Avax-Partition/"
 # configs = ["correct-type", "correct-config"]
 
-exp_dir = "results/Avax-Faulty/"
-configs = ["correct-type", "num-faulty"]
+# exp_dir = "results/Avax-Faulty/"
+# configs = ["correct-type", "num-faulty"]
+
+exp_dir = "results/Diem-Scale/"
+configs = ["num-nodes", "per-node-concurrency"]
 
 metrics = ["avg_tput", "avg_cpu", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms"]
 

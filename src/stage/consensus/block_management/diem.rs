@@ -202,7 +202,7 @@ impl DiemBlockManagement {
     }
 
     async fn request_blk(&self, blk_id: &Hash) -> Result<(), CopycatError> {
-        let mut msg = Vec::with_capacity(32);
+        let mut msg = vec![0u8; 32];
         blk_id.to_little_endian(&mut msg);
         self.peer_messenger
             .broadcast(MsgType::BlockReq { msg })
