@@ -1,0 +1,24 @@
+[experiment]
+num_iterations = 3
+
+[parameters]
+chain-type = "diem"
+cluster-threads = 32
+conn-multiply = 1
+correct-config = ""
+txn-crypto = "dummy"
+p2p-crypto = "dummy-ecdsa"
+threshold-crypto = "dummy-ecdsa"
+exp-prefix = "Diem-Scale/"
+exp-time = 310
+frequency = 0
+mailbox-workers = 16
+max-inflight-txns = 2000000
+network-delay = 30
+num-accounts = 1000
+num-clients = 1
+num-machines = 1
+num-nodes = [4, 10, 16, 22, 28, 34, 40]
+per-node-concurrency = [1, 2]
+txn-span = 0
+disable-txn-dissem = true

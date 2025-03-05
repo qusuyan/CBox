@@ -1,12 +1,11 @@
-use copycat::protocol::crypto::threshold_signature::ThresholdSignatureScheme;
-use mailbox::Mailbox;
-
 use copycat::log::colored_level;
 use copycat::{get_report_timer, get_timer_interval, parse_config_file, start_report_timer, Node, NodeId};
 use copycat::{fully_connected_topology, get_topology};
-use copycat::{ChainType, SignatureScheme};
+use copycat::{ChainType, SignatureScheme, ThresholdSignatureScheme};
 use copycat::protocol::MsgType;
 use copycat_flowgen::get_flow_gen;
+
+use mailbox::Mailbox;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -55,9 +54,17 @@ struct CliArgs {
     #[arg(long, short = 'c', value_enum, default_value = "dummy")]
     chain: ChainType,
 
-    /// Cryptography scheme
+    /// Txn signature scheme
+    #[arg(long, short = 'x', value_enum, default_value = "dummy")]
+    txn_signature_scheme: SignatureScheme,
+
+    /// p2p signature scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
-    crypto: SignatureScheme,
+    p2p_signature_scheme: SignatureScheme,
+
+    /// Threshold signature scheme
+    #[arg(long, short = 'h', value_enum, default_value = "dummy")]
+    threshold_signature_scheme: ThresholdSignatureScheme,
 
     /// Number of clients
     #[arg(long, short = 'l')]
@@ -147,7 +154,7 @@ fn main() {
 
     log::info!("{:?}", args);
 
-    let txn_crypto = args.crypto;
+    let txn_crypto = args.txn_signature_scheme;
 
     // get mailbox parameters
     let machine_config_path = args.machine_config;
@@ -274,7 +281,7 @@ fn main() {
             //     .build()
             //     .expect("Creating new runtime failed");
             let node_config = node_config_map.remove(&node_id).unwrap();
-            let p2p_crypto = args.crypto.gen_p2p_signature(node_id, nodes.iter());
+            let p2p_crypto = args.p2p_signature_scheme.gen_p2p_signature(node_id, nodes.iter());
             let threshold_signature = threshold_signature_quorum.remove(&node_id).unwrap();
             let node = match Node::init(
                 node_id,
@@ -306,7 +313,7 @@ fn main() {
             frequency,
             args.conflict_rate,
             args.chain,
-            args.crypto,
+            args.txn_signature_scheme,
         );
         let init_txns = flow_gen.setup_txns().await.unwrap();
 

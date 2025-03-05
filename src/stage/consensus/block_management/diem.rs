@@ -10,6 +10,7 @@ use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::types::diem::{
     DiemBlock, QuorumCert, TimeCert, GENESIS_QC, GENESIS_VOTE_INFO,
 };
+use crate::protocol::MsgType;
 use crate::stage::pacemaker::diem::DiemPacemaker;
 use crate::stage::process_illusion;
 use crate::transaction::{DiemTxn, Txn};
@@ -41,11 +42,14 @@ pub struct DiemBlockManagement {
     last_tc: Option<Option<TimeCert>>, // outer option indicates if should start new round
     // p2p communication
     all_nodes: Vec<NodeId>,
-    _peer_messenger: Arc<PeerMessenger>,
+    peer_messenger: Arc<PeerMessenger>,
     signature_scheme: SignatureScheme,
     peer_pks: HashMap<NodeId, PubKey>,
     sk: PrivKey,
     threshold_signature: Arc<dyn ThresholdSignature>,
+    // blocks pending validation
+    pending_blks: HashMap<Hash, (Hash, u64)>, // parent_blk_id -> (blk_id, round)
+    blk_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>)>, // only to respond to peer requests
     //
     _notify: Notify,
 }
@@ -76,8 +80,9 @@ impl DiemBlockManagement {
             id,
             blk_size: config.blk_size,
             delay,
-            _peer_messenger: peer_messenger,
+            peer_messenger,
             txn_pool: HashMap::new(),
+            blk_pool: HashMap::new(),
             accounts: HashMap::new(),
             state_merkle: HashMap::new(),
             pending_txns: VecDeque::new(),
@@ -90,6 +95,7 @@ impl DiemBlockManagement {
             peer_pks,
             sk,
             threshold_signature,
+            pending_blks: HashMap::new(),
             _notify: Notify::new(),
         }
     }
@@ -106,6 +112,12 @@ impl DiemBlockManagement {
 
         if qc_round > self.high_qc.vote_info.round {
             self.high_qc = qc.clone();
+            let chain_tail = qc.vote_info.blk_id;
+            if chain_tail != GENESIS_VOTE_INFO.blk_id
+                && !self.state_merkle.contains_key(&chain_tail)
+            {
+                self.request_blk(&chain_tail).await?;
+            }
         }
 
         if qc_round >= self.current_round {
@@ -188,6 +200,14 @@ impl DiemBlockManagement {
 
         Ok((true, verify_time))
     }
+
+    async fn request_blk(&self, blk_id: &Hash) -> Result<(), CopycatError> {
+        let mut msg = Vec::with_capacity(32);
+        blk_id.to_little_endian(&mut msg);
+        self.peer_messenger
+            .broadcast(MsgType::BlockReq { msg })
+            .await
+    }
 }
 
 #[async_trait]
@@ -216,7 +236,12 @@ impl BlockManagement for DiemBlockManagement {
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         loop {
             if self.last_tc.is_some() {
-                return Ok(());
+                let chain_tail = self.high_qc.vote_info.blk_id;
+                if chain_tail == GENESIS_VOTE_INFO.blk_id
+                    || self.state_merkle.contains_key(&chain_tail)
+                {
+                    return Ok(());
+                }
             }
             self._notify.notified().await;
         }
@@ -235,10 +260,10 @@ impl BlockManagement for DiemBlockManagement {
         let mut merkle_tree = if self.high_qc.vote_info.blk_id == GENESIS_VOTE_INFO.blk_id {
             DummyMerkleTree::new()
         } else {
-            match self.state_merkle.get(&self.high_qc.vote_info.blk_id) {
-                Some(merkle_tree) => merkle_tree.clone(),
-                None => todo!(), // wait for dependency
-            }
+            self.state_merkle
+                .get(&self.high_qc.vote_info.blk_id)
+                .expect("missing depending blocks")
+                .clone()
         };
 
         loop {
@@ -339,6 +364,9 @@ impl BlockManagement for DiemBlockManagement {
             txn_ctx: txn_ctxs,
         });
 
+        self.blk_pool
+            .insert(diem_blk_id, (blk.clone(), blk_ctx.clone()));
+
         Ok((blk, blk_ctx))
     }
 
@@ -410,78 +438,117 @@ impl BlockManagement for DiemBlockManagement {
             return Ok(vec![]);
         }
 
-        // TODO: speculative exec
+        self.blk_pool.insert(ctx.id, (block.clone(), ctx.clone()));
+
+        // speculative exec
         let mut speculative_exec_time = 0f64;
         let mut speculative_exec_distinct_writes = 0usize;
         let mut speculative_exec_distinct_inserts = 0usize;
 
-        let mut merkle_tree = if diem_blk.qc.vote_info.blk_id == GENESIS_VOTE_INFO.blk_id {
+        let parent_id = &diem_blk.qc.vote_info.blk_id;
+        let mut merkle_tree = if *parent_id == GENESIS_VOTE_INFO.blk_id {
             DummyMerkleTree::new()
         } else {
-            match self.state_merkle.get(&diem_blk.qc.vote_info.blk_id) {
+            match self.state_merkle.get(parent_id) {
                 Some(merkle_tree) => merkle_tree.clone(),
-                None => todo!(), // TODO: missing depending blocks
+                None => {
+                    self.request_blk(parent_id).await?; // missing parent block, will continue validate when we get all dependencies
+                    match self.pending_blks.entry(*parent_id) {
+                        Entry::Occupied(mut e) => {
+                            let (blk_id, round) = e.get_mut();
+                            // only keep track of latest block
+                            if *round < diem_blk.round {
+                                *round = diem_blk.round;
+                                *blk_id = ctx.id;
+                            }
+                        }
+                        Entry::Vacant(e) => {
+                            e.insert((ctx.id, diem_blk.round));
+                        }
+                    }
+                    return Ok(vec![]);
+                }
             }
         };
 
-        for txn in &block.txns {
-            let diem_txn = match txn.as_ref() {
-                Txn::Diem { txn } => txn,
+        let mut new_tail = vec![];
+
+        let mut cur_block = block;
+        let mut cur_block_ctx = ctx;
+
+        loop {
+            let diem_blk = match &cur_block.header {
+                BlockHeader::Diem { block, .. } => block,
                 _ => unreachable!(),
             };
+            let cur_blk_id = cur_block_ctx.id;
 
-            match diem_txn {
-                DiemTxn::Txn {
-                    sender,
-                    seqno: _seqno, // TODO
-                    payload,
-                    max_gas_amount,
-                    ..
-                } => {
-                    let (_, sender_balance) = match self.accounts.get(sender) {
-                        Some(account) => account,
-                        None => return Ok(vec![]), // invalid txn - unknown sender
-                    };
+            for txn in &cur_block.txns {
+                let diem_txn = match txn.as_ref() {
+                    Txn::Diem { txn } => txn,
+                    _ => unreachable!(),
+                };
 
-                    if sender_balance < max_gas_amount {
-                        return Ok(vec![]); // invalid txn - not enough balance
-                    }
+                match diem_txn {
+                    DiemTxn::Txn {
+                        sender,
+                        seqno: _seqno, // TODO
+                        payload,
+                        max_gas_amount,
+                        ..
+                    } => {
+                        let (_, sender_balance) = match self.accounts.get(sender) {
+                            Some(account) => account,
+                            None => return Ok(vec![]), // invalid txn - unknown sender
+                        };
 
-                    speculative_exec_time += payload.script_runtime_sec;
-                    if !payload.script_succeed {
-                        return Ok(vec![]); // invalid txn
-                    }
-                    speculative_exec_distinct_writes += payload.distinct_writes;
-                }
-                DiemTxn::Grant {
-                    receiver,
-                    receiver_key,
-                    amount,
-                } => match self.accounts.entry(*receiver) {
-                    Entry::Occupied(mut e) => {
-                        let (pubkey, balance) = e.get_mut();
-                        if pubkey != receiver_key {
-                            continue; // receivers do not match, ignore
+                        if sender_balance < max_gas_amount {
+                            return Ok(vec![]); // invalid txn - not enough balance
                         }
-                        *balance += amount; // TODO: move to speculative exec, do not change actual state yet
+
+                        speculative_exec_time += payload.script_runtime_sec;
+                        if !payload.script_succeed {
+                            return Ok(vec![]); // invalid txn
+                        }
+                        speculative_exec_distinct_writes += payload.distinct_writes;
                     }
-                    Entry::Vacant(e) => {
-                        e.insert((receiver_key.clone(), *amount)); // TODO: move to speculative exec, do not change actual state yet
-                        speculative_exec_distinct_inserts += 1; // TODO
-                    }
-                },
+                    DiemTxn::Grant {
+                        receiver,
+                        receiver_key,
+                        amount,
+                    } => match self.accounts.entry(*receiver) {
+                        Entry::Occupied(mut e) => {
+                            let (pubkey, balance) = e.get_mut();
+                            if pubkey != receiver_key {
+                                continue; // receivers do not match, ignore
+                            }
+                            *balance += amount; // TODO: move to speculative exec, do not change actual state yet
+                        }
+                        Entry::Vacant(e) => {
+                            e.insert((receiver_key.clone(), *amount)); // TODO: move to speculative exec, do not change actual state yet
+                            speculative_exec_distinct_inserts += 1; // TODO
+                        }
+                    },
+                }
+            }
+
+            let append_dur = merkle_tree.append(speculative_exec_distinct_inserts)?;
+            let update_dur = merkle_tree.update(speculative_exec_distinct_writes)?;
+            process_illusion(append_dur + update_dur + speculative_exec_time, &self.delay).await;
+            if !merkle_tree.verify_root(&diem_blk.state_id)? {
+                return Ok(vec![]); // speculative exec results do not match
+            }
+            self.state_merkle.insert(cur_blk_id, merkle_tree.clone()); // TODO: merkle tree copy may be expensive
+
+            new_tail.push((cur_block, cur_block_ctx));
+            // check pending blocks if found
+            (cur_block, cur_block_ctx) = match self.pending_blks.remove(&cur_blk_id) {
+                Some((blk_id, _)) => self.blk_pool.get(&blk_id).unwrap().clone(),
+                None => break,
             }
         }
 
-        let append_dur = merkle_tree.append(speculative_exec_distinct_inserts)?;
-        let update_dur = merkle_tree.update(speculative_exec_distinct_writes)?;
-        process_illusion(append_dur + update_dur + speculative_exec_time, &self.delay).await;
-        if !merkle_tree.verify_root(&diem_blk.state_id)? {
-            return Ok(vec![]); // speculative exec results do not match
-        }
-        self.state_merkle.insert(ctx.id, merkle_tree);
-
-        return Ok(vec![(block, ctx)]);
+        return Ok(new_tail);
     }
 
     async fn handle_pmaker_msg(&mut self, msg: Vec<u8>) -> Result<(), CopycatError> {
@@ -493,10 +560,18 @@ impl BlockManagement for DiemBlockManagement {
 
     async fn handle_peer_blk_req(
         &mut self,
-        _peer: NodeId,
-        _msg: Vec<u8>,
+        peer: NodeId,
+        msg: Vec<u8>,
     ) -> Result<(), CopycatError> {
-        todo!()
+        let blk_id = Hash::from_little_endian(&msg);
+        let blk = match self.blk_pool.get(&blk_id) {
+            Some((blk, _)) => blk.clone(),
+            None => return Ok(()), // block not found
+        };
+
+        self.peer_messenger
+            .send(peer, MsgType::NewBlock { blk })
+            .await
     }
 
     fn report(&mut self) {}

@@ -4,6 +4,7 @@ pub mod transaction;
 pub mod types;
 
 pub use crypto::signature::SignatureScheme;
+pub use crypto::threshold_signature::ThresholdSignatureScheme;
 
 use block::Block;
 use get_size::GetSize;

@@ -136,9 +136,13 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     clients_remainder = params["num-clients"] % params["num-machines"]
 
     if params["single-process-cluster"]:
+        txn_crypto = params["txn-crypto"] if params["txn-crypto"] is not None else params["crypto"]
+        p2p_crypto = params["p2p-crypto"] if params["p2p-crypto"] is not None else params["crypto"]
+
         run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox-workers"], params["chain-type"], 
-                    params["crypto"], params["conn-multiply"], SETUP_TIME, clients_per_machine, clients_remainder, num_accounts, 
-                    max_inflight, frequency, params["conflict_rate"], params["txn-span"], params["disable-txn-dissem"]]
+                    txn_crypto, p2p_crypto, params["threshold-crypto"], params["conn-multiply"], SETUP_TIME, 
+                    clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["conflict_rate"], 
+                    params["txn-span"], params["disable-txn-dissem"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -265,6 +269,9 @@ if __name__ == "__main__":
         "topo-skewness": 0.0, # uniform
         "disable-txn-dissem": False,
         "crypto": "dummy",
+        "txn-crypto": None,
+        "p2p-crypto": None,
+        "threshold-crypto": "dummy",
         "single-process-cluster": True,
         "conn-multiply": 1,
         "per-node-concurrency": 2,

@@ -7,17 +7,19 @@ ID=$2
 THREADS=$3
 MAILBOX_WORKERS=$4
 CHAIN_TYPE=$5
-CRYPTO=$6
-CONN_MULTIPLY=$7
-WARMUP_TIME=$8
-NUM_CLIENTS=$9
-CLIENTS_REMAINDER=${10}
-ACCOUNTS=${11}
-MAX_INFLIGHT=${12}
-FREQUENCY=${13}
-CONFLICT_RATE=${14}
-TXN_SPAN=${15}
-DISABLE_TXN_DISSEM=${16}
+TXN_CRYPTO=$6
+P2P_CRYPTO=$7
+THRESHOLD_CRYPTO=$8
+CONN_MULTIPLY=$9
+WARMUP_TIME=${10}
+NUM_CLIENTS=${11}
+CLIENTS_REMAINDER=${12}
+ACCOUNTS=${13}
+MAX_INFLIGHT=${14}
+FREQUENCY=${15}
+CONFLICT_RATE=${16}
+TXN_SPAN=${17}
+DISABLE_TXN_DISSEM=${18}
 
 export RUST_LOG=info
 export RUST_BACKTRACE=full
@@ -38,6 +40,6 @@ fi
 
 ./blockchain_copycat/target/${BUILDTYPE}/copycat_cluster -i ${ID} -t ${THREADS} \
     -w ${MAILBOX_WORKERS} -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} \
-    --config bench_validators.json -p ${CRYPTO} -o ${CONN_MULTIPLY} -l ${CLIENTS} \
-    -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} -s ${TXN_SPAN} -r ${CONFLICT_RATE}\
-    ${DISABLE_TXN_DISSEM} --topology bench_topo.json
+    --config bench_validators.json -p ${TXN_CRYPTO} -x ${P2P_CRYPTO} -h ${THRESHOLD_CRYPTO} \
+    -o ${CONN_MULTIPLY} -l ${CLIENTS} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} \
+    -s ${TXN_SPAN} -r ${CONFLICT_RATE} ${DISABLE_TXN_DISSEM} --topology bench_topo.json

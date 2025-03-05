@@ -1,38 +1,32 @@
 use super::{SignComb, SignPart, ThresholdSignature};
-use crate::{CopycatError, NodeId};
-
-use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
-
-use k256::ecdsa::{
-    signature::{Signer, Verifier},
-    SigningKey, VerifyingKey,
-};
+use crate::protocol::crypto::{PrivKey, PubKey};
+use crate::{CopycatError, NodeId, SignatureScheme};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-pub struct ECDSAThresholdSignature {
+pub struct SignatureBasedThresholdSignature {
     me: NodeId,
+    signature_scheme: SignatureScheme,
     k: u16,
-    pubkeys: HashMap<NodeId, VerifyingKey>,
-    privkey: SigningKey,
+    pubkeys: HashMap<NodeId, PubKey>,
+    privkey: PrivKey,
 }
 
-impl ECDSAThresholdSignature {
+impl SignatureBasedThresholdSignature {
     pub fn setup(
         nodes: &HashSet<NodeId>,
+        signature_scheme: SignatureScheme,
         k: u16,
         seed: u64,
     ) -> Result<HashMap<NodeId, Arc<dyn ThresholdSignature>>, CopycatError> {
-        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        // let mut rng = ChaCha8Rng::seed_from_u64(seed);
         let mut pubkeys = HashMap::new();
         let mut privkeys = HashMap::new();
         for node in nodes {
-            let signing_key = SigningKey::random(&mut rng);
-            let verifying_key = VerifyingKey::from(&signing_key);
-            privkeys.insert(*node, signing_key);
-            pubkeys.insert(*node, verifying_key);
+            let (pk, sk) = signature_scheme.gen_key_pair(seed + *node as u64);
+            privkeys.insert(*node, pk);
+            pubkeys.insert(*node, sk);
         }
 
         let mut quorum: HashMap<u64, Arc<dyn ThresholdSignature>> = HashMap::new();
@@ -40,6 +34,7 @@ impl ECDSAThresholdSignature {
             let privkey = privkeys.remove(node).unwrap();
             let scheme = Self {
                 me: *node,
+                signature_scheme,
                 k,
                 pubkeys: pubkeys.clone(),
                 privkey,
@@ -51,10 +46,9 @@ impl ECDSAThresholdSignature {
     }
 }
 
-impl ThresholdSignature for ECDSAThresholdSignature {
+impl ThresholdSignature for SignatureBasedThresholdSignature {
     fn sign(&self, input: &[u8]) -> Result<(SignPart, f64), CopycatError> {
-        let signature: k256::ecdsa::Signature = self.privkey.sign(input);
-        Ok((signature.to_vec(), 0f64))
+        self.signature_scheme.sign(&self.privkey, input)
     }
 
     fn aggregate(
@@ -63,7 +57,8 @@ impl ThresholdSignature for ECDSAThresholdSignature {
         parts: &mut HashMap<NodeId, SignPart>,
     ) -> Result<(Option<SignComb>, f64), CopycatError> {
         let mut invalid_list = vec![];
-        for (node, part) in parts.iter() {
+        let mut verification_time = 0f64;
+        for (node, signature) in parts.iter() {
             let pubkey = match self.pubkeys.get(node) {
                 Some(key) => key,
                 None => {
@@ -72,11 +67,21 @@ impl ThresholdSignature for ECDSAThresholdSignature {
                     continue;
                 }
             };
-            let signature: k256::ecdsa::Signature = k256::ecdsa::Signature::from_slice(part)?;
-            if let Err(e) = pubkey.verify(input, &signature) {
-                pf_warn!(self.me; "Drop invalid signature share from Node {}: {:?}", node, e);
-                invalid_list.push(*node);
-                continue;
+
+            match self.signature_scheme.verify(&pubkey, input, &signature) {
+                Ok((result, dur)) => {
+                    verification_time += dur;
+                    if !result {
+                        pf_warn!(self.me; "Drop invalid signature share from Node {}: signature verification failed", node);
+                        invalid_list.push(*node);
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    pf_warn!(self.me; "Drop invalid signature share from Node {}: {:?}", node, e);
+                    invalid_list.push(*node);
+                    continue;
+                }
             }
         }
 
@@ -86,9 +91,9 @@ impl ThresholdSignature for ECDSAThresholdSignature {
 
         if parts.len() < self.k as usize {
             pf_warn!(self.me; "Not enough valid shares");
-            Ok((None, 0f64))
+            Ok((None, verification_time))
         } else {
-            Ok((Some(bincode::serialize(parts)?), 0f64))
+            Ok((Some(bincode::serialize(parts)?), verification_time))
         }
     }
 
@@ -99,30 +104,41 @@ impl ThresholdSignature for ECDSAThresholdSignature {
             return Ok((false, 0f64));
         }
 
-        for (node, part) in parts.iter() {
+        let mut verification_time = 0f64;
+        for (node, signature) in parts.iter() {
             let pubkey = match self.pubkeys.get(node) {
                 Some(key) => key,
                 None => {
                     pf_warn!(self.me; "Invalid signature share from Node {}: unknown node", node);
-                    return Ok((false, 0f64));
+                    return Ok((false, verification_time));
                 }
             };
-            let signature: k256::ecdsa::Signature = k256::ecdsa::Signature::from_slice(part)?;
-            if let Err(e) = pubkey.verify(input, &signature) {
-                pf_warn!(self.me; "Invalid signature share from Node {}: {:?}", node, e);
-                return Ok((false, 0f64));
+
+            match self.signature_scheme.verify(&pubkey, input, &signature) {
+                Ok((result, dur)) => {
+                    verification_time += dur;
+                    if !result {
+                        pf_warn!(self.me; "Drop invalid signature share from Node {}: signature verification failed", node);
+                        return Ok((false, verification_time));
+                    }
+                }
+                Err(e) => {
+                    pf_warn!(self.me; "Invalid signature share from Node {}: {:?}", node, e);
+                    return Ok((false, verification_time));
+                }
             }
         }
 
-        Ok((true, 0f64))
+        Ok((true, verification_time))
     }
 }
 
 #[cfg(test)]
 mod ecdsa_threshold_signature_test {
 
-    use super::ECDSAThresholdSignature;
+    use super::SignatureBasedThresholdSignature;
     use crate::CopycatError;
+    use crate::SignatureScheme;
 
     use bincode;
     use std::collections::{HashMap, HashSet};
@@ -132,7 +148,8 @@ mod ecdsa_threshold_signature_test {
         let message = bincode::serialize("test message content")?;
 
         let nodes = HashSet::from_iter(0..5);
-        let mut schemes = ECDSAThresholdSignature::setup(&nodes, 3, 241241)?;
+        let mut schemes =
+            SignatureBasedThresholdSignature::setup(&nodes, SignatureScheme::ECDSA, 3, 241241)?;
         let scheme0 = schemes.remove(&0).unwrap();
         let scheme2 = schemes.remove(&2).unwrap();
         let scheme3 = schemes.remove(&3).unwrap();

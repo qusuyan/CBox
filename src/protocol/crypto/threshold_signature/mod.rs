@@ -1,8 +1,8 @@
 mod dummy;
-mod ecdsa;
 mod frost;
+mod signature_based;
 
-use crate::{CopycatError, NodeId};
+use crate::{CopycatError, NodeId, SignatureScheme};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -14,6 +14,7 @@ pub enum ThresholdSignatureScheme {
     Dummy,
     FROST,
     ECDSA,
+    DummyECDSA,
 }
 
 impl ThresholdSignatureScheme {
@@ -29,7 +30,20 @@ impl ThresholdSignatureScheme {
                 Ok(frost::FrostThresholdSignature::setup(nodes, k, seed)?)
             }
             ThresholdSignatureScheme::ECDSA => {
-                Ok(ecdsa::ECDSAThresholdSignature::setup(nodes, k, seed)?)
+                Ok(signature_based::SignatureBasedThresholdSignature::setup(
+                    nodes,
+                    SignatureScheme::ECDSA,
+                    k,
+                    seed,
+                )?)
+            }
+            ThresholdSignatureScheme::DummyECDSA => {
+                Ok(signature_based::SignatureBasedThresholdSignature::setup(
+                    nodes,
+                    SignatureScheme::DummyECDSA,
+                    k,
+                    seed,
+                )?)
             }
         }
     }
