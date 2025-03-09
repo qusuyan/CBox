@@ -70,7 +70,8 @@ fn main() {
             return;
         }
     };
-    let pipe_info = config::parse_network_config(&nodes, network_config);
+    let (nic_egress_info, pipe_info, nic_ingress_info) =
+        config::parse_network_config(&nodes, network_config);
 
     let num_threads = if args.num_threads > 0 {
         args.num_threads
@@ -90,7 +91,9 @@ fn main() {
         let mailbox = match Mailbox::init::<MsgType>(
             id,
             machine_list,
+            nic_egress_info,
             pipe_info,
+            nic_ingress_info,
             args.num_mailbox_workers,
             args.num_conn_per_peer,
         )

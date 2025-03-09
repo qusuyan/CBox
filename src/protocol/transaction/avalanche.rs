@@ -16,6 +16,7 @@ pub enum AvalancheTxn {
         out_utxo: u64,               // how much money will be sent to the receiver
         remainder: u64,              // how much money left
         sender_signature: Signature, // signature of sender
+        payload_size: usize,         // size of the payload
     },
     // used only for setup
     Grant {
@@ -55,6 +56,15 @@ impl AvalancheTxn {
                 unreachable!("Validating Noop / PlaceHolder txns")
             }
         }
+    }
+
+    pub fn get_size(&self) -> usize {
+        let mut size = GetSize::get_size(self);
+        if let AvalancheTxn::Send { payload_size, .. } = self {
+            size -= GetSize::get_size(payload_size);
+            size += payload_size;
+        }
+        size
     }
 }
 

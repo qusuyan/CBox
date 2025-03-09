@@ -82,7 +82,9 @@ fn get_blk_creation(
         ChainConfig::Bitcoin { config } => {
             bitcoin::new(id, config, delay, core_group, peer_messenger)
         }
-        ChainConfig::Avalanche { config } => avalanche::new(id, config, peer_messenger),
+        ChainConfig::Avalanche { config } => {
+            avalanche::new(id, p2p_signature, config, peer_messenger, delay)
+        }
         ChainConfig::ChainReplication { config } => {
             Box::new(ChainReplicationBlockManagement::new(id, config))
         }

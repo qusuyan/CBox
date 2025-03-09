@@ -179,7 +179,7 @@ fn main() {
             return;
         }
     };
-    let pipe_info = mailbox::config::parse_network_config(&nodes, network_config);
+    let (nic_egress_info, pipe_info, nic_ingress_info) = mailbox::config::parse_network_config(&nodes, network_config);
 
     // get node parameters
 
@@ -261,7 +261,7 @@ fn main() {
 
     runtime.block_on(async {
         // start mailbox
-        let _mailbox = match Mailbox::init::<MsgType>(id, machine_list, pipe_info, args.num_mailbox_workers, args.num_conn_per_peer).await {
+        let _mailbox = match Mailbox::init::<MsgType>(id, machine_list, nic_egress_info, pipe_info, nic_ingress_info, args.num_mailbox_workers, args.num_conn_per_peer).await {
             Ok(mailbox) => mailbox,
             Err(e) => {
                 log::error!("Mailbox initialization failed with error {:?}", e);

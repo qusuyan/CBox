@@ -69,6 +69,10 @@ impl DiemDecision {
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
         delay: Arc<AtomicF64>,
     ) -> Self {
+        let basic_config = match config {
+            DiemConfig::Basic { config } => config,
+        };
+
         let (signature_scheme, peer_pks, sk) = p2p_signature;
         let mut state_id_map = HashMap::new();
         // add genesis block
@@ -85,8 +89,8 @@ impl DiemDecision {
 
         Self {
             id,
-            _proposal_timeout_secs: config.proposal_timeout_secs,
-            _vote_timeout_secs: config.vote_timeout_secs,
+            _proposal_timeout_secs: basic_config.proposal_timeout_secs,
+            _vote_timeout_secs: basic_config.vote_timeout_secs,
             blk_pool: HashMap::new(),
             commit_queue: HashMap::new(),
             next_commit_height: 2,
@@ -222,9 +226,14 @@ impl Decision for DiemDecision {
             let parent_height = self.get_height(parent_blk_id)?;
             self.blk_pool
                 .insert(ctx.id, (blk.clone(), ctx.clone(), parent_height + 1));
-            let qc_round = diem_blk.qc.vote_info.round;
-
             self.state_id_map.insert(ctx.id, diem_blk.state_id);
+
+            // Block Manager decides to vote down
+            if ctx.invalid {
+                continue;
+            }
+
+            let qc_round = diem_blk.qc.vote_info.round;
 
             // commit grandparent block (diem_blk.qc.vote_info.parent_id)
             self.process_certificate_qc(&diem_blk.qc).await?;
@@ -304,6 +313,7 @@ impl Decision for DiemDecision {
             if next_leader == self.id {
                 let qc = self.add_vote(vote_msg).await?;
                 if let Some(qc) = qc {
+                    pf_debug!(self.id; "Combined signatues to quorum certificate: {:?}", qc);
                     self.process_certificate_qc(&qc).await?;
                     self.pmaker_feedback_send
                         .send(bincode::serialize(&qc)?)
@@ -355,6 +365,7 @@ impl Decision for DiemDecision {
         }
         let qc = self.add_vote(vote_msg).await?;
         if let Some(qc) = qc {
+            pf_debug!(self.id; "Combined signatues to quorum certificate: {:?}", qc);
             self.process_certificate_qc(&qc).await?;
             self.pmaker_feedback_send
                 .send(bincode::serialize(&qc)?)

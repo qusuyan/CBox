@@ -424,6 +424,7 @@ impl Decision for AvalancheDecision {
                 proposer,
                 id,
                 depth,
+                ..
             } => {
                 assert!(depth == 0);
                 (proposer, id)

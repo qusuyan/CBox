@@ -280,7 +280,7 @@ impl BlockManagement for BitcoinBlockManagement {
                             if *remainder > 0 {
                                 self.new_utxo.insert((txn_hash.clone(), sender.clone()));
                             }
-                            self.cur_block_size += txn.get_size();
+                            self.cur_block_size += GetSize::get_size(txn.as_ref());
                             modified = true;
                         } else {
                             self.pending_txns.push_back(txn_hash); // some dependencies might be missing, retry later
@@ -364,7 +364,7 @@ impl BlockManagement for BitcoinBlockManagement {
             self.utxo.remove(&utxo);
         }
         let (pow_start_time, pow_time) = self.pow_time.unwrap();
-        pf_info!(
+        pf_debug!(
             self.id;
             "Block {} at height {}, pow actually takes {} sec, pow takes {} sec, compute power is {}, actual block size is {}+{}={}, block len is {}, block_size is {}, {} pending txns left ({:?})",
             hash,

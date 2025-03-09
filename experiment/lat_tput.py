@@ -5,7 +5,8 @@ import pandas as pd
 
 lat_file_regex = "copycat_cluster_[\d+]_lat.csv"
 
-exp_dir = "results/Avax-Latency/"
+# exp_dir = "results/Avax-Latency/"
+exp_dir = "results/HotStuff-Perf"
 
 records = []
 result_dirs = os.listdir(exp_dir)
@@ -36,5 +37,6 @@ for result_dir in result_dirs:
     records.append((config["max-inflight-txns"], stats["avg_tput"], avg_lat, p99_lat))
 
 df = pd.DataFrame(records, columns=["txns", "tput", "avg_lat", "p99_lat"])
+df = df.groupby("txns").mean()
 df = df.sort_values("txns")
 print(df)

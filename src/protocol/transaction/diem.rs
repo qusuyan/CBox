@@ -5,7 +5,7 @@ use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
 // https://github.com/diem/diem/blob/latest/types/src/transaction/mod.rs
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, GetSize)]
 pub enum DiemTxn {
     Txn {
         sender: u64, // address
@@ -29,7 +29,7 @@ pub enum DiemTxn {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, GetSize)]
 pub struct DiemPayload {
     pub script_bytes: usize,
     pub script_runtime_sec: f64,
@@ -74,11 +74,77 @@ impl DiemTxn {
     }
 
     pub fn get_size(&self) -> usize {
-        let mut size = GetSize::get_size(&self);
+        let mut size = GetSize::get_size(self);
         if let DiemTxn::Txn { payload, .. } = self {
-            size -= GetSize::get_size(&payload);
+            size -= GetSize::get_size(payload);
             size += payload.script_bytes;
         }
         size
+    }
+}
+
+#[cfg(test)]
+mod diem_txn_test {
+
+    use super::{super::Txn, DiemPayload, DiemTxn};
+    use crate::protocol::crypto::signature::SignatureScheme;
+    use crate::CopycatError;
+
+    use get_size::GetSize;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_txn_size_correct() -> Result<(), CopycatError> {
+        let expected_size = 1024;
+        let script_size = expected_size - 203;
+
+        let scheme = SignatureScheme::DummyECDSA;
+        let (pk, sk) = scheme.gen_key_pair(0);
+        let data = (
+            0u64,
+            0u64,
+            DiemPayload {
+                script_bytes: script_size,
+                script_runtime_sec: 0f64,
+                script_succeed: true,
+                distinct_writes: 3,
+            },
+            5,
+            0,
+            "XUS".to_owned(),
+            1611792876,
+            4,
+        );
+        let serialized = bincode::serialize(&data)?;
+        let (signature, _) = scheme.sign(&sk, &serialized)?;
+        let (
+            sender,
+            seqno,
+            payload,
+            max_gas_amount,
+            gas_unit_price,
+            gas_currency_code,
+            expiration_timestamp_secs,
+            chain_id,
+        ) = data;
+
+        let diem_txn = DiemTxn::Txn {
+            sender, // address
+            seqno,
+            payload,
+            max_gas_amount,
+            gas_unit_price,
+            gas_currency_code,
+            expiration_timestamp_secs,
+            chain_id,
+            sender_key: pk,
+            signature,
+        };
+
+        let txn = Arc::new(Txn::Diem { txn: diem_txn });
+
+        assert!(txn.get_size() == expected_size);
+
+        Ok(())
     }
 }

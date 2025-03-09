@@ -174,8 +174,8 @@ impl FlowGen for BitcoinFlowGen {
                         out_utxo,
                         remainder,
                         sender_signature,
-                        script_bytes: 400,
-                        script_runtime_sec: 1f64,
+                        script_bytes: 0,
+                        script_runtime_sec: 0f64,
                         script_succeed: true,
                     },
                 });

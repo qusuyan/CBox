@@ -90,7 +90,9 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         network_config = {
             "default_delay_millis": params["network-delay"],
             "default_bandwidth": params["network-bw"],
-            "pipes": []
+            "default_nic_bandwidth": params["nic-bw"],
+            "pipes": [],
+            "nics": []
         }
         network_config_file = "bench_network.json"
         with open(network_config_file, "w") as f:
@@ -252,7 +254,8 @@ if __name__ == "__main__":
         "mailbox-threads": 8,
         "cluster-threads": 40,
         "network-delay": 30, # in millis
-        "network-bw": 100000000, # in B/s
+        "network-bw": 12500000, # 100 Mbps = 12.5 MB/s
+        "nic-bw": 12500000,
         "chain-type": "bitcoin",
         "exp-time": 300, # in s
         "num-accounts": 10000,

@@ -82,8 +82,8 @@ pub enum AvalancheConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
 pub struct AvalancheBasicConfig {
-    #[serde(default = "AvalancheBasicConfig::get_default_blk_len")]
-    pub blk_len: usize,
+    #[serde(default = "AvalancheBasicConfig::get_default_blk_size")]
+    pub blk_size: usize,
     #[serde(default = "AvalancheBasicConfig::get_default_k")]
     pub k: usize,
     #[serde(default = "AvalancheBasicConfig::get_default_alpha")]
@@ -106,7 +106,7 @@ pub struct AvalancheBasicConfig {
 impl Default for AvalancheBasicConfig {
     fn default() -> Self {
         Self {
-            blk_len: 40,
+            blk_size: 0x100000 / 40,
             k: 10,
             alpha: 0.8,
             beta1: 11,
@@ -139,19 +139,24 @@ impl Default for ChainReplicationConfig {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum DiemConfig {
+    Basic { config: DiemBasicConfig },
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
-pub struct DiemConfig {
-    #[serde(default = "DiemConfig::get_default_blk_size")]
+pub struct DiemBasicConfig {
+    #[serde(default = "DiemBasicConfig::get_default_blk_size")]
     pub blk_size: usize,
-    #[serde(default = "DiemConfig::get_default_proposal_timeout_secs")]
+    #[serde(default = "DiemBasicConfig::get_default_proposal_timeout_secs")]
     pub proposal_timeout_secs: f64,
-    #[serde(default = "DiemConfig::get_default_vote_timeout_secs")]
+    #[serde(default = "DiemBasicConfig::get_default_vote_timeout_secs")]
     pub vote_timeout_secs: f64,
-    #[serde(default = "DiemConfig::get_default_txn_dissem")]
+    #[serde(default = "DiemBasicConfig::get_default_txn_dissem")]
     pub txn_dissem: DissemPattern,
 }
 
-impl Default for DiemConfig {
+impl Default for DiemBasicConfig {
     fn default() -> Self {
         Self {
             blk_size: 0x100000,
@@ -244,7 +249,9 @@ impl ChainConfig {
                 AvalancheConfig::VoteNo { .. } => DissemPattern::Passthrough,
             },
             ChainConfig::ChainReplication { .. } => DissemPattern::Passthrough,
-            ChainConfig::Diem { config } => config.txn_dissem.clone(),
+            ChainConfig::Diem { config } => match config {
+                DiemConfig::Basic { config } => config.txn_dissem.clone(),
+            },
         }
     }
 

@@ -8,13 +8,15 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TxnCtx {
     pub id: Hash,
 }
 
+#[derive(Eq, PartialEq)]
 pub struct BlkCtx {
     pub id: Hash,
+    pub invalid: bool,
     pub txn_ctx: Vec<Arc<TxnCtx>>,
 }
 
@@ -36,6 +38,7 @@ impl BlkCtx {
 
         Ok(BlkCtx {
             id: blk_id,
+            invalid: false,
             txn_ctx,
         })
     }
@@ -48,8 +51,25 @@ impl BlkCtx {
 
         Ok(BlkCtx {
             id: blk_id,
+            invalid: false,
             txn_ctx,
         })
+    }
+
+    pub fn from_id_and_txns(id: Hash, txn_ctx: Vec<Arc<TxnCtx>>) -> Self {
+        BlkCtx {
+            id,
+            invalid: false,
+            txn_ctx,
+        }
+    }
+
+    pub fn invalidate(&self) -> Self {
+        Self {
+            id: self.id,
+            invalid: true,
+            txn_ctx: self.txn_ctx.clone(),
+        }
     }
 }
 

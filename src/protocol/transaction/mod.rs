@@ -49,8 +49,8 @@ impl Txn {
 impl GetSize for Txn {
     fn get_size(&self) -> usize {
         match self {
-            Txn::Dummy { txn } => txn.get_size(),
-            Txn::Avalanche { txn } => txn.get_size(),
+            Txn::Dummy { txn } => DummyTxn::get_size(&txn),
+            Txn::Avalanche { txn } => AvalancheTxn::get_size(&txn),
             Txn::Bitcoin { txn } => BitcoinTxn::get_size(&txn),
             Txn::Diem { txn } => DiemTxn::get_size(&txn),
         }

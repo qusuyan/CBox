@@ -384,6 +384,7 @@ impl Decision for BlizzardDecision {
                 proposer,
                 id,
                 depth,
+                ..
             } => {
                 assert!(depth == 0);
                 (proposer, id)

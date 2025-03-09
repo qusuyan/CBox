@@ -149,10 +149,10 @@ impl FlowGen for DiemFlowGen {
                 *sender_addr,
                 *sender_seq_no,
                 DiemPayload {
-                    script_bytes: 400,
+                    script_bytes: 16,
                     script_runtime_sec: 0f64,
                     script_succeed: true,
-                    distinct_writes: 3,
+                    distinct_writes: 1,
                 },
                 5,
                 0,

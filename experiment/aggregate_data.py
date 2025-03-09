@@ -24,8 +24,11 @@ import pandas as pd
 # exp_dir = "results/Avax-Faulty/"
 # configs = ["correct-type", "num-faulty"]
 
-exp_dir = "results/Diem-Scale/"
-configs = ["num-nodes", "per-node-concurrency"]
+# exp_dir = "results/Diem-Scale-NIC1Gbps/"
+# configs = ["num-nodes", "per-node-concurrency"]
+
+exp_dir = "results/Crosschain-Scale"
+configs = ["chain-type", "num-nodes"]
 
 metrics = ["avg_tput", "avg_cpu", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms"]
 

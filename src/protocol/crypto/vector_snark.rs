@@ -12,6 +12,7 @@ pub struct DummyMerkleTree {
 }
 
 impl DummyMerkleTree {
+    // const TIMEOUT_PER_LEAF: f64 = 0f64; // for experiments without Merkle Tree
     const TIMEOUT_PER_LEAF: f64 = 1.23e-5; // from experiment with rs-merkle crate
 
     pub fn new() -> Self {

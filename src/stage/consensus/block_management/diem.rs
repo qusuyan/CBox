@@ -18,7 +18,7 @@ use crate::{CopycatError, NodeId, SignatureScheme};
 
 use atomic_float::AtomicF64;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Notify;
 
@@ -35,11 +35,13 @@ pub struct DiemBlockManagement {
     state_merkle: HashMap<Hash, DummyMerkleTree>,
     // mempool
     pending_txns: VecDeque<Hash>,
+    pending_txns_pool: HashSet<Hash>,
     // consensus info
     current_round: u64,
     high_qc: QuorumCert,
     high_commit_qc: QuorumCert,
-    last_tc: Option<Option<TimeCert>>, // outer option indicates if should start new round
+    last_tc: Option<TimeCert>,
+    should_propose: bool,
     // p2p communication
     all_nodes: Vec<NodeId>,
     peer_messenger: Arc<PeerMessenger>,
@@ -63,6 +65,10 @@ impl DiemBlockManagement {
         delay: Arc<AtomicF64>,
         peer_messenger: Arc<PeerMessenger>,
     ) -> Self {
+        let basic_config = match config {
+            DiemConfig::Basic { config } => config,
+        };
+
         let (signature_scheme, peer_pks, sk) = p2p_signature;
 
         let mut all_nodes: Vec<NodeId> = peer_pks.keys().cloned().collect();
@@ -70,15 +76,10 @@ impl DiemBlockManagement {
 
         let genesis_qc = GENESIS_QC.clone();
         let current_round = 2;
-        let last_tc = if DiemPacemaker::get_leader(current_round, &all_nodes) == id {
-            Some(None)
-        } else {
-            None
-        };
 
         Self {
             id,
-            blk_size: config.blk_size,
+            blk_size: basic_config.blk_size,
             delay,
             peer_messenger,
             txn_pool: HashMap::new(),
@@ -86,10 +87,12 @@ impl DiemBlockManagement {
             accounts: HashMap::new(),
             state_merkle: HashMap::new(),
             pending_txns: VecDeque::new(),
+            pending_txns_pool: HashSet::new(),
             current_round, // reserve round 0 and 1 for genesis
             high_qc: genesis_qc.clone(),
             high_commit_qc: genesis_qc,
-            last_tc,
+            last_tc: None,
+            should_propose: DiemPacemaker::get_leader(current_round, &all_nodes) == id,
             all_nodes,
             signature_scheme,
             peer_pks,
@@ -116,7 +119,7 @@ impl DiemBlockManagement {
             if chain_tail != GENESIS_VOTE_INFO.blk_id
                 && !self.state_merkle.contains_key(&chain_tail)
             {
-                self.request_blk(&chain_tail).await?;
+                self.request_blk(&chain_tail, qc_round).await?;
             }
         }
 
@@ -132,7 +135,7 @@ impl DiemBlockManagement {
         if let Some(tc) = tc {
             let tc_round = tc.round;
             if tc_round >= self.current_round {
-                self.last_tc = Some(Some(tc.clone()));
+                self.last_tc = Some(tc.clone());
                 self.current_round = tc_round + 1;
             }
         }
@@ -201,11 +204,13 @@ impl DiemBlockManagement {
         Ok((true, verify_time))
     }
 
-    async fn request_blk(&self, blk_id: &Hash) -> Result<(), CopycatError> {
+    async fn request_blk(&self, blk_id: &Hash, round: u64) -> Result<(), CopycatError> {
+        let leader = DiemPacemaker::get_leader(round, &self.all_nodes);
+        pf_debug!(self.id; "requesting block {} from leader {}", blk_id, leader);
         let mut msg = vec![0u8; 32];
         blk_id.to_little_endian(&mut msg);
         self.peer_messenger
-            .broadcast(MsgType::BlockReq { msg })
+            .send(leader, MsgType::BlockReq { msg })
             .await
     }
 }
@@ -224,6 +229,7 @@ impl BlockManagement for DiemBlockManagement {
 
         self.txn_pool.insert(txn_id.clone(), (txn, ctx));
         self.pending_txns.push_back(txn_id);
+        self.pending_txns_pool.insert(txn_id);
         Ok(true)
     }
 
@@ -235,7 +241,7 @@ impl BlockManagement for DiemBlockManagement {
     // when we receive a new QC from pmaker
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         loop {
-            if self.last_tc.is_some() {
+            if self.should_propose {
                 let chain_tail = self.high_qc.vote_info.blk_id;
                 if chain_tail == GENESIS_VOTE_INFO.blk_id
                     || self.state_merkle.contains_key(&chain_tail)
@@ -253,7 +259,7 @@ impl BlockManagement for DiemBlockManagement {
         let mut txn_ctxs = vec![];
         let mut blk_size = 0usize;
         let mut speculative_exec_time = 0f64;
-        let mut speculative_exec_distinct_writes = 0usize;
+        let mut speculative_exec_distinct_writes = 1usize; // 1 for proposer receiving gas
         let mut speculative_exec_distinct_inserts = 0usize;
 
         // speculative execute
@@ -272,12 +278,11 @@ impl BlockManagement for DiemBlockManagement {
                 None => break, // no pending txns
             };
 
-            let (next_txn, next_txn_ctx) = self.txn_pool.get(&next_txn_id).unwrap();
-            // block is full
-            let txn_size = next_txn.get_size();
-            if blk_size + txn_size > self.blk_size {
-                break;
+            if self.pending_txns_pool.remove(&next_txn_id) == false {
+                continue; // txn already processed
             }
+
+            let (next_txn, next_txn_ctx) = self.txn_pool.get(&next_txn_id).unwrap();
 
             let diem_txn = match next_txn.as_ref() {
                 Txn::Diem { txn } => txn,
@@ -305,7 +310,8 @@ impl BlockManagement for DiemBlockManagement {
                     if !payload.script_succeed {
                         continue; // invalid txn
                     }
-                    speculative_exec_distinct_writes += payload.distinct_writes;
+                    // +1 for sender paying gas from balance
+                    speculative_exec_distinct_writes += payload.distinct_writes + 1;
                 }
                 DiemTxn::Grant {
                     receiver,
@@ -326,9 +332,15 @@ impl BlockManagement for DiemBlockManagement {
                 },
             }
 
+            let txn_size = GetSize::get_size(next_txn.as_ref());
             txns.push(next_txn.clone());
             txn_ctxs.push(next_txn_ctx.clone());
             blk_size += txn_size;
+
+            // block is full
+            if blk_size >= self.blk_size {
+                break;
+            }
         }
 
         let append_dur = merkle_tree.append(speculative_exec_distinct_inserts)?;
@@ -347,7 +359,7 @@ impl BlockManagement for DiemBlockManagement {
 
         let serialized = bincode::serialize(&diem_blk_id)?;
         let (signature, dur) = self.signature_scheme.sign(&self.sk, &serialized)?;
-        let last_tc = std::mem::replace(&mut self.last_tc, None).unwrap();
+        let last_tc = std::mem::replace(&mut self.last_tc, None);
         process_illusion(dur, &self.delay).await;
         let blk_header = BlockHeader::Diem {
             block: diem_blk,
@@ -359,13 +371,12 @@ impl BlockManagement for DiemBlockManagement {
             header: blk_header,
             txns,
         });
-        let blk_ctx = Arc::new(BlkCtx {
-            id: diem_blk_id,
-            txn_ctx: txn_ctxs,
-        });
+        let blk_ctx = Arc::new(BlkCtx::from_id_and_txns(diem_blk_id, txn_ctxs));
 
         self.blk_pool
             .insert(diem_blk_id, (blk.clone(), blk_ctx.clone()));
+
+        self.should_propose = false;
 
         Ok((blk, blk_ctx))
     }
@@ -433,8 +444,8 @@ impl BlockManagement for DiemBlockManagement {
             return Ok(vec![]);
         }
 
-        let leader = DiemPacemaker::get_leader(self.current_round, &self.all_nodes);
-        if diem_blk.round != self.current_round || src != leader || diem_blk.proposer != leader {
+        let leader = DiemPacemaker::get_leader(diem_blk.round, &self.all_nodes);
+        if diem_blk.proposer != leader || src != leader {
             return Ok(vec![]);
         }
 
@@ -442,17 +453,18 @@ impl BlockManagement for DiemBlockManagement {
 
         // speculative exec
         let mut speculative_exec_time = 0f64;
-        let mut speculative_exec_distinct_writes = 0usize;
+        let mut speculative_exec_distinct_writes = 1usize;
         let mut speculative_exec_distinct_inserts = 0usize;
 
         let parent_id = &diem_blk.qc.vote_info.blk_id;
+        let parent_round = diem_blk.qc.vote_info.round;
         let mut merkle_tree = if *parent_id == GENESIS_VOTE_INFO.blk_id {
             DummyMerkleTree::new()
         } else {
             match self.state_merkle.get(parent_id) {
                 Some(merkle_tree) => merkle_tree.clone(),
                 None => {
-                    self.request_blk(parent_id).await?; // missing parent block, will continue validate when we get all dependencies
+                    self.request_blk(parent_id, parent_round).await?; // missing parent block, will continue validate when we get all dependencies
                     match self.pending_blks.entry(*parent_id) {
                         Entry::Occupied(mut e) => {
                             let (blk_id, round) = e.get_mut();
@@ -482,6 +494,11 @@ impl BlockManagement for DiemBlockManagement {
                 _ => unreachable!(),
             };
             let cur_blk_id = cur_block_ctx.id;
+            cur_block_ctx = if diem_blk.round == self.current_round {
+                cur_block_ctx
+            } else {
+                Arc::new(cur_block_ctx.invalidate())
+            };
 
             for txn in &cur_block.txns {
                 let diem_txn = match txn.as_ref() {
@@ -510,7 +527,8 @@ impl BlockManagement for DiemBlockManagement {
                         if !payload.script_succeed {
                             return Ok(vec![]); // invalid txn
                         }
-                        speculative_exec_distinct_writes += payload.distinct_writes;
+                        // +1 for sender paying gas from balance
+                        speculative_exec_distinct_writes += payload.distinct_writes + 1;
                     }
                     DiemTxn::Grant {
                         receiver,
@@ -538,8 +556,13 @@ impl BlockManagement for DiemBlockManagement {
             if !merkle_tree.verify_root(&diem_blk.state_id)? {
                 return Ok(vec![]); // speculative exec results do not match
             }
+            pf_debug!(self.id; "validated block {}", cur_blk_id);
             self.state_merkle.insert(cur_blk_id, merkle_tree.clone()); // TODO: merkle tree copy may be expensive
 
+            // remove txns from mempool
+            for txn_ctx in &cur_block_ctx.txn_ctx {
+                self.pending_txns_pool.remove(&txn_ctx.id);
+            }
             new_tail.push((cur_block, cur_block_ctx));
             // check pending blocks if found
             (cur_block, cur_block_ctx) = match self.pending_blks.remove(&cur_blk_id) {
@@ -548,13 +571,13 @@ impl BlockManagement for DiemBlockManagement {
             }
         }
 
-        return Ok(new_tail);
+        Ok(new_tail)
     }
 
     async fn handle_pmaker_msg(&mut self, msg: Vec<u8>) -> Result<(), CopycatError> {
         let qc: QuorumCert = bincode::deserialize(&msg)?;
         self.process_certificate_qc(&qc).await?;
-        self.last_tc = Some(None);
+        self.should_propose = true;
         Ok(())
     }
 
@@ -569,10 +592,137 @@ impl BlockManagement for DiemBlockManagement {
             None => return Ok(()), // block not found
         };
 
+        pf_debug!(self.id; "sending block {} to {}", blk_id, peer);
+
         self.peer_messenger
             .send(peer, MsgType::NewBlock { blk })
             .await
     }
 
     fn report(&mut self) {}
+}
+
+#[cfg(test)]
+mod diem_block_management_test {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+
+    use super::DiemBlockManagement;
+    use crate::config::DiemConfig;
+    use crate::context::BlkCtx;
+    use crate::peers::PeerMessenger;
+    use crate::protocol::block::{Block, BlockHeader};
+    use crate::protocol::crypto::{sha256, Hash};
+    use crate::protocol::types::diem::{
+        DiemBlock, LedgerCommitInfo, QuorumCert, VoteInfo, GENESIS_QC,
+    };
+    use crate::stage::consensus::block_management::BlockManagement;
+    use crate::stage::pacemaker::diem::DiemPacemaker;
+    use crate::{CopycatError, NodeId, SignatureScheme, ThresholdSignatureScheme};
+
+    use atomic_float::AtomicF64;
+
+    #[tokio::test]
+    async fn test_blocks_arrive_out_of_order() -> Result<(), CopycatError> {
+        let p2p_signature_scheme = SignatureScheme::Dummy;
+        let threshold_signature_scheme = ThresholdSignatureScheme::Dummy;
+
+        let node_list = vec![0, 1, 2, 3];
+
+        let all_nodes = HashSet::from_iter(node_list.iter().cloned());
+        let p2p_signature = p2p_signature_scheme.gen_p2p_signature(0, all_nodes.iter());
+        let threshold_signatures =
+            threshold_signature_scheme.to_threshold_signature(&all_nodes, 3, 0)?;
+        let threshold_signature = threshold_signatures.get(&0).unwrap().clone();
+
+        let config = DiemConfig::Basic {
+            config: Default::default(),
+        };
+        let delay = Arc::new(AtomicF64::new(0f64));
+        let peer_messenger = PeerMessenger::new_stub();
+
+        let mut diem = DiemBlockManagement::new(
+            0,
+            p2p_signature,
+            threshold_signature,
+            config,
+            delay,
+            Arc::new(peer_messenger),
+        );
+
+        let blk1_leader = DiemPacemaker::get_leader(2, &node_list);
+        let diem_blk1 = DiemBlock {
+            proposer: blk1_leader,
+            round: 2,
+            state_id: Hash::zero(),
+            qc: GENESIS_QC.clone(),
+        };
+        let blk1_header = BlockHeader::Diem {
+            block: diem_blk1,
+            last_round_tc: None,
+            high_commit_qc: GENESIS_QC.clone(),
+            signature: vec![],
+        };
+        let blk1 = Arc::new(Block {
+            header: blk1_header,
+            txns: vec![],
+        });
+        let blk1_ctx = Arc::new(BlkCtx::from_blk(&blk1)?);
+
+        let blk2_leader = DiemPacemaker::get_leader(3, &node_list);
+        let blk1_qc_vinfo = VoteInfo {
+            blk_id: blk1_ctx.id,
+            round: 2,
+            parent_id: GENESIS_QC.vote_info.blk_id,
+            parent_round: GENESIS_QC.vote_info.round,
+            exec_state_hash: Hash::zero(),
+        };
+        let blk1_qc_vinfo_hash = sha256(&blk1_qc_vinfo)?;
+        let mut blk1_qc_signatures = (1..4 as NodeId)
+            .map(|node| (node, vec![]))
+            .collect::<HashMap<_, _>>();
+        let blk2_leader_thresh = threshold_signatures.get(&blk2_leader).unwrap();
+        let (blk1_qc_signatures_agg, _) =
+            blk2_leader_thresh.aggregate(&[0], &mut blk1_qc_signatures)?;
+        let blk1_qc = QuorumCert {
+            vote_info: blk1_qc_vinfo,
+            commit_info: LedgerCommitInfo {
+                commit_state_id: None,
+                vote_info_hash: blk1_qc_vinfo_hash,
+            },
+            signatures: blk1_qc_signatures_agg.unwrap(),
+            author: blk2_leader,
+            author_signature: vec![],
+        };
+        let diem_blk2 = DiemBlock {
+            proposer: blk2_leader,
+            round: 3,
+            state_id: Hash::zero(),
+            qc: blk1_qc,
+        };
+        let blk2_header = BlockHeader::Diem {
+            block: diem_blk2,
+            last_round_tc: None,
+            high_commit_qc: GENESIS_QC.clone(),
+            signature: vec![],
+        };
+        let blk2 = Arc::new(Block {
+            header: blk2_header,
+            txns: vec![],
+        });
+        let blk2_ctx = Arc::new(BlkCtx::from_blk(&blk2)?);
+
+        assert!(diem
+            .validate_block(blk2_leader, blk2, blk2_ctx.clone())
+            .await?
+            .is_empty());
+        let ret = diem
+            .validate_block(blk1_leader, blk1, blk1_ctx.clone())
+            .await?;
+        assert!(ret.len() == 2);
+        assert!(ret[0].1 == blk1_ctx);
+        assert!(ret[1].1 == blk2_ctx);
+
+        Ok(())
+    }
 }

@@ -3,18 +3,24 @@ use crate::config::AvalancheBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::Hash;
+use crate::protocol::crypto::signature::P2PSignature;
+use crate::protocol::crypto::vector_snark::DummyMerkleTree;
+use crate::protocol::crypto::{Hash, PrivKey, PubKey, Signature};
 use crate::protocol::transaction::{AvalancheTxn, Txn};
+use crate::stage::process_illusion;
 use crate::utils::{CopycatError, NodeId};
+use crate::SignatureScheme;
 
 use async_trait::async_trait;
 
-use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
+use atomic_float::AtomicF64;
+use get_size::GetSize;
+use serde::{Deserialize, Serialize};
 
 struct DagNode {
     pub num_parents: usize,
@@ -31,19 +37,27 @@ struct PeerReq {
 
 pub struct AvalancheBlockManagement {
     id: NodeId,
-    blk_len: usize,
+    blk_size: usize,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     txn_dag: HashMap<Hash, DagNode>,
     dag_frontier: VecDeque<Hash>,
     // fields for constructing new batch of txns
     blk_counter: u64,
     curr_batch: Vec<Hash>,
+    curr_batch_size: usize,
     next_propose_time: Instant,
     proposal_timeout: Duration,
     _notify: Notify,
     // for requesting missing txns
     peer_messenger: Arc<PeerMessenger>,
-    pending_blks: HashMap<(NodeId, u64, usize), (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>, Vec<usize>)>,
+    pending_blks: HashMap<
+        (NodeId, u64, usize),
+        (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>, Vec<usize>, Hash, Signature),
+    >,
+    delay: Arc<AtomicF64>,
+    signature_scheme: SignatureScheme,
+    peer_pks: HashMap<NodeId, PubKey>,
+    sk: PrivKey,
     // for control loop
     blk_quota: usize,
     // for reporting data and debugging
@@ -55,27 +69,37 @@ pub struct AvalancheBlockManagement {
 impl AvalancheBlockManagement {
     pub fn new(
         id: NodeId,
+        p2p_signature: P2PSignature,
         config: AvalancheBasicConfig,
         peer_messenger: Arc<PeerMessenger>,
+        delay: Arc<AtomicF64>,
     ) -> Self {
         let proposal_timeout = Duration::from_secs_f64(config.proposal_timeout_secs);
+
+        let (signature_scheme, peer_pks, sk) = p2p_signature;
+
         Self {
             id,
-            blk_len: config.blk_len,
+            blk_size: config.blk_size,
             txn_pool: HashMap::new(),
             txn_dag: HashMap::new(),
             dag_frontier: VecDeque::new(),
             blk_counter: 0,
             curr_batch: vec![],
+            curr_batch_size: 0,
             next_propose_time: Instant::now() + proposal_timeout,
             proposal_timeout,
             _notify: Notify::new(),
             peer_messenger,
             pending_blks: HashMap::new(),
+            signature_scheme,
+            peer_pks,
+            sk,
             blk_quota: 0,
             blk_quota_recved: 0,
             blk_queries_sent: 0,
             txns_queried: 0,
+            delay,
         }
     }
 }
@@ -213,7 +237,7 @@ impl BlockManagement for AvalancheBlockManagement {
 
     async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError> {
         let blk_full = loop {
-            if self.curr_batch.len() >= self.blk_len {
+            if self.curr_batch_size >= self.blk_size {
                 break CurBlockState::Full;
             }
 
@@ -241,6 +265,8 @@ impl BlockManagement for AvalancheBlockManagement {
                 }
             }
 
+            let (txn, _) = self.txn_pool.get(&next_txn).unwrap();
+            self.curr_batch_size += GetSize::get_size(txn.as_ref());
             self.curr_batch.push(next_txn);
         };
 
@@ -254,7 +280,7 @@ impl BlockManagement for AvalancheBlockManagement {
             loop {
                 self._notify.notified().await;
             }
-        } else if self.curr_batch.len() >= self.blk_len {
+        } else if self.curr_batch_size >= self.blk_size {
             // we got a complete block, can propose
             return Ok(());
         } else {
@@ -268,6 +294,7 @@ impl BlockManagement for AvalancheBlockManagement {
         //TODO: add noop txns to drive consensus as needed
         assert!(self.blk_quota > 0);
         let txn_hashs: Vec<Hash> = self.curr_batch.drain(0..).collect();
+        self.curr_batch_size = 0;
         // let mut txn_hashs = vec![];
         // std::mem::swap(&mut txn_hashs, &mut self.curr_batch);
         let txns_with_ctx = txn_hashs
@@ -275,10 +302,19 @@ impl BlockManagement for AvalancheBlockManagement {
             .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone());
         let (txns, txn_ctx) = txns_with_ctx.unzip();
 
+        let mut merkle_tree = DummyMerkleTree::new();
+        let merkle_dur = merkle_tree.append(txn_hashs.len())?;
+        let merkle_root = merkle_tree.get_root();
+        let serialized = bincode::serialize(&(self.blk_counter, 0, merkle_root))?;
+        let (signature, signature_dur) = self.signature_scheme.sign(&serialized, &self.sk)?;
+        process_illusion(merkle_dur + signature_dur, &self.delay).await;
+
         let header = BlockHeader::Avalanche {
             proposer: self.id,
             id: self.blk_counter,
             depth: 0,
+            merkle_root,
+            signature,
         };
         let blk_ctx = BlkCtx::from_header_and_txns(&header, txn_ctx)?;
         pf_trace!(self.id; "sending block query {:?} ({} txns)", header, txn_hashs.len());
@@ -299,14 +335,41 @@ impl BlockManagement for AvalancheBlockManagement {
         pf_trace!(self.id; "Validating block {:?}", block);
         assert!(block.txns.len() == blk_ctx.txn_ctx.len());
 
-        let (proposer, blk_id, depth) = match block.header {
+        let (proposer, blk_id, merkle_root, depth, signature) = match &block.header {
             BlockHeader::Avalanche {
                 proposer,
                 id,
+                merkle_root,
                 depth,
-            } => (proposer, id, depth),
+                signature,
+            } => (*proposer, *id, merkle_root, *depth, signature),
             _ => unreachable!(),
         };
+
+        let proposer_pk = match self.peer_pks.get(&proposer) {
+            Some(pk) => pk,
+            None => {
+                pf_debug!(self.id; "Missing public key for proposer {}", proposer);
+                return Ok(vec![]);
+            }
+        };
+        let serialized = bincode::serialize(&(self.blk_counter, 0, merkle_root))?;
+        let (valid, dur) = self
+            .signature_scheme
+            .verify(proposer_pk, &serialized, &signature)?;
+        process_illusion(dur, &self.delay).await;
+        if !valid {
+            pf_debug!(self.id; "Invalid signature for block {:?}", block);
+            return Ok(vec![]);
+        }
+
+        let mut merkle_tree = DummyMerkleTree::new();
+        let merkle_dur = merkle_tree.append(block.txns.len())?;
+        process_illusion(merkle_dur, &self.delay).await;
+        if !merkle_tree.verify_root(merkle_root)? {
+            pf_debug!(self.id; "Invalid merkle root for block {:?}", block);
+            return Ok(vec![]);
+        }
 
         let mut filtered_txns = vec![];
         let mut blk_txn_ctx = vec![];
@@ -431,7 +494,13 @@ impl BlockManagement for AvalancheBlockManagement {
             // record the current results
             self.pending_blks.insert(
                 (proposer, blk_id, depth),
-                (filtered_txns, blk_txn_ctx, recheck_txn_idx),
+                (
+                    filtered_txns,
+                    blk_txn_ctx,
+                    recheck_txn_idx,
+                    *merkle_root,
+                    signature.clone(),
+                ),
             );
 
             return Ok(vec![]);
@@ -439,9 +508,11 @@ impl BlockManagement for AvalancheBlockManagement {
 
         // if depth > 0, recursively check the blocks with smaller depth until we reach depth = 0
         let mut curr_depth = depth;
+        let mut curr_merkle_root = *merkle_root;
+        let mut curr_signature = signature.clone();
         while curr_depth > 0 {
             curr_depth -= 1;
-            let (mut curr_txns, mut curr_txn_ctx, recheck_idx) =
+            let (mut curr_txns, mut curr_txn_ctx, recheck_idx, root, sig) =
                 match self.pending_blks.remove(&(proposer, blk_id, curr_depth)) {
                     Some(record) => record,
                     None => {
@@ -449,6 +520,9 @@ impl BlockManagement for AvalancheBlockManagement {
                         return Ok(vec![]);
                     }
                 };
+
+            curr_merkle_root = root;
+            curr_signature = sig;
 
             // validate txns that did not get validated due to missing dependencies
             for idx in recheck_idx.into_iter() {
@@ -519,7 +593,9 @@ impl BlockManagement for AvalancheBlockManagement {
             header: BlockHeader::Avalanche {
                 proposer,
                 id: blk_id,
+                merkle_root: curr_merkle_root,
                 depth: curr_depth,
+                signature: curr_signature,
             },
             txns: filtered_txns,
         });
@@ -547,7 +623,7 @@ impl BlockManagement for AvalancheBlockManagement {
             dep_set,
         } = peer_req;
 
-        let txns = dep_set
+        let txns: Vec<Arc<Txn>> = dep_set
             .into_iter()
             .map(|hash| self.txn_pool.get(&hash))
             .filter(|res| {
@@ -559,10 +635,19 @@ impl BlockManagement for AvalancheBlockManagement {
             .map(|res| res.unwrap().0.clone())
             .collect();
 
+        let mut merkle_tree = DummyMerkleTree::new();
+        let merkle_dur = merkle_tree.append(txns.len())?;
+        let merkle_root = merkle_tree.get_root();
+        let serialized = bincode::serialize(&(self.blk_counter, 0, merkle_root))?;
+        let (signature, signature_dur) = self.signature_scheme.sign(&serialized, &self.sk)?;
+        process_illusion(merkle_dur + signature_dur, &self.delay).await;
+
         let blk_header = BlockHeader::Avalanche {
             proposer,
             id: blk_id,
+            merkle_root,
             depth: depth + 1,
+            signature,
         };
 
         let blk = Arc::new(Block {

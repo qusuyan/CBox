@@ -1,0 +1,28 @@
+[experiment]
+num_iterations = 3
+
+[parameters]
+chain-type = ["avalanche", "bitcoin", "diem"]
+cluster-threads = 32
+conn-multiply = 1
+correct-config = ""
+correct-type = "Basic"
+crypto = "dummy-ecdsa"
+disable-txn-dissem = true
+exp-prefix = "Crosschain-Scale/"
+exp-time = 310
+frequency = 0
+mailbox-workers = 16
+max-inflight-txns = 50000
+network-delay = 30
+num-accounts = 2000
+num-clients = 10
+num-faulty = 0
+num-machines = 1
+num-nodes = [10, 20, 30, 40]
+per-node-concurrency = 4
+topo-degree = 100                             # all-to-all communication
+# topo-skewness = 0.5
+txn-span = 0
+nic-bw = 125000000
+network-bw = 12500000

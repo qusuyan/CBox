@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{AvalancheTxn, Txn};
-use copycat::{CopycatError, SignatureScheme, NodeId};
+use copycat::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -201,6 +201,7 @@ impl FlowGen for AvalancheFlowGen {
                         out_utxo,
                         remainder,
                         sender_signature,
+                        payload_size: 0,
                     },
                 });
 
@@ -268,6 +269,7 @@ impl FlowGen for AvalancheFlowGen {
                         out_utxo: value,
                         remainder: 0,
                         sender_signature: sender_signature.clone(),
+                        payload_size: 0,
                     },
                 });
                 let base_txn1_hash = txn1.compute_id()?;
@@ -288,6 +290,7 @@ impl FlowGen for AvalancheFlowGen {
                         out_utxo: value,
                         remainder: 0,
                         sender_signature,
+                        payload_size: 0,
                     },
                 });
                 let base_txn2_hash = txn2.compute_id()?;
@@ -330,6 +333,7 @@ impl FlowGen for AvalancheFlowGen {
                             out_utxo: value,
                             remainder: 0,
                             sender_signature: sender_signature1,
+                            payload_size: 0,
                         },
                     });
                     txn1_hash = txn1.compute_id()?;
@@ -354,6 +358,7 @@ impl FlowGen for AvalancheFlowGen {
                             out_utxo: value,
                             remainder: 0,
                             sender_signature: sender_signature2,
+                            payload_size: 0,
                         },
                     });
                     txn2_hash = txn2.compute_id()?;

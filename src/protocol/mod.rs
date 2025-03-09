@@ -42,3 +42,41 @@ pub enum MsgType {
     BlockReq { msg: Vec<u8> },
     // BlockResp { id: Hash, blk: Block },
 }
+
+#[cfg(test)]
+mod msgtype_test {
+
+    use super::MsgType;
+    use crate::protocol::transaction::BitcoinTxn;
+    use crate::protocol::transaction::Txn;
+    use crate::CopycatError;
+
+    use get_size::GetSize;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_msg_size_correct() -> Result<(), CopycatError> {
+        let txn_size = 0x100000;
+        let txn = Txn::Bitcoin {
+            txn: BitcoinTxn::Send {
+                sender: vec![],
+                in_utxo: vec![],
+                receiver: vec![],
+                out_utxo: 10,
+                remainder: 10,
+                sender_signature: vec![],
+                script_bytes: 0x100000,
+                script_runtime_sec: 0f64,
+                script_succeed: true,
+            },
+        };
+
+        let msg = MsgType::NewTxn {
+            txn_batch: vec![Arc::new(txn)],
+        };
+
+        assert!(msg.get_size() > txn_size);
+
+        Ok(())
+    }
+}
