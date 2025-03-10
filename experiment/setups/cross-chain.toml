@@ -2,7 +2,7 @@
 num_iterations = 3
 
 [parameters]
-chain-type = ["avalanche", "bitcoin", "diem"]
+chain-type = "avalanche"
 cluster-threads = 32
 conn-multiply = 1
 correct-config = ""
@@ -21,7 +21,7 @@ num-faulty = 0
 num-machines = 1
 num-nodes = [10, 20, 30, 40]
 per-node-concurrency = 4
-topo-degree = 100                             # all-to-all communication
+topo-degree = 100                # all-to-all communication
 # topo-skewness = 0.5
 txn-span = 0
 nic-bw = 125000000
