@@ -106,14 +106,14 @@ pub struct AvalancheBasicConfig {
 impl Default for AvalancheBasicConfig {
     fn default() -> Self {
         Self {
-            blk_size: 0x100000 / 40,
+            blk_size: 40,
             k: 10,
             alpha: 0.8,
             beta1: 11,
             beta2: 150,
             proposal_timeout_secs: 5.0,
             vote_timeout_secs: 5.0,
-            max_inflight_blk: 40, // 40 * blk_len ~ 1800 txns / blk (bitcoin)
+            max_inflight_blk: 235, // 40 * blk_len ~ 1800 txns / blk (bitcoin)
             txn_dissem: DissemPattern::Broadcast,
         }
     }

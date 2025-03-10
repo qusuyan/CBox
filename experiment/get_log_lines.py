@@ -3,7 +3,7 @@
 import os, sys, re
 from subprocess import check_output
 
-file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
+file_regex = "META.log"
 tput_ts_regex = "(\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d).*Runtime: ([\d]+) s"
 
 def get_log_lines(log_dir, start_rt = None, end_rt = None): # TODO: different files may have different start and end?
@@ -12,7 +12,7 @@ def get_log_lines(log_dir, start_rt = None, end_rt = None): # TODO: different fi
     line_ranges = {}
 
     for file_name in log_files:
-        if not re.match(file_regex, file_name):
+        if file_name == file_regex:
             continue
 
         log_file = os.path.join(log_dir, file_name)

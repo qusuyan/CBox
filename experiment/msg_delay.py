@@ -6,7 +6,7 @@ from subprocess import check_output
 import pandas as pd
 import json
 
-file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
+meta_log = "META.log"
 deliver_regex = "Worker (\d) \(([\d]+)->([\d]+)\): message get delivered later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
 arrive_regex = "Worker (\d) \(([\d]+)->([\d]+)\): message arrived later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
 msgs_sent_recv_regex = "copycat::peers::peers: \(([\d]+)\) In the last minute: ([\d]+) msgs sent and ([\d]+) msgs recved"
@@ -33,7 +33,7 @@ def parse_msg_delay(log_dir, line_ranges = {}):
             raise Exception(f"unit {unit} not recognized")
 
     for file_name in log_files:
-        if not re.match(file_regex, file_name):
+        if file_name == meta_log:
             continue
 
         log_file = os.path.join(log_dir, file_name)

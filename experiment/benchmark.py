@@ -64,10 +64,13 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     
     nodes = []
 
-    addrs = exp_machines.get_addrs()
+    internal_addrs = exp_machines.get_internal_addrs()
+    public_addrs = exp_machines.get_addrs()
+    addrs = list(enumerate(zip(public_addrs, internal_addrs)))
+    print(addrs)
     if params["machine-config"] == "":
         machine_config = {}
-        for (idx, addr) in enumerate(addrs):
+        for (idx, (_, addr)) in addrs:
             base = idx << 12
             curr_machine_num_nodes = num_nodes_per_machine + (1 if num_nodes_remainder > idx else 0)
             node_list = [base + id for id in range(curr_machine_num_nodes)]
@@ -122,7 +125,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     else:
         validator_config_file = params["validator-config"]
 
-    for addr in addrs: 
+    for (_, (addr, _)) in addrs: 
         cluster.copy_to(addr, machine_config_file, f'{cluster.workdir}/bench_machines.json')
         cluster.copy_to(addr, network_config_file, f'{cluster.workdir}/bench_network.json')
         cluster.copy_to(addr, topo_config_file, f'{cluster.workdir}/bench_topo.json')
@@ -176,8 +179,9 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
 
     # collect stats
     files = []
-    for (machine_id, machine) in machine_config.items():
-        addr = machine["addr"].split(":")[0]
+    # for (machine_id, machine) in machine_config.items():
+    for (machine_id, (addr, _)) in addrs:
+        # addr = machine["addr"].split(":")[0]
         if params["single-process-cluster"]:
             stats_file = f"copycat_cluster_{machine_id}.csv"
             lat_file = f"copycat_cluster_{machine_id}_lat.csv"

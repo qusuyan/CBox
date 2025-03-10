@@ -5,7 +5,7 @@ from subprocess import check_output
 
 import json
 
-file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
+meta_log = "META.log"
 vcore_regex = "copycat::node: \(([0-9]+)\) vCore utilization: ([0-9.]+)"
 
 def parse_vcore_util(log_dir, line_ranges = {}):
@@ -14,7 +14,7 @@ def parse_vcore_util(log_dir, line_ranges = {}):
     vcore_utils = []
 
     for file_name in log_files:
-        if not re.match(file_regex, file_name):
+        if file_name == meta_log:
             continue
 
         log_file = os.path.join(log_dir, file_name)
