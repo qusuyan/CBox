@@ -4,17 +4,19 @@ use crate::{CopycatError, SignatureScheme};
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
+pub type DiemAccountAddress = [u8; 16];
+
 // https://github.com/diem/diem/blob/latest/types/src/transaction/mod.rs
 #[derive(Debug, Clone, Serialize, Deserialize, GetSize)]
 pub enum DiemTxn {
     Txn {
-        sender: u64, // address
+        sender: DiemAccountAddress,
         seqno: u64,
         payload: DiemPayload,
         max_gas_amount: u64,
         // following fields exists in Diem's RawTransaction structure but are not used during emulation
         gas_unit_price: u64,
-        gas_currency_code: String,
+        // gas_currency_code: String,
         expiration_timestamp_secs: u64,
         chain_id: u8,
         // authenticator
@@ -23,7 +25,7 @@ pub enum DiemTxn {
     },
     // used only for setup
     Grant {
-        receiver: u64, // address
+        receiver: DiemAccountAddress,
         receiver_key: PubKey,
         amount: u64,
     },
@@ -51,7 +53,7 @@ impl DiemTxn {
                 payload,
                 max_gas_amount,
                 gas_unit_price,
-                gas_currency_code,
+                // gas_currency_code,
                 expiration_timestamp_secs,
                 chain_id,
                 sender_key,
@@ -63,7 +65,7 @@ impl DiemTxn {
                     payload,
                     max_gas_amount,
                     gas_unit_price,
-                    gas_currency_code,
+                    // gas_currency_code,
                     expiration_timestamp_secs,
                     chain_id,
                 ))?;
@@ -96,12 +98,12 @@ mod diem_txn_test {
     #[test]
     fn test_txn_size_correct() -> Result<(), CopycatError> {
         let expected_size = 1024;
-        let script_size = expected_size - 203;
+        let script_size = expected_size - 184;
 
         let scheme = SignatureScheme::DummyECDSA;
         let (pk, sk) = scheme.gen_key_pair(0);
         let data = (
-            0u64,
+            [0u8; 16],
             0u64,
             DiemPayload {
                 script_bytes: script_size,
@@ -111,7 +113,7 @@ mod diem_txn_test {
             },
             5,
             0,
-            "XUS".to_owned(),
+            // "XUS".to_owned(),
             1611792876,
             4,
         );
@@ -123,7 +125,7 @@ mod diem_txn_test {
             payload,
             max_gas_amount,
             gas_unit_price,
-            gas_currency_code,
+            // gas_currency_code,
             expiration_timestamp_secs,
             chain_id,
         ) = data;
@@ -134,7 +136,7 @@ mod diem_txn_test {
             payload,
             max_gas_amount,
             gas_unit_price,
-            gas_currency_code,
+            // gas_currency_code,
             expiration_timestamp_secs,
             chain_id,
             sender_key: pk,
@@ -143,6 +145,7 @@ mod diem_txn_test {
 
         let txn = Arc::new(Txn::Diem { txn: diem_txn });
 
+        println!("{}", txn.get_size());
         assert!(txn.get_size() == expected_size);
 
         Ok(())

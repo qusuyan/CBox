@@ -13,7 +13,7 @@ use crate::protocol::types::diem::{
 use crate::protocol::MsgType;
 use crate::stage::pacemaker::diem::DiemPacemaker;
 use crate::stage::process_illusion;
-use crate::transaction::{DiemTxn, Txn};
+use crate::transaction::{DiemAccountAddress, DiemTxn, Txn};
 use crate::{CopycatError, NodeId, SignatureScheme};
 
 use atomic_float::AtomicF64;
@@ -31,7 +31,7 @@ pub struct DiemBlockManagement {
     delay: Arc<AtomicF64>,
     // states
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
-    accounts: HashMap<u64, (PubKey, u64)>,
+    accounts: HashMap<DiemAccountAddress, (PubKey, u64)>,
     state_merkle: HashMap<Hash, DummyMerkleTree>,
     // mempool
     pending_txns: VecDeque<Hash>,

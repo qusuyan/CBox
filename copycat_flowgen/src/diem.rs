@@ -1,7 +1,7 @@
 use super::{FlowGen, Stats};
 use crate::{ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
-use copycat::transaction::DiemPayload;
+use copycat::transaction::{DiemAccountAddress, DiemPayload};
 use copycat::transaction::{DiemTxn, Txn};
 use copycat::{CopycatError, NodeId, SignatureScheme};
 
@@ -30,7 +30,7 @@ pub struct DiemFlowGen {
     next_batch_time: Instant,
     crypto: SignatureScheme,
     client_list: Vec<ClientId>,
-    accounts: HashMap<ClientId, Vec<(u64, (PubKey, PrivKey), u64, u64)>>, // addr, (pk, sk), seqno, balance
+    accounts: HashMap<ClientId, Vec<(DiemAccountAddress, (PubKey, PrivKey), u64, u64)>>, // addr, (pk, sk), seqno, balance
     in_flight: HashMap<Hash, Instant>,
     chain_info: HashMap<NodeId, ChainInfo>,
     latencies: Vec<f64>,
@@ -59,8 +59,10 @@ impl DiemFlowGen {
                 let seed = (id << 32) | i;
                 i += 1;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
+                let addr = (seed as u128).to_ne_bytes();
+                // TODO: fill addr with seed
                 accounts.entry(*client).or_insert(vec![]).push((
-                    seed,
+                    addr.try_into().unwrap(),
                     (pubkey, privkey),
                     0u64,
                     0u64,
@@ -156,7 +158,7 @@ impl FlowGen for DiemFlowGen {
                 },
                 5,
                 0,
-                "XUS".to_owned(),
+                // "XUS".to_owned(),
                 1611792876,
                 4,
             );
@@ -168,7 +170,7 @@ impl FlowGen for DiemFlowGen {
                 payload,
                 max_gas_amount,
                 gas_unit_price,
-                gas_currency_code,
+                // gas_currency_code,
                 expiration_timestamp_secs,
                 chain_id,
             ) = data;
@@ -180,7 +182,7 @@ impl FlowGen for DiemFlowGen {
                     payload,
                     max_gas_amount,
                     gas_unit_price,
-                    gas_currency_code,
+                    // gas_currency_code,
                     expiration_timestamp_secs,
                     chain_id,
                     sender_key: sender_pk.clone(),

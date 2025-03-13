@@ -8,7 +8,7 @@ mod avalanche;
 pub use avalanche::AvalancheTxn;
 
 mod diem;
-pub use diem::{DiemPayload, DiemTxn};
+pub use diem::{DiemAccountAddress, DiemPayload, DiemTxn};
 
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};

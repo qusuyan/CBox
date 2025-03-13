@@ -2,7 +2,7 @@ use super::TxnValidation;
 use crate::config::DiemConfig;
 use crate::context::TxnCtx;
 use crate::protocol::crypto::PubKey;
-use crate::transaction::{DiemTxn, Txn};
+use crate::transaction::{DiemAccountAddress, DiemTxn, Txn};
 use crate::{CopycatError, NodeId};
 
 use async_trait::async_trait;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 pub struct DiemTxnValidation {
     _id: NodeId,
-    accounts: HashMap<u64, PubKey>,
+    accounts: HashMap<DiemAccountAddress, PubKey>,
 }
 
 impl DiemTxnValidation {
