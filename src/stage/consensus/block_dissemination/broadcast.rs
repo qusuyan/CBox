@@ -21,12 +21,16 @@ impl BroadcastBlockDissemination {
 
 #[async_trait]
 impl BlockDissemination for BroadcastBlockDissemination {
-    async fn disseminate(&self, src: NodeId, blk: Arc<Block>) -> Result<(), CopycatError> {
+    async fn disseminate(&mut self, src: NodeId, blk: Arc<Block>) -> Result<(), CopycatError> {
         if self.me == src {
             self.peer_messenger
                 .broadcast(MsgType::NewBlock { blk })
                 .await?;
         }
         Ok(())
+    }
+
+    async fn handle_peer_msg(&mut self, _src: NodeId, _msg: Vec<u8>) -> Result<(), CopycatError> {
+        unreachable!()
     }
 }

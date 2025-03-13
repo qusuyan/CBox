@@ -45,7 +45,7 @@ impl LinearBlockDissemination {
 
 #[async_trait]
 impl BlockDissemination for LinearBlockDissemination {
-    async fn disseminate(&self, src: NodeId, blk: Arc<Block>) -> Result<(), CopycatError> {
+    async fn disseminate(&mut self, src: NodeId, blk: Arc<Block>) -> Result<(), CopycatError> {
         assert!(src == self.prev);
         match self.next {
             Some(next) => {
@@ -57,5 +57,9 @@ impl BlockDissemination for LinearBlockDissemination {
         }
 
         Ok(())
+    }
+
+    async fn handle_peer_msg(&mut self, _src: NodeId, _msg: Vec<u8>) -> Result<(), CopycatError> {
+        unreachable!()
     }
 }

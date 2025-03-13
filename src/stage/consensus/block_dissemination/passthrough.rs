@@ -19,7 +19,11 @@ impl PassthroughBlockDissemination {
 
 #[async_trait]
 impl BlockDissemination for PassthroughBlockDissemination {
-    async fn disseminate(&self, _src: NodeId, _blk: Arc<Block>) -> Result<(), CopycatError> {
+    async fn disseminate(&mut self, _src: NodeId, _blk: Arc<Block>) -> Result<(), CopycatError> {
         Ok(())
+    }
+
+    async fn handle_peer_msg(&mut self, _src: NodeId, _msg: Vec<u8>) -> Result<(), CopycatError> {
+        unreachable!()
     }
 }

@@ -37,10 +37,10 @@ pub enum DissemPattern {
 pub enum MsgType {
     NewTxn { txn_batch: Vec<Arc<Txn>> },
     NewBlock { blk: Arc<Block> },
+    BlkDissemMsg { msg: Vec<u8> },
     ConsensusMsg { msg: Vec<u8> },
     PMakerMsg { msg: Vec<u8> },
     BlockReq { msg: Vec<u8> },
-    // BlockResp { id: Hash, blk: Block },
 }
 
 #[cfg(test)]

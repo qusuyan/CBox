@@ -4,22 +4,14 @@ use crate::utils::{CopycatError, NodeId};
 use mailbox_client::{ClientStubRecvHalf, ClientStubSendHalf};
 
 use rand::seq::IteratorRandom;
-use serde::{Deserialize, Serialize};
 
 use tokio::time::Duration;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use std::collections::HashSet;
-use std::fmt::Debug;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-
-#[derive(Debug, Serialize, Deserialize)]
-enum SendRequest {
-    Send { dest: NodeId, msg: MsgType },
-    Broadcast { msg: MsgType },
-}
 
 pub struct PeerMessenger {
     id: NodeId,
@@ -43,6 +35,7 @@ impl PeerMessenger {
             mpsc::Receiver<(NodeId, Vec<u8>)>,
             mpsc::Receiver<(NodeId, Vec<u8>)>,
             mpsc::Receiver<(NodeId, Vec<u8>)>,
+            mpsc::Receiver<(NodeId, Vec<u8>)>,
             // mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,
         ),
         CopycatError,
@@ -51,6 +44,7 @@ impl PeerMessenger {
 
         let (rx_txn_send, rx_txn_recv) = mpsc::channel(0x1000000);
         let (rx_blk_send, rx_blk_recv) = mpsc::channel(0x100000);
+        let (rx_blk_dissem_send, rx_blk_dissem_recv) = mpsc::channel(0x100000);
         let (rx_consensus_send, rx_consensus_recv) = mpsc::channel(0x100000);
         let (rx_pmaker_send, rx_pmaker_recv) = mpsc::channel(0x100000);
         let (rx_blk_req_send, rx_blk_req_recv) = mpsc::channel(0x100000);
@@ -71,6 +65,7 @@ impl PeerMessenger {
                 recv_half,
                 rx_txn_send,
                 rx_blk_send,
+                rx_blk_dissem_send,
                 rx_consensus_send,
                 rx_pmaker_send,
                 rx_blk_req_send,
@@ -84,6 +79,7 @@ impl PeerMessenger {
                 recv_half,
                 rx_txn_send,
                 rx_blk_send,
+                rx_blk_dissem_send,
                 rx_consensus_send,
                 rx_pmaker_send,
                 rx_blk_req_send,
@@ -104,6 +100,7 @@ impl PeerMessenger {
             },
             rx_txn_recv,
             rx_blk_recv,
+            rx_blk_dissem_recv,
             rx_consensus_recv,
             rx_pmaker_recv,
             rx_blk_req_recv,
@@ -180,6 +177,7 @@ impl PeerMessenger {
         mut transport_hub: ClientStubRecvHalf<MsgType>,
         rx_txn_send: mpsc::Sender<(NodeId, Vec<Arc<Txn>>)>,
         rx_blk_send: mpsc::Sender<(NodeId, Arc<Block>)>,
+        rx_blk_dissem_send: mpsc::Sender<(NodeId, Vec<u8>)>,
         rx_consensus_send: mpsc::Sender<(NodeId, Vec<u8>)>,
         rx_pmaker_send: mpsc::Sender<(NodeId, Vec<u8>)>,
         rx_blk_req_send: mpsc::Sender<(NodeId, Vec<u8>)>,
@@ -210,6 +208,11 @@ impl PeerMessenger {
                                         pf_error!(id; "rx_blk_send failed: {:?}", e)
                                     }
                                 }
+                                MsgType::BlkDissemMsg { msg } => {
+                                    if let Err(e) = rx_blk_dissem_send.send((src, msg)).await {
+                                        pf_error!(id; "rx_blk_send failed: {:?}", e)
+                                    }
+                                }
                                 MsgType::ConsensusMsg { msg } => {
                                     if let Err(e) = rx_consensus_send.send((src, msg)).await {
                                         pf_error!(id; "rx_consensus_send failed: {:?}", e)
@@ -224,12 +227,7 @@ impl PeerMessenger {
                                     if let Err(e) = rx_blk_req_send.send((src, msg)).await {
                                         pf_error!(id; "rx_pmaker_send failed: {:?}", e)
                                     }
-                                } // MsgType::BlockResp { id, blk } => {
-                                  //     if let Err(e) = rx_blk_resp_send.send((src, (id, Arc::new(blk)))).await
-                                  //     {
-                                  //         pf_error!(id; "rx_pmaker_send failed: {e:?}")
-                                  //     }
-                                  // }
+                                }
                             }
                         }
                         Err(e) => {

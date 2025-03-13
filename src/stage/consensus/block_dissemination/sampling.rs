@@ -26,12 +26,16 @@ impl SamplingBlockDissemination {
 
 #[async_trait]
 impl BlockDissemination for SamplingBlockDissemination {
-    async fn disseminate(&self, src: NodeId, blk: Arc<Block>) -> Result<(), CopycatError> {
+    async fn disseminate(&mut self, src: NodeId, blk: Arc<Block>) -> Result<(), CopycatError> {
         if src == self.me {
             self.peer_messenger
                 .sample(MsgType::NewBlock { blk }, self.neighbors)
                 .await?;
         }
         Ok(())
+    }
+
+    async fn handle_peer_msg(&mut self, _src: NodeId, _msg: Vec<u8>) -> Result<(), CopycatError> {
+        unreachable!()
     }
 }

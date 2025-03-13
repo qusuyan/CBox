@@ -23,6 +23,7 @@ impl PeerMessenger {
             mpsc::Receiver<(NodeId, Vec<u8>)>,
             mpsc::Receiver<(NodeId, Vec<u8>)>,
             mpsc::Receiver<(NodeId, Vec<u8>)>,
+            mpsc::Receiver<(NodeId, Vec<u8>)>,
             // mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,
         ),
         CopycatError,

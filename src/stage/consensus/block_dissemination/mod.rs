@@ -35,7 +35,8 @@ use tokio_metrics::TaskMonitor;
 
 #[async_trait]
 trait BlockDissemination: Sync + Send {
-    async fn disseminate(&self, src: NodeId, block: Arc<Block>) -> Result<(), CopycatError>;
+    async fn disseminate(&mut self, src: NodeId, block: Arc<Block>) -> Result<(), CopycatError>;
+    async fn handle_peer_msg(&mut self, src: NodeId, msg: Vec<u8>) -> Result<(), CopycatError>;
 }
 
 fn get_block_dissemination(
@@ -65,6 +66,7 @@ pub async fn block_dissemination_thread(
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
+    mut peer_blk_dissem_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     block_ready_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
@@ -74,7 +76,7 @@ pub async fn block_dissemination_thread(
     let delay = Arc::new(AtomicF64::new(0f64));
     let mut insert_delay_time = Instant::now() + BLK_DISS_DELAY_INTERVAL;
 
-    let block_dissemination_stage = get_block_dissemination(id, config, peer_messenger);
+    let mut block_dissemination_stage = get_block_dissemination(id, config, peer_messenger);
 
     let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();
@@ -120,6 +122,21 @@ pub async fn block_dissemination_thread(
                     continue;
                 }
             },
+
+            peer_msg = peer_blk_dissem_recv.recv() => {
+                let (src, msg) = match peer_msg {
+                    Some(content) => content,
+                    None => {
+                        pf_error!(id; "peer_blk_dissem pipe closed unexpectedly");
+                        continue;
+                    }
+                };
+
+                if let Err(e) = block_dissemination_stage.handle_peer_msg(src, msg).await {
+                    pf_error!(id; "failed to handle peer block dissem message: {:?}", e);
+                    continue;
+                }
+            }
 
             _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
