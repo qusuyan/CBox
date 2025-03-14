@@ -3,7 +3,7 @@ use crate::protocol::{block::Block, transaction::Txn, MsgType};
 use crate::utils::{CopycatError, NodeId};
 use mailbox_client::{ClientStubRecvHalf, ClientStubSendHalf};
 
-use rand::seq::IteratorRandom;
+use rand::seq::{IteratorRandom, SliceRandom};
 
 use tokio::time::Duration;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -159,7 +159,9 @@ impl PeerMessenger {
     pub async fn sample(&self, msg: MsgType, neighbors: usize) -> Result<(), CopycatError> {
         let sample = {
             let mut rng = rand::thread_rng();
-            self.neighbors.iter().choose_multiple(&mut rng, neighbors)
+            let mut samples = self.neighbors.iter().choose_multiple(&mut rng, neighbors);
+            samples.shuffle(&mut rng);
+            samples
         };
         let dests: Vec<u64> = sample.into_iter().cloned().collect();
         pf_trace!(self.id; "sending {:?} to {} neighbors ({:?})", msg, neighbors, dests);
