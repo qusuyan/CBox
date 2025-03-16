@@ -1,3 +1,18 @@
+mod dummy;
+pub use dummy::DummyConfig;
+
+mod avalanche;
+pub use avalanche::{AvalancheBasicConfig, AvalancheConfig, AvalancheVoteNoConfig};
+
+mod bitcoin;
+pub use bitcoin::{BitcoinBasicConfig, BitcoinConfig};
+
+mod chain_replication;
+pub use chain_replication::ChainReplicationConfig;
+
+mod diem;
+pub use diem::{DiemBasicConfig, DiemConfig};
+
 use crate::protocol::ChainType;
 use crate::utils::CopycatError;
 use crate::{DissemPattern, NodeId};
@@ -6,7 +21,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::BufReader;
 
-use default_fields::DefaultFields;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -22,149 +36,6 @@ pub enum ChainConfig {
 pub struct NodeConfig {
     pub chain_config: ChainConfig,
     pub max_concurrency: Option<usize>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
-pub struct DummyConfig {
-    #[serde(default = "DummyConfig::get_default_txn_dissem")]
-    pub txn_dissem: DissemPattern,
-    #[serde(default = "DummyConfig::get_default_blk_dissem")]
-    pub blk_dissem: DissemPattern,
-}
-
-impl Default for DummyConfig {
-    fn default() -> Self {
-        Self {
-            txn_dissem: DissemPattern::Broadcast,
-            blk_dissem: DissemPattern::Broadcast,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum BitcoinConfig {
-    Basic { config: BitcoinBasicConfig },
-    Eager { config: BitcoinBasicConfig },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
-pub struct BitcoinBasicConfig {
-    #[serde(default = "BitcoinBasicConfig::get_default_blk_size")]
-    pub blk_size: usize,
-    #[serde(default = "BitcoinBasicConfig::get_default_difficulty")]
-    pub difficulty: u8,
-    #[serde(default = "BitcoinBasicConfig::get_default_commit_depth")]
-    pub commit_depth: u8,
-    #[serde(default = "BitcoinBasicConfig::get_default_txn_dissem")]
-    pub txn_dissem: DissemPattern,
-    #[serde(default = "BitcoinBasicConfig::get_default_blk_dissem")]
-    pub blk_dissem: DissemPattern,
-}
-
-impl Default for BitcoinBasicConfig {
-    fn default() -> Self {
-        Self {
-            blk_size: 0x100000,
-            difficulty: 25,
-            commit_depth: 6,
-            txn_dissem: DissemPattern::Gossip,
-            blk_dissem: DissemPattern::Gossip,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum AvalancheConfig {
-    Basic { config: AvalancheBasicConfig },
-    Blizzard { config: AvalancheBasicConfig }, //https://arxiv.org/pdf/2401.02811
-    VoteNo { config: AvalancheVoteNoConfig },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
-pub struct AvalancheBasicConfig {
-    #[serde(default = "AvalancheBasicConfig::get_default_blk_size")]
-    pub blk_size: usize,
-    #[serde(default = "AvalancheBasicConfig::get_default_k")]
-    pub k: usize,
-    #[serde(default = "AvalancheBasicConfig::get_default_alpha")]
-    pub alpha: f64,
-    #[serde(default = "AvalancheBasicConfig::get_default_beta1")]
-    pub beta1: u64,
-    #[serde(default = "AvalancheBasicConfig::get_default_beta2")]
-    pub beta2: u64,
-    #[serde(default = "AvalancheBasicConfig::get_default_proposal_timeout_secs")]
-    pub proposal_timeout_secs: f64,
-    #[serde(default = "AvalancheBasicConfig::get_default_vote_timeout_secs")]
-    pub vote_timeout_secs: f64,
-    #[serde(default = "AvalancheBasicConfig::get_default_max_inflight_blk")]
-    pub max_inflight_blk: usize,
-    #[serde(default = "AvalancheBasicConfig::get_default_txn_dissem")]
-    pub txn_dissem: DissemPattern,
-}
-
-// https://arxiv.org/pdf/1906.08936.pdf
-impl Default for AvalancheBasicConfig {
-    fn default() -> Self {
-        Self {
-            blk_size: 4480, // 40 txns/blk * 112 B per noop txn
-            k: 10,
-            alpha: 0.8,
-            beta1: 11,
-            beta2: 150,
-            proposal_timeout_secs: 5.0,
-            vote_timeout_secs: 5.0,
-            max_inflight_blk: 235, // 40 * max_inflight_blk ~ 1MB   (bitcoin block size)
-            txn_dissem: DissemPattern::Broadcast,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AvalancheVoteNoConfig {}
-
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
-pub struct ChainReplicationConfig {
-    #[serde(default = "ChainReplicationConfig::get_default_order")]
-    pub order: Vec<NodeId>,
-    #[serde(default = "ChainReplicationConfig::get_default_blk_size")]
-    pub blk_size: usize,
-}
-
-impl Default for ChainReplicationConfig {
-    fn default() -> Self {
-        Self {
-            order: vec![],
-            blk_size: 0x100000,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum DiemConfig {
-    Basic { config: DiemBasicConfig },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]
-pub struct DiemBasicConfig {
-    #[serde(default = "DiemBasicConfig::get_default_blk_size")]
-    pub blk_size: usize,
-    #[serde(default = "DiemBasicConfig::get_default_proposal_timeout_secs")]
-    pub proposal_timeout_secs: f64,
-    #[serde(default = "DiemBasicConfig::get_default_vote_timeout_secs")]
-    pub vote_timeout_secs: f64,
-    #[serde(default = "DiemBasicConfig::get_default_txn_dissem")]
-    pub txn_dissem: DissemPattern,
-}
-
-impl Default for DiemBasicConfig {
-    fn default() -> Self {
-        Self {
-            blk_size: 0x100000,
-            proposal_timeout_secs: 5.0,
-            vote_timeout_secs: 5.0,
-            txn_dissem: DissemPattern::Broadcast,
-        }
-    }
 }
 
 impl NodeConfig {

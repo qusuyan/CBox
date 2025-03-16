@@ -1,5 +1,5 @@
 use super::{BlockManagement, CurBlockState};
-use crate::config::DiemConfig;
+use crate::config::DiemBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
@@ -61,14 +61,10 @@ impl DiemBlockManagement {
         id: NodeId,
         p2p_signature: P2PSignature,
         threshold_signature: Arc<dyn ThresholdSignature>,
-        config: DiemConfig,
+        config: DiemBasicConfig,
         delay: Arc<DelayPool>,
         peer_messenger: Arc<PeerMessenger>,
     ) -> Self {
-        let basic_config = match config {
-            DiemConfig::Basic { config } => config,
-        };
-
         let (signature_scheme, peer_pks, sk) = p2p_signature;
 
         let mut all_nodes: Vec<NodeId> = peer_pks.keys().cloned().collect();
@@ -79,7 +75,7 @@ impl DiemBlockManagement {
 
         Self {
             id,
-            blk_size: basic_config.blk_size,
+            blk_size: config.blk_size,
             delay,
             peer_messenger,
             txn_pool: HashMap::new(),
@@ -620,7 +616,6 @@ mod diem_block_management_test {
     use std::sync::Arc;
 
     use super::DiemBlockManagement;
-    use crate::config::DiemConfig;
     use crate::context::BlkCtx;
     use crate::peers::PeerMessenger;
     use crate::protocol::block::{Block, BlockHeader};
@@ -646,9 +641,7 @@ mod diem_block_management_test {
             threshold_signature_scheme.to_threshold_signature(&all_nodes, 3, 0)?;
         let threshold_signature = threshold_signatures.get(&0).unwrap().clone();
 
-        let config = DiemConfig::Basic {
-            config: Default::default(),
-        };
+        let config = Default::default();
         let delay = Arc::new(DelayPool::new());
         let peer_messenger = PeerMessenger::new_stub();
 

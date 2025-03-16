@@ -86,14 +86,14 @@ fn get_blk_creation(
         ChainConfig::ChainReplication { config } => {
             Box::new(ChainReplicationBlockManagement::new(id, config))
         }
-        ChainConfig::Diem { config } => Box::new(diem::DiemBlockManagement::new(
+        ChainConfig::Diem { config } => diem::new(
             id,
             p2p_signature,
             threshold_signature,
             config,
             delay,
             peer_messenger,
-        )),
+        ),
     }
 }
 

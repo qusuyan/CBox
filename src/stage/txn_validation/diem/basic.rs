@@ -1,5 +1,5 @@
 use super::TxnValidation;
-use crate::config::DiemConfig;
+use crate::config::DiemBasicConfig;
 use crate::context::TxnCtx;
 use crate::protocol::crypto::PubKey;
 use crate::transaction::{DiemAccountAddress, DiemTxn, Txn};
@@ -16,7 +16,7 @@ pub struct DiemTxnValidation {
 }
 
 impl DiemTxnValidation {
-    pub fn new(id: NodeId, _config: DiemConfig) -> Self {
+    pub fn new(id: NodeId, _config: DiemBasicConfig) -> Self {
         Self {
             _id: id,
             accounts: HashMap::new(),

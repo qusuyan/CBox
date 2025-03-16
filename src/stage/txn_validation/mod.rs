@@ -40,7 +40,7 @@ fn get_txn_validation(id: NodeId, config: ChainConfig) -> Box<dyn TxnValidation>
         }
         ChainConfig::Bitcoin { config } => bitcoin::new(id, config),
         ChainConfig::Avalanche { config } => avalanche::new(id, config),
-        ChainConfig::Diem { config } => Box::new(diem::DiemTxnValidation::new(id, config)),
+        ChainConfig::Diem { config } => diem::new(id, config),
     }
 }
 

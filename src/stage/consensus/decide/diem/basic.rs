@@ -1,5 +1,5 @@
 use super::Decision;
-use crate::config::DiemConfig;
+use crate::config::DiemBasicConfig;
 use crate::context::BlkCtx;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
@@ -64,15 +64,11 @@ impl DiemDecision {
         id: NodeId,
         p2p_signature: P2PSignature,
         threshold_signature: Arc<dyn ThresholdSignature>,
-        config: DiemConfig,
+        config: DiemBasicConfig,
         peer_messenger: Arc<PeerMessenger>,
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
         delay: Arc<DelayPool>,
     ) -> Self {
-        let basic_config = match config {
-            DiemConfig::Basic { config } => config,
-        };
-
         let (signature_scheme, peer_pks, sk) = p2p_signature;
         let mut state_id_map = HashMap::new();
         // add genesis block
@@ -89,8 +85,8 @@ impl DiemDecision {
 
         Self {
             id,
-            _proposal_timeout_secs: basic_config.proposal_timeout_secs,
-            _vote_timeout_secs: basic_config.vote_timeout_secs,
+            _proposal_timeout_secs: config.proposal_timeout_secs,
+            _vote_timeout_secs: config.vote_timeout_secs,
             blk_pool: HashMap::new(),
             commit_queue: HashMap::new(),
             next_commit_height: 2,

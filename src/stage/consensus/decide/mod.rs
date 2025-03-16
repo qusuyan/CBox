@@ -63,7 +63,7 @@ fn get_decision(
         ChainConfig::ChainReplication { .. } => {
             Box::new(ChainReplicationDecision::new(id, config, peer_messenger))
         }
-        ChainConfig::Diem { config } => Box::new(diem::DiemDecision::new(
+        ChainConfig::Diem { config } => diem::new(
             id,
             p2p_signature,
             threshold_signature,
@@ -71,7 +71,7 @@ fn get_decision(
             peer_messenger,
             pmaker_feedback_send,
             delay,
-        )),
+        ),
     }
 }
 
