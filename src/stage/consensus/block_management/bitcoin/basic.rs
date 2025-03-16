@@ -7,12 +7,11 @@ use crate::protocol::crypto::vector_snark::DummyMerkleTree;
 use crate::protocol::crypto::{Hash, PubKey};
 use crate::protocol::transaction::{BitcoinTxn, Txn};
 use crate::protocol::MsgType;
-use crate::stage::process_illusion;
+use crate::stage::DelayPool;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 
 use async_trait::async_trait;
-use atomic_float::AtomicF64;
 use get_size::GetSize;
 use primitive_types::U256;
 use rand::Rng;
@@ -26,7 +25,7 @@ use std::sync::Arc;
 pub struct BitcoinBlockManagement {
     id: NodeId,
     blk_size: usize,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
     core_group: Arc<VCoreGroup>,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     block_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>, u64)>,
@@ -50,7 +49,7 @@ impl BitcoinBlockManagement {
     pub fn new(
         id: NodeId,
         config: BitcoinBasicConfig,
-        delay: Arc<AtomicF64>,
+        delay: Arc<DelayPool>,
         core_group: Arc<VCoreGroup>,
         peer_messenger: Arc<PeerMessenger>,
     ) -> Self {
@@ -304,14 +303,14 @@ impl BlockManagement for BitcoinBlockManagement {
             let timeout = merkle_tree.append(self.block_under_construction.len() - orig_blk_len)?;
             execution_delay += timeout;
             self.merkle_root = Some(merkle_tree);
-            process_illusion(execution_delay, &self.delay).await;
+            self.delay.process_illusion(execution_delay).await;
             let pow_start_time = Instant::now();
             let pow_time = self.get_pow_time_secs();
             self.pow_time = Some((pow_start_time, pow_time));
             // let runtime = Instant::now() - start_time;
             // pf_debug!(self.id; "preparing new block takes {:?}, execution delay is {:?}", runtime, execution_delay);
         } else {
-            process_illusion(execution_delay, &self.delay).await;
+            self.delay.process_illusion(execution_delay).await;
         }
 
         Ok(blk_full)
@@ -412,7 +411,7 @@ impl BlockManagement for BitcoinBlockManagement {
         // hash verification
         let mut verification_timeout = HEADER_HASH_TIME;
         if *nonce != 1 {
-            process_illusion(verification_timeout, &self.delay).await;
+            self.delay.process_illusion(verification_timeout).await;
             return Ok(vec![]); // invalid POW
         }
 
@@ -437,7 +436,7 @@ impl BlockManagement for BitcoinBlockManagement {
             // validate transaction
             if !self.txn_pool.contains_key(&txn_hash) {
                 if !self.validate_txn(bitcoin_txn)? {
-                    process_illusion(verification_timeout, &self.delay).await;
+                    self.delay.process_illusion(verification_timeout).await;
                     return Ok(vec![]);
                 }
                 self.txn_pool
@@ -445,7 +444,7 @@ impl BlockManagement for BitcoinBlockManagement {
             };
         }
 
-        process_illusion(verification_timeout, &self.delay).await;
+        self.delay.process_illusion(verification_timeout).await;
 
         // height of block in the chain or 0 if the height is unknown because we have not seen its parent yet
         let blk_height = if parent_id.is_zero() {
@@ -497,11 +496,12 @@ impl BlockManagement for BitcoinBlockManagement {
             let mut buf = [0u8; 32];
             parent.to_little_endian(&mut buf);
             self.peer_messenger
-                .gossip(
+                .delayed_gossip(
                     MsgType::BlockReq {
                         msg: Vec::from(buf),
                     },
                     HashSet::from([self.id]),
+                    Duration::from_secs_f64(self.delay.get_current_delay()),
                 )
                 .await?;
             return Ok(vec![]);
@@ -773,12 +773,20 @@ impl BlockManagement for BitcoinBlockManagement {
         if let Some((blk, _, _)) = self.block_pool.get(&blk_id) {
             // return the req if the block is known
             self.peer_messenger
-                .send(peer, MsgType::NewBlock { blk: blk.clone() })
+                .delayed_send(
+                    peer,
+                    MsgType::NewBlock { blk: blk.clone() },
+                    Duration::from_secs_f64(self.delay.get_current_delay()),
+                )
                 .await?
         } else {
             // otherwise gossip to other neighbors
             self.peer_messenger
-                .gossip(MsgType::BlockReq { msg }, HashSet::from([self.id, peer]))
+                .delayed_gossip(
+                    MsgType::BlockReq { msg },
+                    HashSet::from([self.id, peer]),
+                    Duration::from_secs_f64(self.delay.get_current_delay()),
+                )
                 .await?;
         }
         Ok(())
@@ -802,8 +810,6 @@ impl BlockManagement for BitcoinBlockManagement {
 mod bitcoin_block_management_test {
     use std::sync::Arc;
 
-    use atomic_float::AtomicF64;
-
     use crate::{
         config::BitcoinBasicConfig,
         context::BlkCtx,
@@ -812,8 +818,11 @@ mod bitcoin_block_management_test {
             block::{Block, BlockHeader},
             crypto::Hash,
         },
-        stage::consensus::block_management::{
-            bitcoin::basic::BitcoinBlockManagement, BlockManagement,
+        stage::{
+            consensus::block_management::{
+                bitcoin::basic::BitcoinBlockManagement, BlockManagement,
+            },
+            DelayPool,
         },
         transaction::{BitcoinTxn, Txn},
         utils::CopycatError,
@@ -1031,7 +1040,7 @@ mod bitcoin_block_management_test {
         let mut stage = BitcoinBlockManagement::new(
             1,
             BitcoinBasicConfig::default(),
-            Arc::new(AtomicF64::new(0f64)),
+            Arc::new(DelayPool::new()),
             Arc::new(VCoreGroup::new(1)),
             Arc::new(PeerMessenger::new_stub()),
         );

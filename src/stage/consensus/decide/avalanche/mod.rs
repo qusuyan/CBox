@@ -12,9 +12,9 @@ use crate::config::AvalancheConfig;
 use crate::peers::PeerMessenger;
 use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::Signature;
+use crate::stage::DelayPool;
 use crate::NodeId;
 
-use atomic_float::AtomicF64;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -32,7 +32,7 @@ pub fn new(
     config: AvalancheConfig,
     peer_messenger: Arc<PeerMessenger>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
 ) -> Box<dyn Decision> {
     match config {
         AvalancheConfig::Basic { config } => Box::new(AvalancheDecision::new(

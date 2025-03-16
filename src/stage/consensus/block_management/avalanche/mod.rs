@@ -1,5 +1,4 @@
 mod basic;
-use atomic_float::AtomicF64;
 use basic::AvalancheBlockManagement;
 
 mod vote_no;
@@ -9,6 +8,7 @@ use super::{BlockManagement, CurBlockState};
 use crate::config::AvalancheConfig;
 use crate::peers::PeerMessenger;
 use crate::protocol::crypto::signature::P2PSignature;
+use crate::stage::DelayPool;
 use crate::NodeId;
 
 use std::sync::Arc;
@@ -18,7 +18,7 @@ pub fn new(
     p2p_signature: P2PSignature,
     config: AvalancheConfig,
     peer_messenger: Arc<PeerMessenger>,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
 ) -> Box<dyn BlockManagement> {
     match config {
         AvalancheConfig::Basic { config } => Box::new(AvalancheBlockManagement::new(

@@ -156,6 +156,27 @@ impl PeerMessenger {
         Ok(())
     }
 
+    pub async fn delayed_gossip(
+        &self,
+        msg: MsgType,
+        skipping: HashSet<NodeId>,
+        delay: Duration,
+    ) -> Result<(), CopycatError> {
+        pf_trace!(self.id; "gossiping {:?}", msg);
+        let dests: Vec<u64> = self.neighbors.difference(&skipping).cloned().collect();
+        if dests.len() > 0 {
+            if let Err(e) = self
+                .transport_hub
+                .delayed_multicast(dests, msg, delay)
+                .await
+            {
+                return Err(CopycatError(format!("gossip failed: {e:?}")));
+            }
+            self.msgs_sent.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
     pub async fn sample(&self, msg: MsgType, neighbors: usize) -> Result<(), CopycatError> {
         let sample = {
             let mut rng = rand::thread_rng();

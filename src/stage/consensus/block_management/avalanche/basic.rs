@@ -7,7 +7,7 @@ use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::vector_snark::DummyMerkleTree;
 use crate::protocol::crypto::{Hash, PrivKey, PubKey, Signature};
 use crate::protocol::transaction::{AvalancheTxn, Txn};
-use crate::stage::process_illusion;
+use crate::stage::DelayPool;
 use crate::utils::{CopycatError, NodeId};
 use crate::SignatureScheme;
 
@@ -18,7 +18,6 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 
-use atomic_float::AtomicF64;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
@@ -54,7 +53,7 @@ pub struct AvalancheBlockManagement {
         (NodeId, u64, usize),
         (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>, Vec<usize>, Hash, Signature),
     >,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
     signature_scheme: SignatureScheme,
     peer_pks: HashMap<NodeId, PubKey>,
     sk: PrivKey,
@@ -72,7 +71,7 @@ impl AvalancheBlockManagement {
         p2p_signature: P2PSignature,
         config: AvalancheBasicConfig,
         peer_messenger: Arc<PeerMessenger>,
-        delay: Arc<AtomicF64>,
+        delay: Arc<DelayPool>,
     ) -> Self {
         let proposal_timeout = Duration::from_secs_f64(config.proposal_timeout_secs);
 
@@ -307,7 +306,9 @@ impl BlockManagement for AvalancheBlockManagement {
         let merkle_root = merkle_tree.get_root();
         let serialized = bincode::serialize(&(self.blk_counter, 0, merkle_root))?;
         let (signature, signature_dur) = self.signature_scheme.sign(&serialized, &self.sk)?;
-        process_illusion(merkle_dur + signature_dur, &self.delay).await;
+        self.delay
+            .process_illusion(merkle_dur + signature_dur)
+            .await;
 
         let header = BlockHeader::Avalanche {
             proposer: self.id,
@@ -354,22 +355,27 @@ impl BlockManagement for AvalancheBlockManagement {
             }
         };
         let serialized = bincode::serialize(&(self.blk_counter, 0, merkle_root))?;
+        let mut check_time = 0f64;
         let (valid, dur) = self
             .signature_scheme
             .verify(proposer_pk, &serialized, &signature)?;
-        process_illusion(dur, &self.delay).await;
+        check_time += dur;
         if !valid {
             pf_debug!(self.id; "Invalid signature for block {:?}", block);
+            self.delay.process_illusion(check_time).await;
             return Ok(vec![]);
         }
 
         let mut merkle_tree = DummyMerkleTree::new();
         let merkle_dur = merkle_tree.append(block.txns.len())?;
-        process_illusion(merkle_dur, &self.delay).await;
+        check_time += merkle_dur;
         if !merkle_tree.verify_root(merkle_root)? {
             pf_debug!(self.id; "Invalid merkle root for block {:?}", block);
+            self.delay.process_illusion(check_time).await;
             return Ok(vec![]);
         }
+
+        self.delay.process_illusion(check_time).await;
 
         let mut filtered_txns = vec![];
         let mut blk_txn_ctx = vec![];
@@ -489,7 +495,11 @@ impl BlockManagement for AvalancheBlockManagement {
             };
             let msg = bincode::serialize(&peer_req)?;
             self.peer_messenger
-                .send(proposer, crate::protocol::MsgType::BlockReq { msg })
+                .delayed_send(
+                    proposer,
+                    crate::protocol::MsgType::BlockReq { msg },
+                    Duration::from_secs_f64(self.delay.get_current_delay()),
+                )
                 .await?;
             // record the current results
             self.pending_blks.insert(
@@ -640,7 +650,9 @@ impl BlockManagement for AvalancheBlockManagement {
         let merkle_root = merkle_tree.get_root();
         let serialized = bincode::serialize(&(self.blk_counter, 0, merkle_root))?;
         let (signature, signature_dur) = self.signature_scheme.sign(&serialized, &self.sk)?;
-        process_illusion(merkle_dur + signature_dur, &self.delay).await;
+        self.delay
+            .process_illusion(merkle_dur + signature_dur)
+            .await;
 
         let blk_header = BlockHeader::Avalanche {
             proposer,
@@ -656,7 +668,11 @@ impl BlockManagement for AvalancheBlockManagement {
         });
 
         self.peer_messenger
-            .send(peer, crate::protocol::MsgType::NewBlock { blk })
+            .delayed_send(
+                peer,
+                crate::protocol::MsgType::NewBlock { blk },
+                Duration::from_secs_f64(self.delay.get_current_delay()),
+            )
             .await?;
 
         Ok(())

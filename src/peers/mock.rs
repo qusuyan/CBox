@@ -67,6 +67,16 @@ impl PeerMessenger {
         Ok(())
     }
 
+    pub async fn delayed_gossip(
+        &self,
+        msg: MsgType,
+        _skipping: HashSet<NodeId>,
+        delay: Duration,
+    ) -> Result<(), CopycatError> {
+        println!("Gossping msg with delay {}: {msg:?}", delay.as_secs_f64());
+        Ok(())
+    }
+
     pub async fn sample(&self, msg: MsgType, neighbors: usize) -> Result<(), CopycatError> {
         println!("Sending msg to {neighbors} neighbors: {msg:?}");
         Ok(())

@@ -18,20 +18,18 @@ use crate::protocol::crypto::threshold_signature::ThresholdSignature;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::protocol::SignatureScheme;
-use crate::stage::{pass, process_illusion};
+use crate::stage::{pass, DelayPool};
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 
 use async_trait::async_trait;
 
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 
 use dashmap::DashMap;
 
-use atomic_float::AtomicF64;
 use std::collections::HashSet;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 enum CurBlockState {
@@ -73,7 +71,7 @@ fn get_blk_creation(
     p2p_signature: P2PSignature,
     threshold_signature: Arc<dyn ThresholdSignature>,
     config: ChainConfig,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
     core_group: Arc<VCoreGroup>,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
@@ -118,8 +116,8 @@ pub async fn block_management_thread(
 ) {
     pf_info!(id; "block management stage starting...");
 
-    let delay = Arc::new(AtomicF64::new(0f64));
-    let mut insert_delay_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
+    let delay = Arc::new(DelayPool::new());
+    let mut yield_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
 
     let mut block_management_stage = get_blk_creation(
         id,
@@ -304,7 +302,7 @@ pub async fn block_management_thread(
                         }
                     }
 
-                    process_illusion(verification_time, &delay_pool).await;
+                    delay_pool.process_illusion(verification_time).await;
                     drop(_permit);
 
                     if !blk_valid {
@@ -416,24 +414,9 @@ pub async fn block_management_thread(
                 }
             }
 
-            _ = pass(), if Instant::now() > insert_delay_time => {
-                // insert delay as appropriate
-                let sleep_time = delay.load(Ordering::Relaxed);
-                if sleep_time > 0.05 {
-                    // doing skipped compute cost
-                    let _permit = match core_group.acquire().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            continue;
-                        }
-                    };
-                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-                    delay.store(0f64, Ordering::Relaxed);
-                } else {
-                    tokio::task::yield_now().await;
-                }
-                insert_delay_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
+            _ = pass(), if Instant::now() > yield_time => {
+                tokio::task::yield_now().await;
+                yield_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
             }
 
             report_val = report_timer.changed() => {

@@ -6,15 +6,13 @@ use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::PrivKey;
 use crate::protocol::MsgType;
+use crate::stage::DelayPool;
 use crate::transaction::Txn;
 use crate::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 
-use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
-
 use tokio::sync::Notify;
 use tokio::time::Duration;
 
@@ -23,7 +21,7 @@ pub struct AvalancheVoteNoDecision {
     signature_scheme: SignatureScheme,
     sk: PrivKey,
     peer_messenger: Arc<PeerMessenger>,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
     _notify: Notify,
 }
 
@@ -33,7 +31,7 @@ impl AvalancheVoteNoDecision {
         p2p_signature: P2PSignature,
         _config: AvalancheVoteNoConfig,
         peer_messenger: Arc<PeerMessenger>,
-        delay: Arc<AtomicF64>,
+        delay: Arc<DelayPool>,
     ) -> Self {
         let (signature_scheme, _, sk) = p2p_signature;
 
@@ -71,7 +69,8 @@ impl Decision for AvalancheVoteNoDecision {
         let msg_content = (id, votes);
         let serialized_msg = &bincode::serialize(&msg_content)?;
         let (signature, stime) = self.signature_scheme.sign(&self.sk, serialized_msg)?;
-        let delay = self.delay.fetch_add(stime, Ordering::Relaxed);
+        self.delay.process_illusion(stime).await;
+        let delay = self.delay.get_current_delay();
         let vote_msg = VoteMsg {
             round: msg_content.0,
             votes: msg_content.1,
@@ -86,7 +85,7 @@ impl Decision for AvalancheVoteNoDecision {
                 MsgType::ConsensusMsg {
                     msg: bincode::serialize(&vote_msg)?,
                 },
-                Duration::from_secs_f64(delay + stime),
+                Duration::from_secs_f64(delay),
             )
             .await?;
 

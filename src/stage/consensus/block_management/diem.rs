@@ -12,14 +12,14 @@ use crate::protocol::types::diem::{
 };
 use crate::protocol::MsgType;
 use crate::stage::pacemaker::diem::DiemPacemaker;
-use crate::stage::process_illusion;
+use crate::stage::DelayPool;
 use crate::transaction::{DiemAccountAddress, DiemTxn, Txn};
 use crate::{CopycatError, NodeId, SignatureScheme};
 
-use atomic_float::AtomicF64;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Notify;
 
 use async_trait::async_trait;
@@ -28,7 +28,7 @@ use get_size::GetSize;
 pub struct DiemBlockManagement {
     id: NodeId,
     blk_size: usize,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
     // states
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     accounts: HashMap<DiemAccountAddress, (PubKey, u64)>,
@@ -62,7 +62,7 @@ impl DiemBlockManagement {
         p2p_signature: P2PSignature,
         threshold_signature: Arc<dyn ThresholdSignature>,
         config: DiemConfig,
-        delay: Arc<AtomicF64>,
+        delay: Arc<DelayPool>,
         peer_messenger: Arc<PeerMessenger>,
     ) -> Self {
         let basic_config = match config {
@@ -210,7 +210,11 @@ impl DiemBlockManagement {
         let mut msg = vec![0u8; 32];
         blk_id.to_little_endian(&mut msg);
         self.peer_messenger
-            .send(leader, MsgType::BlockReq { msg })
+            .delayed_send(
+                leader,
+                MsgType::BlockReq { msg },
+                Duration::from_secs_f64(self.delay.get_current_delay()),
+            )
             .await
     }
 }
@@ -345,7 +349,9 @@ impl BlockManagement for DiemBlockManagement {
 
         let append_dur = merkle_tree.append(speculative_exec_distinct_inserts)?;
         let update_dur = merkle_tree.update(speculative_exec_distinct_writes)?;
-        process_illusion(append_dur + update_dur + speculative_exec_time, &self.delay).await;
+        self.delay
+            .process_illusion(append_dur + update_dur + speculative_exec_time)
+            .await;
 
         // build block
         let diem_blk = DiemBlock {
@@ -360,7 +366,7 @@ impl BlockManagement for DiemBlockManagement {
         let serialized = bincode::serialize(&diem_blk_id)?;
         let (signature, dur) = self.signature_scheme.sign(&self.sk, &serialized)?;
         let last_tc = std::mem::replace(&mut self.last_tc, None);
-        process_illusion(dur, &self.delay).await;
+        self.delay.process_illusion(dur).await;
         let blk_header = BlockHeader::Diem {
             block: diem_blk,
             high_commit_qc: self.high_commit_qc.clone(),
@@ -402,7 +408,7 @@ impl BlockManagement for DiemBlockManagement {
             true
         } else {
             let (valid, verify_time) = self.validate_qc_signatures(&diem_blk.qc)?;
-            process_illusion(verify_time, &self.delay).await;
+            self.delay.process_illusion(verify_time).await;
             if valid {
                 self.process_certificate_qc(&diem_blk.qc).await?;
             }
@@ -413,7 +419,7 @@ impl BlockManagement for DiemBlockManagement {
             true
         } else {
             let (valid, verify_time) = self.validate_qc_signatures(high_commit_qc)?;
-            process_illusion(verify_time, &self.delay).await;
+            self.delay.process_illusion(verify_time).await;
             if valid {
                 self.process_certificate_qc(high_commit_qc).await?;
             }
@@ -422,7 +428,7 @@ impl BlockManagement for DiemBlockManagement {
 
         let tc_valid = {
             let (valid, verify_time) = self.validate_tc_signatures(last_round_tc)?;
-            process_illusion(verify_time, &self.delay).await;
+            self.delay.process_illusion(verify_time).await;
             if valid {
                 self.process_certificate_tc(last_round_tc).await?;
             }
@@ -434,7 +440,7 @@ impl BlockManagement for DiemBlockManagement {
                 let serialized = bincode::serialize(&ctx.id)?;
                 let (valid, verify_time) =
                     self.signature_scheme.verify(&pk, &serialized, signature)?;
-                process_illusion(verify_time, &self.delay).await;
+                self.delay.process_illusion(verify_time).await;
                 valid
             }
             None => false,
@@ -552,7 +558,9 @@ impl BlockManagement for DiemBlockManagement {
 
             let append_dur = merkle_tree.append(speculative_exec_distinct_inserts)?;
             let update_dur = merkle_tree.update(speculative_exec_distinct_writes)?;
-            process_illusion(append_dur + update_dur + speculative_exec_time, &self.delay).await;
+            self.delay
+                .process_illusion(append_dur + update_dur + speculative_exec_time)
+                .await;
             if !merkle_tree.verify_root(&diem_blk.state_id)? {
                 return Ok(vec![]); // speculative exec results do not match
             }
@@ -595,7 +603,11 @@ impl BlockManagement for DiemBlockManagement {
         pf_debug!(self.id; "sending block {} to {}", blk_id, peer);
 
         self.peer_messenger
-            .send(peer, MsgType::NewBlock { blk })
+            .delayed_send(
+                peer,
+                MsgType::NewBlock { blk },
+                Duration::from_secs_f64(self.delay.get_current_delay()),
+            )
             .await
     }
 
@@ -618,9 +630,8 @@ mod diem_block_management_test {
     };
     use crate::stage::consensus::block_management::BlockManagement;
     use crate::stage::pacemaker::diem::DiemPacemaker;
+    use crate::stage::DelayPool;
     use crate::{CopycatError, NodeId, SignatureScheme, ThresholdSignatureScheme};
-
-    use atomic_float::AtomicF64;
 
     #[tokio::test]
     async fn test_blocks_arrive_out_of_order() -> Result<(), CopycatError> {
@@ -638,7 +649,7 @@ mod diem_block_management_test {
         let config = DiemConfig::Basic {
             config: Default::default(),
         };
-        let delay = Arc::new(AtomicF64::new(0f64));
+        let delay = Arc::new(DelayPool::new());
         let peer_messenger = PeerMessenger::new_stub();
 
         let mut diem = DiemBlockManagement::new(

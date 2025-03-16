@@ -6,6 +6,7 @@ use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::MsgType;
+use crate::stage::DelayPool;
 use crate::transaction::{AvalancheTxn, Txn};
 use crate::utils::time_queue::TimeQueue;
 use crate::{CopycatError, NodeId, SignatureScheme};
@@ -14,14 +15,11 @@ use async_trait::async_trait;
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
-
-use atomic_float::AtomicF64;
 
 struct ConflictSet {
     pub has_conflicts: bool,
@@ -69,7 +67,7 @@ pub struct BlizzardDecision {
     commit_count: usize,
     txn_query_count: usize,
     // batch sleep time to reduce overhead
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
 }
 
 impl BlizzardDecision {
@@ -79,7 +77,7 @@ impl BlizzardDecision {
         config: AvalancheBasicConfig,
         peer_messenger: Arc<PeerMessenger>,
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
-        delay: Arc<AtomicF64>,
+        delay: Arc<DelayPool>,
     ) -> Self {
         let (signature_scheme, peer_pks, sk) = p2p_signature;
         let vote_thresh = (config.k as f64 * config.alpha).ceil() as usize;
@@ -538,7 +536,7 @@ impl Decision for BlizzardDecision {
             let msg_content = (blk_id, votes);
             let serialized_msg = &bincode::serialize(&msg_content)?;
             let (signature, stime) = self.signature_scheme.sign(&self.sk, serialized_msg)?;
-            let delay = self.delay.fetch_add(stime, Ordering::Relaxed);
+            self.delay.process_illusion(stime).await;
             let vote_msg = VoteMsg {
                 round: msg_content.0,
                 votes: msg_content.1,
@@ -550,7 +548,7 @@ impl Decision for BlizzardDecision {
                     MsgType::ConsensusMsg {
                         msg: bincode::serialize(&vote_msg)?,
                     },
-                    Duration::from_secs_f64(delay + stime),
+                    Duration::from_secs_f64(self.delay.get_current_delay()),
                 )
                 .await?;
         }
@@ -610,7 +608,7 @@ impl Decision for BlizzardDecision {
         let (valid, vtime) =
             self.signature_scheme
                 .verify(&peer_pk, &serialized_content, &msg.signature)?;
-        self.delay.fetch_add(vtime, Ordering::Relaxed);
+        self.delay.process_illusion(vtime).await;
         if valid {
             self.record_votes(blk_id, src, votes).await?;
         }

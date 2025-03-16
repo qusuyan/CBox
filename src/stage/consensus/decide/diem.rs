@@ -11,7 +11,7 @@ use crate::protocol::types::diem::{
 };
 use crate::protocol::MsgType;
 use crate::stage::pacemaker::diem::DiemPacemaker;
-use crate::stage::process_illusion;
+use crate::stage::DelayPool;
 use crate::transaction::Txn;
 use crate::{CopycatError, NodeId, SignatureScheme};
 
@@ -19,9 +19,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Notify};
+use tokio::time::Duration;
 
 use async_trait::async_trait;
-use atomic_float::AtomicF64;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VoteMsg {
@@ -55,7 +55,7 @@ pub struct DiemDecision {
     threshold_signature: Arc<dyn ThresholdSignature>,
     //
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
     _notify: Notify,
 }
 
@@ -67,7 +67,7 @@ impl DiemDecision {
         config: DiemConfig,
         peer_messenger: Arc<PeerMessenger>,
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
-        delay: Arc<AtomicF64>,
+        delay: Arc<DelayPool>,
     ) -> Self {
         let basic_config = match config {
             DiemConfig::Basic { config } => config,
@@ -157,7 +157,7 @@ impl DiemDecision {
             .aggregate(&ledger_commit_info_serialized, votes)
         {
             Ok((signature, dur)) => {
-                process_illusion(dur, &self.delay).await;
+                self.delay.process_illusion(dur).await;
                 signature
             }
             Err(e) => {
@@ -172,7 +172,7 @@ impl DiemDecision {
             Some(signcomb) => {
                 let (author_signature, dur) =
                     self.signature_scheme.sign(&self.sk, &signcomb).unwrap();
-                process_illusion(dur, &self.delay).await;
+                self.delay.process_illusion(dur).await;
                 self.pending_votes.remove(&vote_id);
                 self.closed_votes.insert(vote_id);
                 Some(QuorumCert {
@@ -306,7 +306,7 @@ impl Decision for DiemDecision {
                 signature,
             };
 
-            process_illusion(check_time_secs, &self.delay).await;
+            self.delay.process_illusion(check_time_secs).await;
 
             let next_leader = DiemPacemaker::get_leader(diem_blk.round + 1, &self.all_nodes);
             pf_debug!(self.id; "Sending vote to node {}: {:?}", next_leader, vote_msg);
@@ -323,7 +323,11 @@ impl Decision for DiemDecision {
                 // send vote message to next leader
                 let msg = bincode::serialize(&vote_msg)?;
                 self.peer_messenger
-                    .send(next_leader, MsgType::ConsensusMsg { msg })
+                    .delayed_send(
+                        next_leader,
+                        MsgType::ConsensusMsg { msg },
+                        Duration::from_secs_f64(self.delay.get_current_delay()),
+                    )
                     .await?;
             }
         }

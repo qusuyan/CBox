@@ -18,19 +18,16 @@ use crate::context::BlkCtx;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
 use crate::protocol::DissemPattern;
-use crate::stage::pass;
+use crate::stage::{pass, DelayPool};
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 use crate::{get_report_timer, ChainConfig};
 
 use async_trait::async_trait;
 
-use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
-
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 use tokio_metrics::TaskMonitor;
 
 #[async_trait]
@@ -73,7 +70,7 @@ pub async fn block_dissemination_thread(
 ) {
     pf_info!(id; "block dissemination stage starting...");
 
-    let delay = Arc::new(AtomicF64::new(0f64));
+    let _delay = Arc::new(DelayPool::new());
     let mut insert_delay_time = Instant::now() + BLK_DISS_DELAY_INTERVAL;
 
     let mut block_dissemination_stage = get_block_dissemination(id, config, peer_messenger);
@@ -140,21 +137,7 @@ pub async fn block_dissemination_thread(
 
             _ = pass(), if Instant::now() > insert_delay_time => {
                 // insert delay as appropriate
-                let sleep_time = delay.load(Ordering::Relaxed);
-                if sleep_time > 0.05 {
-                    // doing skipped compute cost
-                    let _permit = match core_group.acquire().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            continue;
-                        }
-                    };
-                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-                    delay.store(0f64, Ordering::Relaxed);
-                } else {
-                    tokio::task::yield_now().await;
-                }
+                tokio::task::yield_now().await;
                 insert_delay_time = Instant::now() + BLK_DISS_DELAY_INTERVAL;
             }
 

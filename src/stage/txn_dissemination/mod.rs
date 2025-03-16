@@ -13,7 +13,7 @@ use crate::context::TxnCtx;
 use crate::peers::PeerMessenger;
 use crate::protocol::transaction::Txn;
 use crate::protocol::DissemPattern;
-use crate::stage::pass;
+use crate::stage::{pass, DelayPool};
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 use crate::{get_report_timer, ChainConfig};
@@ -22,10 +22,7 @@ use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
-
-use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
+use tokio::time::Instant;
 
 #[async_trait]
 trait TxnDissemination: Send + Sync {
@@ -65,7 +62,7 @@ pub async fn txn_dissemination_thread(
 
     const DISSEM_BATCH_SIZE: usize = 2000usize;
 
-    let delay = Arc::new(AtomicF64::new(0f64));
+    let _delay_pool = Arc::new(DelayPool::new());
     let mut insert_delay_time = Instant::now() + TXM_DISSEM_DELAY_INTERVAL;
 
     let txn_dissemination_stage = get_txn_dissemination(id, enabled, config, peer_messenger);
@@ -136,22 +133,7 @@ pub async fn txn_dissemination_thread(
             }
 
             _ = pass(), if Instant::now() > insert_delay_time => {
-                // insert delay as appropriate
-                let sleep_time = delay.load(Ordering::Relaxed);
-                if sleep_time > 0.05 {
-                    // doing skipped compute cost
-                    let _permit = match core_group.acquire().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            continue;
-                        }
-                    };
-                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-                    delay.store(0f64, Ordering::Relaxed);
-                } else {
-                    tokio::task::yield_now().await;
-                }
+                tokio::task::yield_now().await;
                 insert_delay_time = Instant::now() + TXM_DISSEM_DELAY_INTERVAL;
             }
 
