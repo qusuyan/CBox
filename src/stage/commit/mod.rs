@@ -27,6 +27,7 @@ fn get_commit(_id: NodeId, config: ChainConfig) -> Box<dyn Commit> {
         ChainConfig::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::Diem { .. } => Box::new(DummyCommit::new()),    // TODO:
+        ChainConfig::Aptos { .. } => Box::new(DummyCommit::new()),   // TODO:
     }
 }
 

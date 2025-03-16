@@ -28,6 +28,7 @@ use get_size::GetSize;
 pub struct DiemBlockManagement {
     id: NodeId,
     blk_size: usize,
+    _proposao_timeout: Duration,
     delay: Arc<DelayPool>,
     // states
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
@@ -76,6 +77,7 @@ impl DiemBlockManagement {
         Self {
             id,
             blk_size: config.blk_size,
+            _proposao_timeout: Duration::from_secs_f64(config.proposal_timeout_secs),
             delay,
             peer_messenger,
             txn_pool: HashMap::new(),

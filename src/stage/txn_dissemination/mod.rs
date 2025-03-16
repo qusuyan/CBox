@@ -45,6 +45,7 @@ fn get_txn_dissemination(
         DissemPattern::Sample { .. } => todo!(), // TODO: use gossip for now
         DissemPattern::Passthrough => Box::new(PassthroughTxnDissemination::new()),
         DissemPattern::Linear { .. } => todo!(), // TODO: use passthrough for now
+        DissemPattern::Narwhal { .. } => unreachable!(),
     }
 }
 

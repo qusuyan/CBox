@@ -7,6 +7,8 @@ use fixed_inflight_blk::FixedInflightBlkPacemaker;
 pub mod diem;
 use diem::DiemPacemaker;
 
+mod aptos;
+
 use crate::config::AvalancheConfig;
 use crate::consts::PACE_DELAY_INTERVAL;
 use crate::get_report_timer;
@@ -49,6 +51,7 @@ fn get_pacemaker(
         },
         ChainConfig::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,
         ChainConfig::Diem { .. } => Box::new(DiemPacemaker::new(id, peer_messenger)),
+        ChainConfig::Aptos { config } => aptos::new(id, config),
     }
 }
 

@@ -13,6 +13,8 @@ use linear::LinearBlockDissemination;
 mod passthrough;
 use passthrough::PassthroughBlockDissemination;
 
+mod narwhal;
+
 use crate::consts::BLK_DISS_DELAY_INTERVAL;
 use crate::context::BlkCtx;
 use crate::peers::PeerMessenger;
@@ -55,6 +57,7 @@ fn get_block_dissemination(
         DissemPattern::Passthrough => {
             Box::new(PassthroughBlockDissemination::new(id, peer_messenger))
         }
+        DissemPattern::Narwhal => todo!(),
     }
 }
 

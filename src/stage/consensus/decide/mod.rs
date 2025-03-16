@@ -1,3 +1,4 @@
+mod aptos;
 mod avalanche;
 mod bitcoin;
 mod diem;
@@ -64,6 +65,15 @@ fn get_decision(
             Box::new(ChainReplicationDecision::new(id, config, peer_messenger))
         }
         ChainConfig::Diem { config } => diem::new(
+            id,
+            p2p_signature,
+            threshold_signature,
+            config,
+            peer_messenger,
+            pmaker_feedback_send,
+            delay,
+        ),
+        ChainConfig::Aptos { config } => aptos::new(
             id,
             p2p_signature,
             threshold_signature,

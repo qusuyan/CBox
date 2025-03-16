@@ -34,8 +34,7 @@ struct VoteMsg {
 
 pub struct DiemDecision {
     id: NodeId,
-    _proposal_timeout_secs: f64, // TODO
-    _vote_timeout_secs: f64,     // TODO
+    _vote_timeout_secs: f64, // TODO
     blk_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>, u64)>,
     commit_queue: HashMap<u64, Hash>,
     next_commit_height: u64,
@@ -85,7 +84,6 @@ impl DiemDecision {
 
         Self {
             id,
-            _proposal_timeout_secs: config.proposal_timeout_secs,
             _vote_timeout_secs: config.vote_timeout_secs,
             blk_pool: HashMap::new(),
             commit_queue: HashMap::new(),

@@ -13,6 +13,9 @@ pub use chain_replication::ChainReplicationConfig;
 mod diem;
 pub use diem::{DiemBasicConfig, DiemConfig};
 
+mod aptos;
+pub use aptos::{AptosConfig, AptosDiemConfig};
+
 use crate::protocol::ChainType;
 use crate::utils::CopycatError;
 use crate::{DissemPattern, NodeId};
@@ -30,6 +33,7 @@ pub enum ChainConfig {
     Avalanche { config: AvalancheConfig },
     ChainReplication { config: ChainReplicationConfig },
     Diem { config: DiemConfig },
+    Aptos { config: AptosConfig },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -102,6 +106,7 @@ impl NodeConfig {
                 }
             }
             ChainConfig::Diem { .. } => {}
+            ChainConfig::Aptos { .. } => {}
         }
     }
 }
@@ -122,6 +127,9 @@ impl ChainConfig {
             ChainConfig::ChainReplication { .. } => DissemPattern::Passthrough,
             ChainConfig::Diem { config } => match config {
                 DiemConfig::Basic { config } => config.txn_dissem.clone(),
+            },
+            ChainConfig::Aptos { config } => match config {
+                AptosConfig::Basic { config } => config.txn_dissem.clone(),
             },
         }
     }
@@ -146,6 +154,7 @@ impl ChainConfig {
                 order: config.order.clone(),
             },
             ChainConfig::Diem { .. } => DissemPattern::Broadcast,
+            ChainConfig::Aptos { .. } => DissemPattern::Narwhal,
         }
     }
 }

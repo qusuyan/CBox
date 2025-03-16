@@ -31,6 +31,7 @@ pub enum DissemPattern {
     Sample { sample_size: usize },
     Linear { order: Vec<NodeId> },
     Passthrough,
+    Narwhal,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, GetSize)]

@@ -1,3 +1,4 @@
+mod aptos;
 mod avalanche;
 mod bitcoin;
 mod diem;
@@ -94,6 +95,9 @@ fn get_blk_creation(
             delay,
             peer_messenger,
         ),
+        ChainConfig::Aptos { config } => {
+            aptos::new(id, p2p_signature, config, delay, peer_messenger)
+        }
     }
 }
 

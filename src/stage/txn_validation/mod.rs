@@ -1,3 +1,4 @@
+mod aptos;
 mod avalanche;
 mod bitcoin;
 mod diem;
@@ -41,6 +42,7 @@ fn get_txn_validation(id: NodeId, config: ChainConfig) -> Box<dyn TxnValidation>
         ChainConfig::Bitcoin { config } => bitcoin::new(id, config),
         ChainConfig::Avalanche { config } => avalanche::new(id, config),
         ChainConfig::Diem { config } => diem::new(id, config),
+        ChainConfig::Aptos { config } => aptos::new(id, config),
     }
 }
 
