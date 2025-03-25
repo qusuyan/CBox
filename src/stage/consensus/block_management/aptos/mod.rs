@@ -5,6 +5,7 @@ use super::{BlockManagement, CurBlockState};
 use crate::config::AptosConfig;
 use crate::peers::PeerMessenger;
 use crate::protocol::crypto::signature::P2PSignature;
+use crate::protocol::crypto::threshold_signature::ThresholdSignature;
 use crate::stage::DelayPool;
 use crate::NodeId;
 
@@ -13,6 +14,7 @@ use std::sync::Arc;
 pub fn new(
     id: NodeId,
     p2p_signature: P2PSignature,
+    threshold_signature: Arc<dyn ThresholdSignature>,
     config: AptosConfig,
     delay: Arc<DelayPool>,
     peer_messenger: Arc<PeerMessenger>,
@@ -21,6 +23,7 @@ pub fn new(
         AptosConfig::Basic { config } => Box::new(AptosBlockManagement::new(
             id,
             p2p_signature,
+            threshold_signature,
             config,
             delay,
             peer_messenger,

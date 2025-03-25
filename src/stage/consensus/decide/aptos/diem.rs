@@ -52,8 +52,8 @@ impl AptosDiemDecision {
         Self {
             id,
             blk_len: config.diem_blk_len,
-            _proposao_timeout: Duration::from_secs_f64(config.proposal_timeout_secs),
-            _vote_timeout_secs: Duration::from_secs_f64(config.vote_timeout_secs),
+            _proposao_timeout: Duration::from_secs_f64(config.diem_batching_timeout_secs),
+            _vote_timeout_secs: Duration::from_secs_f64(config.diem_vote_timeout_secs),
             all_nodes,
             peer_messenger,
             signature_scheme,

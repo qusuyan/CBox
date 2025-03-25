@@ -14,11 +14,13 @@ mod passthrough;
 use passthrough::PassthroughBlockDissemination;
 
 mod narwhal;
+use narwhal::NarwhalBlockDissemination;
 
 use crate::consts::BLK_DISS_DELAY_INTERVAL;
 use crate::context::BlkCtx;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
+use crate::protocol::crypto::threshold_signature::ThresholdSignature;
 use crate::protocol::DissemPattern;
 use crate::stage::{pass, DelayPool};
 use crate::utils::{CopycatError, NodeId};
@@ -34,7 +36,15 @@ use tokio_metrics::TaskMonitor;
 
 #[async_trait]
 trait BlockDissemination: Sync + Send {
-    async fn disseminate(&mut self, src: NodeId, block: Arc<Block>) -> Result<(), CopycatError>;
+    async fn disseminate(
+        &mut self,
+        src: NodeId,
+        blocks: Vec<(Arc<Block>, Arc<BlkCtx>)>,
+    ) -> Result<(), CopycatError>;
+    async fn wait_disseminated(&self) -> Result<(), CopycatError>;
+    async fn get_disseminated(
+        &mut self,
+    ) -> Result<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>), CopycatError>;
     async fn handle_peer_msg(&mut self, src: NodeId, msg: Vec<u8>) -> Result<(), CopycatError>;
 }
 
@@ -42,6 +52,9 @@ fn get_block_dissemination(
     id: NodeId,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
+    threshold_signature: Arc<dyn ThresholdSignature>,
+    pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
+    delay: Arc<DelayPool>,
 ) -> Box<dyn BlockDissemination> {
     match config.get_blk_dissem() {
         DissemPattern::Broadcast => Box::new(BroadcastBlockDissemination::new(id, peer_messenger)),
@@ -57,7 +70,13 @@ fn get_block_dissemination(
         DissemPattern::Passthrough => {
             Box::new(PassthroughBlockDissemination::new(id, peer_messenger))
         }
-        DissemPattern::Narwhal => todo!(),
+        DissemPattern::Narwhal => Box::new(NarwhalBlockDissemination::new(
+            id,
+            peer_messenger,
+            threshold_signature,
+            pmaker_feedback_send,
+            delay,
+        )),
     }
 }
 
@@ -65,18 +84,27 @@ pub async fn block_dissemination_thread(
     id: NodeId,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
+    threshold_signature: Arc<dyn ThresholdSignature>,
     mut new_block_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
     mut peer_blk_dissem_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     block_ready_send: mpsc::Sender<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
+    pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
     core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "block dissemination stage starting...");
 
-    let _delay = Arc::new(DelayPool::new());
+    let delay = Arc::new(DelayPool::new());
     let mut insert_delay_time = Instant::now() + BLK_DISS_DELAY_INTERVAL;
 
-    let mut block_dissemination_stage = get_block_dissemination(id, config, peer_messenger);
+    let mut block_dissemination_stage = get_block_dissemination(
+        id,
+        config,
+        peer_messenger,
+        threshold_signature,
+        pmaker_feedback_send,
+        delay,
+    );
 
     let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();
@@ -102,26 +130,35 @@ pub async fn block_dissemination_thread(
                     }
                 };
 
-                // only disseminate the last block
-                let (new_blk, _) = match new_tail.last() {
-                    Some(blk) => blk,
-                    None => continue,
-                };
+                pf_debug!(id; "got new tail {:?}", new_tail);
 
-                pf_debug!(id; "got new block {:?}", new_blk);
-
-                if let Err(e) = block_dissemination_stage.disseminate(src, new_blk.clone()).await {
+                if let Err(e) = block_dissemination_stage.disseminate(src, new_tail).await {
                     pf_error!(id; "failed to disseminate new block: {:?}", e);
                     continue;
                 }
 
                 drop(_permit);
+            },
 
-                if let Err(e) = block_ready_send.send((src, new_tail)).await {
-                    pf_error!(id; "failed to send to block_ready pipe: {:?}", e);
+            wait_result = block_dissemination_stage.wait_disseminated() => {
+                if let Err(e) = wait_result {
+                    pf_error!(id; "failed to wait for disseminated block: {:?}", e);
                     continue;
                 }
-            },
+
+                match block_dissemination_stage.get_disseminated().await {
+                    Ok(blks) => {
+                        if let Err(e) = block_ready_send.send(blks).await {
+                            pf_error!(id; "failed to send disseminated block: {:?}", e);
+                            continue
+                        }
+                    },
+                    Err(e) => {
+                        pf_error!(id; "failed to get disseminated block: {:?}", e);
+                        continue;
+                    }
+                }
+            }
 
             peer_msg = peer_blk_dissem_recv.recv() => {
                 let (src, msg) = match peer_msg {

@@ -10,6 +10,9 @@ pub use avalanche::AvalancheTxn;
 mod diem;
 pub use diem::{DiemAccountAddress, DiemPayload, DiemTxn};
 
+mod aptos;
+pub use aptos::{get_aptos_addr, AptosAccountAddress, AptosPayload, AptosTxn};
+
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +27,7 @@ pub enum Txn {
     Bitcoin { txn: BitcoinTxn },
     Avalanche { txn: AvalancheTxn },
     Diem { txn: DiemTxn },
+    Aptos { txn: AptosTxn },
 }
 
 impl Txn {
@@ -33,6 +37,7 @@ impl Txn {
             Txn::Bitcoin { txn } => txn.compute_id(),
             Txn::Avalanche { txn } => txn.compute_id(),
             Txn::Diem { txn } => txn.compute_id(),
+            Txn::Aptos { txn } => txn.compute_id(),
         }
     }
 
@@ -42,6 +47,7 @@ impl Txn {
             Txn::Bitcoin { txn } => txn.validate(crypto),
             Txn::Avalanche { txn } => txn.validate(crypto),
             Txn::Diem { txn } => txn.validate(crypto),
+            Txn::Aptos { txn } => txn.validate(crypto),
         }
     }
 }
@@ -53,6 +59,7 @@ impl GetSize for Txn {
             Txn::Avalanche { txn } => AvalancheTxn::get_size(&txn),
             Txn::Bitcoin { txn } => BitcoinTxn::get_size(&txn),
             Txn::Diem { txn } => DiemTxn::get_size(&txn),
+            Txn::Aptos { txn } => AptosTxn::get_size(&txn),
         }
     }
 }

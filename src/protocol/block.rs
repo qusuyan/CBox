@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use super::types::diem::QuorumCert;
+use super::types::{aptos::CoA, diem::QuorumCert};
 use super::{
     crypto::{sha256, Signature},
     types::diem::{DiemBlock, TimeCert},
@@ -46,6 +46,13 @@ pub enum BlockHeader {
         high_commit_qc: QuorumCert,
         signature: Signature,
     },
+    Aptos {
+        sender: NodeId,
+        round: u64,
+        certificates: Vec<CoA>,
+        merkle_root: Hash,
+        signature: Signature,
+    },
 }
 
 // TODO: for better accuracy, we should implement GetSize manually so that message size
@@ -82,6 +89,10 @@ impl Block {
             BlockHeader::Bitcoin { .. } => Ok(sha256(&header)?),
             BlockHeader::ChainReplication { blk_id } => Ok(*blk_id),
             BlockHeader::Diem { block, .. } => block.compute_id(txn_ctx),
+            BlockHeader::Aptos { sender, round, .. } => {
+                let raw = [0u64, 0u64, *sender, *round];
+                Ok(Hash { 0: raw })
+            }
         }
     }
 }

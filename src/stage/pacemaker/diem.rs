@@ -34,10 +34,10 @@ impl DiemPacemaker {
 
 #[async_trait]
 impl Pacemaker for DiemPacemaker {
-    async fn wait_to_propose(&self) {
+    async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         loop {
             if !self.pending_qcs.is_empty() {
-                return;
+                return Ok(());
             }
             self._notify.notified().await;
         }

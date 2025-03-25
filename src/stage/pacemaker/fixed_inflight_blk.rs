@@ -20,10 +20,11 @@ impl FixedInflightBlkPacemaker {
 
 #[async_trait]
 impl Pacemaker for FixedInflightBlkPacemaker {
-    async fn wait_to_propose(&self) {
+    async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         if self.quota == 0 {
             self._notify.notified().await;
         }
+        Ok(())
     }
 
     async fn get_propose_msg(&mut self) -> Result<Vec<u8>, CopycatError> {

@@ -12,6 +12,7 @@ mod aptos;
 use crate::config::AvalancheConfig;
 use crate::consts::PACE_DELAY_INTERVAL;
 use crate::get_report_timer;
+use crate::protocol::crypto::signature::P2PSignature;
 use crate::stage::{pass, DelayPool};
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
@@ -26,7 +27,7 @@ use tokio_metrics::TaskMonitor;
 
 #[async_trait]
 trait Pacemaker: Sync + Send {
-    async fn wait_to_propose(&self);
+    async fn wait_to_propose(&self) -> Result<(), CopycatError>;
     async fn get_propose_msg(&mut self) -> Result<Vec<u8>, CopycatError>;
     async fn handle_feedback(&mut self, feedback: Vec<u8>) -> Result<(), CopycatError>;
     async fn handle_peer_msg(&mut self, src: NodeId, msg: Vec<u8>) -> Result<(), CopycatError>;
@@ -36,6 +37,7 @@ fn get_pacemaker(
     id: NodeId,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
+    p2p_signature: P2PSignature,
 ) -> Box<dyn Pacemaker> {
     match config {
         ChainConfig::Dummy { .. } => Box::new(DummyPacemaker::new()),
@@ -51,7 +53,7 @@ fn get_pacemaker(
         },
         ChainConfig::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,
         ChainConfig::Diem { .. } => Box::new(DiemPacemaker::new(id, peer_messenger)),
-        ChainConfig::Aptos { config } => aptos::new(id, config),
+        ChainConfig::Aptos { config } => aptos::new(id, config, p2p_signature),
     }
 }
 
@@ -59,6 +61,7 @@ pub async fn pacemaker_thread(
     id: NodeId,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
+    p2p_signature: P2PSignature,
     mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut pmaker_feedback_recv: mpsc::Receiver<Vec<u8>>,
     should_propose_send: mpsc::Sender<Vec<u8>>,
@@ -70,14 +73,19 @@ pub async fn pacemaker_thread(
     let _delay_pool = Arc::new(DelayPool::new());
     let mut insert_delay_time = Instant::now() + PACE_DELAY_INTERVAL;
 
-    let mut pmaker = get_pacemaker(id, config, peer_messenger);
+    let mut pmaker = get_pacemaker(id, config, peer_messenger, p2p_signature);
 
     let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
-            _ = pmaker.wait_to_propose() => {
+            wait_result = pmaker.wait_to_propose() => {
+                if let Err(e) = wait_result {
+                    pf_error!(id; "failed waiting for proposal message: {:?}", e);
+                    continue;
+                }
+
                 // pmaker logic to decide if current node can propose new block
                 let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,

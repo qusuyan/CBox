@@ -20,8 +20,9 @@ impl DummyPacemaker {
 
 #[async_trait]
 impl Pacemaker for DummyPacemaker {
-    async fn wait_to_propose(&self) {
+    async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         self._notify.notified().await;
+        Ok(())
     }
 
     async fn get_propose_msg(&mut self) -> Result<Vec<u8>, CopycatError> {
