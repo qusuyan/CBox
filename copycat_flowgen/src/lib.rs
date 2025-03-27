@@ -1,4 +1,5 @@
 mod chain_replication;
+use aptos::AptosFlowGen;
 use chain_replication::ChainReplicationFlowGen;
 
 mod bitcoin;
@@ -8,10 +9,12 @@ mod avalanche;
 use avalanche::AvalancheFlowGen;
 
 mod diem;
+use diem::DiemFlowGen;
+
+mod aptos;
 
 use async_trait::async_trait;
 use copycat::{transaction::Txn, ChainType, CopycatError, NodeId, SignatureScheme};
-use diem::DiemFlowGen;
 
 use std::sync::Arc;
 
@@ -77,6 +80,14 @@ pub fn get_flow_gen(
             crypto,
         )),
         ChainType::Diem => Box::new(DiemFlowGen::new(
+            id,
+            client_list,
+            num_accounts,
+            max_inflight,
+            frequency,
+            crypto,
+        )),
+        ChainType::Aptos => Box::new(AptosFlowGen::new(
             id,
             client_list,
             num_accounts,

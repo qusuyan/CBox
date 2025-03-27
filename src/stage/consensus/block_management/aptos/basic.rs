@@ -26,7 +26,7 @@ pub struct AptosBlockManagement {
     blk_size: usize,
     batch_timeout: Duration,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
-    blk_pool: HashMap<(NodeId, u64), (Arc<Block>, Arc<BlkCtx>)>,
+    blks_seen: HashSet<(NodeId, u64)>,
     all_nodes: Vec<NodeId>,
     self_idx: usize,
     // mempool
@@ -79,7 +79,7 @@ impl AptosBlockManagement {
             blk_size: config.narwhal_blk_size,
             batch_timeout: Duration::from_secs_f64(config.diem_batching_timeout_secs),
             txn_pool: HashMap::new(),
-            blk_pool: HashMap::new(),
+            blks_seen: HashSet::new(),
             all_nodes,
             self_idx,
             pending_txns: VecDeque::new(),
@@ -194,8 +194,7 @@ impl BlockManagement for AptosBlockManagement {
         let blk_ctx = Arc::new(BlkCtx::from_header_and_txns(&header, txn_ctx)?);
         let block = Arc::new(Block { header, txns });
 
-        self.blk_pool
-            .insert((self.id, self.round), (block.clone(), blk_ctx.clone()));
+        self.blks_seen.insert((self.id, self.round));
 
         self.cur_block_size = 0;
         self.cur_block_timeout = None;
@@ -225,7 +224,7 @@ impl BlockManagement for AptosBlockManagement {
         // verify signature
         let sender_pk = match self.peer_pks.get(sender) {
             Some(pk) => pk,
-            None => return Ok(vec![(block, Arc::new(ctx.invalidate()))]), // unknown sender
+            None => return Ok(vec![]), // unknown sender
         };
         let content = (sender, round, certificates, merkle_root);
         let serialized = bincode::serialize(&content)?;
@@ -234,21 +233,16 @@ impl BlockManagement for AptosBlockManagement {
             .verify(sender_pk, &serialized, signature)?;
         self.delay.process_illusion(dur).await;
         if !valid {
-            return Ok(vec![(block, Arc::new(ctx.invalidate()))]);
-        }
-
-        // only vote for blocks in the current round
-        if *round != self.round {
-            return Ok(vec![(block, Arc::new(ctx.invalidate()))]);
+            return Ok(vec![]);
         }
 
         // either genesis or contains N-f certificates from round r-1
-        if *round != 0 {
+        if *round != 1 {
             let mut valid_needed = self.all_nodes.len() - self.num_faulty;
             for (idx, certificate) in certificates.iter().enumerate() {
                 if certificates.len() - idx < valid_needed {
                     // not enough certificates left, kill early
-                    return Ok(vec![(block, Arc::new(ctx.invalidate()))]);
+                    return Ok(vec![]);
                 }
                 if certificate.round != round - 1 {
                     continue;
@@ -260,12 +254,14 @@ impl BlockManagement for AptosBlockManagement {
                 }
                 valid_needed -= 1;
             }
+
+            if valid_needed > 0 {
+                // not enough certificates
+                return Ok(vec![]);
+            }
         }
 
-        // only vote for the first one received from creator of round r
-        if self.blk_pool.contains_key(&(*sender, *round)) {
-            return Ok(vec![(block, Arc::new(ctx.invalidate()))]);
-        }
+        self.blks_seen.insert((*sender, *round));
 
         Ok(vec![(block, ctx)])
     }
@@ -273,6 +269,7 @@ impl BlockManagement for AptosBlockManagement {
     async fn handle_pmaker_msg(&mut self, msg: Vec<u8>) -> Result<(), CopycatError> {
         let coa_list: Vec<CoA> = bincode::deserialize(&msg)?;
         let round = coa_list.first().unwrap().round;
+        pf_debug!(self.id; "got coa list for round {}, current round is {} (curblock len: {}, curblock size: {}, curblock timeout: {:?})", round, self.round, self.block_under_construction.len(), self.cur_block_size, self.cur_block_timeout);
         self.coa_lists.insert(round, coa_list);
         Ok(())
     }

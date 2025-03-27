@@ -22,6 +22,7 @@ pub enum ChainType {
     Avalanche,
     ChainReplication,
     Diem,
+    Aptos,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

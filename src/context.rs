@@ -78,6 +78,7 @@ impl Debug for BlkCtx {
         f.debug_struct("BlkCtx")
             .field("id", &self.id)
             .field("num_txns", &self.txn_ctx.len())
+            .field("is_invalid", &self.invalid)
             .finish()
     }
 }

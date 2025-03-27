@@ -25,8 +25,8 @@ impl SignatureBasedThresholdSignature {
         let mut privkeys = HashMap::new();
         for node in nodes {
             let (pk, sk) = signature_scheme.gen_key_pair(seed + *node as u64);
-            privkeys.insert(*node, pk);
-            pubkeys.insert(*node, sk);
+            pubkeys.insert(*node, pk);
+            privkeys.insert(*node, sk);
         }
 
         let mut quorum: HashMap<u64, Arc<dyn ThresholdSignature>> = HashMap::new();

@@ -195,6 +195,9 @@ pub fn parse_config_file(
             ChainType::Diem => ChainConfig::Diem {
                 config: serde_json::from_value(config_item.config.clone())?,
             },
+            ChainType::Aptos => ChainConfig::Aptos {
+                config: serde_json::from_value(config_item.config.clone())?,
+            },
         };
         println!("{:?}", config);
         for node in config_item.nodes {
