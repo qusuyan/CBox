@@ -56,12 +56,13 @@ pub enum BlockHeader {
     },
 }
 
+// TODO: use len() instead of get_size() for signatures
 impl GetSize for BlockHeader {
     fn get_size(&self) -> usize {
         match self {
             BlockHeader::Dummy => 0,
             BlockHeader::Bitcoin { .. } => 76,
-            BlockHeader::Avalanche { signature, .. } => 56 + signature.get_size(),
+            BlockHeader::Avalanche { signature, .. } => 56 + signature.len(),
             BlockHeader::ChainReplication { .. } => 32,
             BlockHeader::Diem {
                 block,
@@ -69,21 +70,22 @@ impl GetSize for BlockHeader {
                 high_commit_qc,
                 signature,
             } => {
-                block.get_size()
-                    + last_round_tc.get_size()
-                    + high_commit_qc.get_size()
-                    + signature.get_size()
+                let tc_size = match last_round_tc {
+                    Some(tc) => 1 + tc.get_size(),
+                    None => 1,
+                };
+                block.get_size() + tc_size + high_commit_qc.get_size() + signature.len()
             }
             BlockHeader::Aptos {
                 certificates,
                 signature,
                 ..
-            } => 48 + certificates.get_size() + signature.get_size(),
+            } => 48 + certificates.get_size() + signature.len(),
         }
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Block {
     pub header: BlockHeader,
     pub txns: Vec<Arc<Txn>>,
@@ -121,6 +123,17 @@ impl Block {
     }
 }
 
+impl GetSize for Block {
+    fn get_size(&self) -> usize {
+        self.header.get_size()
+            + self
+                .txns
+                .iter()
+                .map(|txn| txn.as_ref().get_size())
+                .sum::<usize>()
+    }
+}
+
 impl Debug for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         self.header.fmt(f)
@@ -137,6 +150,7 @@ mod blk_header_get_size_test {
 
     use get_size::GetSize;
     use primitive_types::U256;
+
     #[test]
     fn blk_header_get_size() {
         let dummy_header = BlockHeader::Dummy;
@@ -156,13 +170,14 @@ mod blk_header_get_size_test {
         };
         println!("{}", avax_header.get_size());
 
+        let diem_block = DiemBlock {
+            proposer: 0,
+            round: 0,
+            state_id: Hash(U256::zero()),
+            qc: GENESIS_QC.clone(),
+        };
         let diem_header = BlockHeader::Diem {
-            block: DiemBlock {
-                proposer: 0,
-                round: 0,
-                state_id: Hash(U256::zero()),
-                qc: GENESIS_QC.clone(),
-            },
+            block: diem_block,
             last_round_tc: None,
             high_commit_qc: GENESIS_QC.clone(),
             signature: vec![0u8; 64],

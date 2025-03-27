@@ -13,7 +13,6 @@ use crate::transaction::Txn;
 use crate::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
-use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;

@@ -6,14 +6,14 @@ pub mod types;
 pub use crypto::signature::SignatureScheme;
 pub use crypto::threshold_signature::ThresholdSignatureScheme;
 
+use crate::NodeId;
 use block::Block;
-use get_size::GetSize;
-use serde::{Deserialize, Serialize};
 use transaction::Txn;
 
 use std::sync::Arc;
 
-use crate::NodeId;
+use get_size::GetSize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, clap::ValueEnum)]
 pub enum ChainType {
@@ -35,7 +35,7 @@ pub enum DissemPattern {
     Narwhal,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MsgType {
     NewTxn { txn_batch: Vec<Arc<Txn>> },
     NewBlock { blk: Arc<Block> },
@@ -43,6 +43,24 @@ pub enum MsgType {
     ConsensusMsg { msg: Vec<u8> },
     PMakerMsg { msg: Vec<u8> },
     BlockReq { msg: Vec<u8> },
+}
+
+impl GetSize for MsgType {
+    fn get_size(&self) -> usize {
+        match self {
+            MsgType::NewTxn { txn_batch } => {
+                8 + txn_batch
+                    .iter()
+                    .map(|txn| txn.as_ref().get_size())
+                    .sum::<usize>()
+            }
+            MsgType::NewBlock { blk } => blk.as_ref().get_size(),
+            MsgType::BlkDissemMsg { msg } => msg.len(),
+            MsgType::ConsensusMsg { msg } => msg.len(),
+            MsgType::PMakerMsg { msg } => msg.len(),
+            MsgType::BlockReq { msg } => msg.len(),
+        }
+    }
 }
 
 #[cfg(test)]

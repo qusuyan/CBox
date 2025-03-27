@@ -26,13 +26,23 @@ impl VoteInfo {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct LedgerCommitInfo {
     pub commit_state_id: Option<Hash>,
     pub vote_info_hash: Hash,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, GetSize)]
+impl GetSize for LedgerCommitInfo {
+    fn get_size(&self) -> usize {
+        let commit_id_size = match self.commit_state_id {
+            Some(id) => 1 + id.get_size(),
+            None => 1,
+        };
+        commit_id_size + 32
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct QuorumCert {
     pub vote_info: VoteInfo,
     pub commit_info: LedgerCommitInfo,
@@ -41,12 +51,28 @@ pub struct QuorumCert {
     pub author_signature: Signature,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
+impl GetSize for QuorumCert {
+    fn get_size(&self) -> usize {
+        self.vote_info.get_size()
+            + self.commit_info.get_size()
+            + self.signatures.len()
+            + 8 // NodeId is 8 bytes
+            + self.author_signature.len()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DiemBlock {
     pub proposer: NodeId,
     pub round: u64,
     pub state_id: Hash,
     pub qc: QuorumCert,
+}
+
+impl GetSize for DiemBlock {
+    fn get_size(&self) -> usize {
+        48 + self.qc.get_size()
+    }
 }
 
 impl DiemBlock {
@@ -62,7 +88,7 @@ impl DiemBlock {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimeoutInfo {
     pub round: u64,
     pub high_qc: QuorumCert,
@@ -70,11 +96,28 @@ pub struct TimeoutInfo {
     pub signature: Signature,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, GetSize)]
+impl GetSize for TimeoutInfo {
+    fn get_size(&self) -> usize {
+        16 + self.high_qc.get_size() + self.signature.len()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimeCert {
     pub round: u64,
     pub tmo_high_qc_rounds: HashMap<NodeId, u64>,
     pub tmo_signatures: HashMap<NodeId, Signature>,
+}
+
+impl GetSize for TimeCert {
+    fn get_size(&self) -> usize {
+        8 + self.tmo_high_qc_rounds.len() * (8 + 8)
+            + self
+                .tmo_signatures
+                .iter()
+                .map(|(_, signature)| 8 + signature.len())
+                .sum::<usize>()
+    }
 }
 
 lazy_static! {

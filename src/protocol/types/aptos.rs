@@ -24,6 +24,6 @@ impl CoA {
 
 impl GetSize for CoA {
     fn get_size(&self) -> usize {
-        48 + self.signature.get_size()
+        48 + self.signature.len()
     }
 }
