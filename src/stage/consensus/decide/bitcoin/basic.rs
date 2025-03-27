@@ -51,7 +51,7 @@ impl Decision for BitcoinDecision {
                     BlockHeader::Bitcoin { parent_id, .. } => parent_id,
                     _ => unreachable!(),
                 };
-                if parent_id.is_zero() {
+                if parent_id.0.is_zero() {
                     (parent_id, 1u64) // first block of chain
                 } else {
                     match self.block_pool.get(parent_id) {

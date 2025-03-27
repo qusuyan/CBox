@@ -1,27 +1,41 @@
 use crate::config::AptosDiemConfig;
 use crate::context::BlkCtx;
 use crate::peers::PeerMessenger;
-use crate::protocol::block::Block;
+use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::threshold_signature::ThresholdSignature;
 use crate::protocol::crypto::{PrivKey, PubKey};
+use crate::protocol::types::aptos::CoA;
+use crate::protocol::types::diem::{DiemBlock, TimeCert};
 use crate::stage::consensus::decide::Decision;
 use crate::stage::DelayPool;
 use crate::transaction::Txn;
 use crate::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
+use get_size::GetSize;
+use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum DiemConsensusMsg {
+    Proposal {
+        block: DiemBlock,
+        last_round_tc: Option<TimeCert>,
+    },
+}
+
 pub struct AptosDiemDecision {
     id: NodeId,
     blk_len: usize,
     _proposao_timeout: Duration,
     _vote_timeout_secs: Duration, // TODO
+    //
+    quorum_store: HashMap<(NodeId, u64), (Arc<Block>, Arc<BlkCtx>)>,
     // P2P communication
     all_nodes: Vec<NodeId>,
     peer_messenger: Arc<PeerMessenger>,
@@ -54,6 +68,7 @@ impl AptosDiemDecision {
             blk_len: config.diem_blk_len,
             _proposao_timeout: Duration::from_secs_f64(config.diem_batching_timeout_secs),
             _vote_timeout_secs: Duration::from_secs_f64(config.diem_vote_timeout_secs),
+            quorum_store: HashMap::new(),
             all_nodes,
             peer_messenger,
             signature_scheme,
@@ -70,10 +85,17 @@ impl AptosDiemDecision {
 impl Decision for AptosDiemDecision {
     async fn new_tail(
         &mut self,
-        src: NodeId,
+        _src: NodeId,
         new_tail: Vec<(Arc<Block>, Arc<BlkCtx>)>,
     ) -> Result<(), CopycatError> {
-        todo!()
+        for (blk, ctx) in new_tail {
+            let (sender, round) = match blk.header {
+                BlockHeader::Aptos { sender, round, .. } => (sender, round),
+                _ => unreachable!(),
+            };
+            self.quorum_store.insert((sender, round), (blk, ctx));
+        }
+        Ok(())
     }
 
     async fn commit_ready(&self) -> Result<(), CopycatError> {

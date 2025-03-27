@@ -1,4 +1,5 @@
 use get_size::GetSize;
+use primitive_types::U256;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 
@@ -55,9 +56,32 @@ pub enum BlockHeader {
     },
 }
 
-// TODO: for better accuracy, we should implement GetSize manually so that message size
-// matches the size after marshalling.
-impl GetSize for BlockHeader {}
+impl GetSize for BlockHeader {
+    fn get_size(&self) -> usize {
+        match self {
+            BlockHeader::Dummy => 0,
+            BlockHeader::Bitcoin { .. } => 76,
+            BlockHeader::Avalanche { signature, .. } => 56 + signature.get_size(),
+            BlockHeader::ChainReplication { .. } => 32,
+            BlockHeader::Diem {
+                block,
+                last_round_tc,
+                high_commit_qc,
+                signature,
+            } => {
+                block.get_size()
+                    + last_round_tc.get_size()
+                    + high_commit_qc.get_size()
+                    + signature.get_size()
+            }
+            BlockHeader::Aptos {
+                certificates,
+                signature,
+                ..
+            } => 48 + certificates.get_size() + signature.get_size(),
+        }
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize, GetSize)]
 pub struct Block {
@@ -75,7 +99,7 @@ impl Block {
                 let mut rng = thread_rng();
                 let mut rand = [0u8; 32];
                 rng.fill(&mut rand);
-                Ok(Hash::from_little_endian(&rand))
+                Ok(Hash(U256::from_little_endian(&rand)))
             }
             BlockHeader::Avalanche {
                 proposer,
@@ -84,14 +108,14 @@ impl Block {
                 ..
             } => {
                 let raw = [0u64, *depth as u64, *proposer, *id];
-                Ok(Hash { 0: raw })
+                Ok(Hash(U256(raw)))
             }
             BlockHeader::Bitcoin { .. } => Ok(sha256(&header)?),
             BlockHeader::ChainReplication { blk_id } => Ok(*blk_id),
             BlockHeader::Diem { block, .. } => block.compute_id(txn_ctx),
             BlockHeader::Aptos { sender, round, .. } => {
                 let raw = [0u64, 0u64, *sender, *round];
-                Ok(Hash { 0: raw })
+                Ok(Hash(U256(raw)))
             }
         }
     }
@@ -100,5 +124,64 @@ impl Block {
 impl Debug for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         self.header.fmt(f)
+    }
+}
+
+#[cfg(test)]
+mod blk_header_get_size_test {
+    use super::BlockHeader;
+    use crate::protocol::crypto::Hash;
+    use crate::protocol::types::aptos::CoA;
+    use crate::protocol::types::diem::DiemBlock;
+    use crate::protocol::types::diem::GENESIS_QC;
+
+    use get_size::GetSize;
+    use primitive_types::U256;
+    #[test]
+    fn blk_header_get_size() {
+        let dummy_header = BlockHeader::Dummy;
+        println!("{}", dummy_header.get_size());
+
+        let cr_header = BlockHeader::ChainReplication {
+            blk_id: Hash(U256::zero()),
+        };
+        println!("{}", cr_header.get_size());
+
+        let avax_header = BlockHeader::Avalanche {
+            proposer: 0,
+            id: 0,
+            merkle_root: Hash(U256::zero()),
+            depth: 0,
+            signature: vec![0u8; 64],
+        };
+        println!("{}", avax_header.get_size());
+
+        let diem_header = BlockHeader::Diem {
+            block: DiemBlock {
+                proposer: 0,
+                round: 0,
+                state_id: Hash(U256::zero()),
+                qc: GENESIS_QC.clone(),
+            },
+            last_round_tc: None,
+            high_commit_qc: GENESIS_QC.clone(),
+            signature: vec![0u8; 64],
+        };
+        println!("{}", diem_header.get_size());
+
+        let coa = CoA {
+            sender: 0,
+            round: 0,
+            digest: Hash(U256::zero()),
+            signature: vec![0u8; 64],
+        };
+        let aptos_header = BlockHeader::Aptos {
+            sender: 0,
+            round: 0,
+            certificates: vec![coa; 3],
+            merkle_root: Hash(U256::zero()),
+            signature: vec![0u8; 64],
+        };
+        println!("{}", aptos_header.get_size());
     }
 }

@@ -1,6 +1,7 @@
 use super::Hash;
 use crate::CopycatError;
 
+use primitive_types::U256;
 use rand::Rng;
 
 // TODO: add Authenticated Multipoint evaluation Tree (AMT)
@@ -17,7 +18,7 @@ impl DummyMerkleTree {
 
     pub fn new() -> Self {
         Self {
-            root: Hash::zero(),
+            root: Hash(U256::zero()),
             num_elem: 0,
         }
     }
@@ -26,7 +27,7 @@ impl DummyMerkleTree {
         let timeout = Self::TIMEOUT_PER_LEAF * num_elem as f64;
         let mut rng = rand::thread_rng();
         let raw: [u8; 32] = rng.gen();
-        self.root = Hash::from(raw);
+        self.root = Hash(U256::from(raw));
         self.num_elem += num_elem;
         Ok(timeout)
     }
@@ -35,7 +36,7 @@ impl DummyMerkleTree {
         let timeout = Self::TIMEOUT_PER_LEAF * num_elem as f64; // TODO
         let mut rng = rand::thread_rng();
         let raw: [u8; 32] = rng.gen();
-        self.root = Hash::from(raw);
+        self.root = Hash(U256::from(raw));
         Ok(timeout)
     }
 

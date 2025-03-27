@@ -61,7 +61,7 @@ impl BitcoinBlockManagement {
             txn_pool: HashMap::new(),
             block_pool: HashMap::new(),
             utxo: HashSet::new(),
-            chain_tail: U256::zero(),
+            chain_tail: Hash(U256::zero()),
             difficulty: config.difficulty,
             pending_txns: VecDeque::new(),
             block_under_construction: vec![],
@@ -76,7 +76,7 @@ impl BitcoinBlockManagement {
     }
 
     pub fn get_chain_length(&self) -> u64 {
-        if self.chain_tail.is_zero() {
+        if self.chain_tail.0.is_zero() {
             0u64
         } else {
             let (_, _, chain_tail_height) = self.block_pool.get(&self.chain_tail).unwrap();
@@ -447,7 +447,7 @@ impl BlockManagement for BitcoinBlockManagement {
         self.delay.process_illusion(verification_timeout).await;
 
         // height of block in the chain or 0 if the height is unknown because we have not seen its parent yet
-        let blk_height = if parent_id.is_zero() {
+        let blk_height = if parent_id.0.is_zero() {
             1u64
         } else {
             match self.block_pool.get(parent_id) {
@@ -479,7 +479,7 @@ impl BlockManagement for BitcoinBlockManagement {
             // find the missing ancestor and send a request for it
             let mut parent = parent_id;
             loop {
-                assert!(!parent.is_zero());
+                assert!(!parent.0.is_zero());
                 if let Some((block, _, height)) = self.block_pool.get(parent) {
                     assert!(*height == 0);
                     parent = match &block.header {
@@ -494,7 +494,7 @@ impl BlockManagement for BitcoinBlockManagement {
             pf_debug!(self.id; "block {} arrived early, still waiting for its ancestor {}", block_hash, parent);
             // request the missing ancestor from peers
             let mut buf = [0u8; 32];
-            parent.to_little_endian(&mut buf);
+            parent.0.to_little_endian(&mut buf);
             self.peer_messenger
                 .delayed_gossip(
                     MsgType::BlockReq {
@@ -769,7 +769,7 @@ impl BlockManagement for BitcoinBlockManagement {
         peer: NodeId,
         msg: Vec<u8>,
     ) -> Result<(), CopycatError> {
-        let blk_id = U256::from_little_endian(&msg);
+        let blk_id = Hash(U256::from_little_endian(&msg));
         if let Some((blk, _, _)) = self.block_pool.get(&blk_id) {
             // return the req if the block is known
             self.peer_messenger
@@ -809,6 +809,8 @@ impl BlockManagement for BitcoinBlockManagement {
 #[cfg(test)]
 mod bitcoin_block_management_test {
     use std::sync::Arc;
+
+    use primitive_types::U256;
 
     use crate::{
         config::BitcoinBasicConfig,
@@ -885,8 +887,8 @@ mod bitcoin_block_management_test {
         let blk1 = Arc::new(Block {
             header: BlockHeader::Bitcoin {
                 proposer: 0,
-                parent_id: Hash::zero(),
-                merkle_root: Hash::zero(),
+                parent_id: Hash(U256::zero()),
+                merkle_root: Hash(U256::zero()),
                 nonce: 1,
             },
             txns: vec![txn1_1.clone(), txn1_2.clone(), txn1_3.clone()],
@@ -927,8 +929,8 @@ mod bitcoin_block_management_test {
         let blk2 = Arc::new(Block {
             header: BlockHeader::Bitcoin {
                 proposer: 0,
-                parent_id: Hash::zero(),
-                merkle_root: Hash::one(),
+                parent_id: Hash(U256::zero()),
+                merkle_root: Hash(U256::one()),
                 nonce: 1,
             },
             txns: vec![txn1_1, txn1_2, txn1_3],
@@ -977,7 +979,7 @@ mod bitcoin_block_management_test {
             header: BlockHeader::Bitcoin {
                 proposer: 0,
                 parent_id: blk2_ctx.id,
-                merkle_root: Hash::zero(),
+                merkle_root: Hash(U256::zero()),
                 nonce: 1,
             },
             txns: vec![txn3_1, txn3_2, txn3_3],
@@ -1030,7 +1032,7 @@ mod bitcoin_block_management_test {
             header: BlockHeader::Bitcoin {
                 proposer: 0,
                 parent_id: blk3_ctx.id,
-                merkle_root: Hash::zero(),
+                merkle_root: Hash(U256::zero()),
                 nonce: 1,
             },
             txns: vec![txn4_1, txn4_2, txn4_3],

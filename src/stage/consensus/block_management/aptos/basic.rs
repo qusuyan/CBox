@@ -116,7 +116,7 @@ impl BlockManagement for AptosBlockManagement {
         }
 
         self.txn_pool.insert(txn_id.clone(), (txn, ctx));
-        if txn_id % self.all_nodes.len() == self.self_idx.into() {
+        if txn_id.0 % self.all_nodes.len() == self.self_idx.into() {
             // TODO: add other txns to the pending queue to avoid censorship
             self.pending_txns.push_back(txn_id);
         }

@@ -16,6 +16,7 @@ use crate::stage::DelayPool;
 use crate::transaction::{DiemAccountAddress, DiemTxn, Txn};
 use crate::{CopycatError, NodeId, SignatureScheme};
 
+use primitive_types::U256;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -206,7 +207,7 @@ impl DiemBlockManagement {
         let leader = DiemPacemaker::get_leader(round, &self.all_nodes);
         pf_debug!(self.id; "requesting block {} from leader {}", blk_id, leader);
         let mut msg = vec![0u8; 32];
-        blk_id.to_little_endian(&mut msg);
+        blk_id.0.to_little_endian(&mut msg);
         self.peer_messenger
             .delayed_send(
                 leader,
@@ -592,7 +593,7 @@ impl BlockManagement for DiemBlockManagement {
         peer: NodeId,
         msg: Vec<u8>,
     ) -> Result<(), CopycatError> {
-        let blk_id = Hash::from_little_endian(&msg);
+        let blk_id = Hash(U256::from_little_endian(&msg));
         let blk = match self.blk_pool.get(&blk_id) {
             Some((blk, _)) => blk.clone(),
             None => return Ok(()), // block not found
@@ -616,6 +617,8 @@ impl BlockManagement for DiemBlockManagement {
 mod diem_block_management_test {
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
+
+    use primitive_types::U256;
 
     use super::DiemBlockManagement;
     use crate::context::BlkCtx;
@@ -660,7 +663,7 @@ mod diem_block_management_test {
         let diem_blk1 = DiemBlock {
             proposer: blk1_leader,
             round: 2,
-            state_id: Hash::zero(),
+            state_id: Hash(U256::zero()),
             qc: GENESIS_QC.clone(),
         };
         let blk1_header = BlockHeader::Diem {
@@ -681,7 +684,7 @@ mod diem_block_management_test {
             round: 2,
             parent_id: GENESIS_QC.vote_info.blk_id,
             parent_round: GENESIS_QC.vote_info.round,
-            exec_state_hash: Hash::zero(),
+            exec_state_hash: Hash(U256::zero()),
         };
         let blk1_qc_vinfo_hash = sha256(&blk1_qc_vinfo)?;
         let mut blk1_qc_signatures = (1..4 as NodeId)
@@ -703,7 +706,7 @@ mod diem_block_management_test {
         let diem_blk2 = DiemBlock {
             proposer: blk2_leader,
             round: 3,
-            state_id: Hash::zero(),
+            state_id: Hash(U256::zero()),
             qc: blk1_qc,
         };
         let blk2_header = BlockHeader::Diem {

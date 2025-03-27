@@ -8,7 +8,7 @@ pub type AptosAccountAddress = [u8; 32];
 
 pub fn get_aptos_addr(pk: &PubKey) -> Result<AptosAccountAddress, CopycatError> {
     let hash = sha256(pk)?;
-    Ok(hash.into())
+    Ok(hash.0.into())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, GetSize)]

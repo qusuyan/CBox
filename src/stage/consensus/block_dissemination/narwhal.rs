@@ -10,6 +10,7 @@ use crate::stage::DelayPool;
 use crate::{CopycatError, NodeId};
 
 use async_trait::async_trait;
+use primitive_types::U256;
 use serde::{Deserialize, Serialize};
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -257,7 +258,7 @@ impl BlockDissemination for NarwhalBlockDissemination {
             sender,
             round,
             certificates: vec![],
-            merkle_root: Hash::zero(),
+            merkle_root: Hash(U256::zero()),
             signature: vec![],
         };
         let ctx = Arc::new(BlkCtx::from_header_and_txns(&header, vec![])?); // TODO: add CoA

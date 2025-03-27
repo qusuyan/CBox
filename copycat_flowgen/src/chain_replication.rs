@@ -2,9 +2,10 @@ use super::{FlowGen, Stats};
 use crate::ClientId;
 use copycat::protocol::crypto::{Hash, PubKey, Signature};
 use copycat::protocol::transaction::{DummyTxn, Txn};
-use copycat::{CopycatError, SignatureScheme, NodeId};
+use copycat::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
+use primitive_types::U256;
 use rand::Rng;
 
 use std::collections::HashMap;
@@ -27,7 +28,7 @@ pub struct ChainReplicationFlowGen {
     batch_size: usize,
     next_batch_time: Instant,
     client_list: Vec<ClientId>,
-    next_txn_id: Hash,
+    next_txn_id: U256,
     in_flight: HashMap<Hash, Instant>,
     // fields to create transactions
     content: Arc<Vec<u8>>, // for simplicity, all txns are the same
@@ -65,7 +66,7 @@ impl ChainReplicationFlowGen {
             batch_size,
             next_batch_time: Instant::now(),
             client_list,
-            next_txn_id: Hash::zero(),
+            next_txn_id: U256::zero(),
             in_flight: HashMap::new(),
             content: txn_content,
             pub_key,
@@ -111,7 +112,7 @@ impl FlowGen for ChainReplicationFlowGen {
             let client_id = self.client_list[rand::random::<usize>() % self.client_list.len()];
             let txn = Arc::new(Txn::Dummy {
                 txn: DummyTxn {
-                    id: self.next_txn_id,
+                    id: Hash(self.next_txn_id),
                     content: self.content.clone(),
                     pub_key: self.pub_key.clone(),
                     signature: self.signature.clone(),
@@ -119,7 +120,7 @@ impl FlowGen for ChainReplicationFlowGen {
             });
             let txn_hash = txn.compute_id()?;
 
-            self.next_txn_id += Hash::one();
+            self.next_txn_id += U256::one();
             self.in_flight.insert(txn_hash, Instant::now());
             batch.push((client_id, txn));
         }

@@ -8,6 +8,7 @@ use crate::transaction::Txn;
 use crate::{ChainConfig, CopycatError, NodeId};
 
 use async_trait::async_trait;
+use primitive_types::U256;
 use serde::{Deserialize, Serialize};
 
 use std::collections::{HashMap, HashSet};
@@ -33,7 +34,7 @@ pub struct ChainReplicationDecision {
     peer_messenger: Arc<PeerMessenger>,
     inflight_blks: HashMap<Hash, Arc<Block>>,
     commit_ready: HashSet<Hash>,
-    next_to_commit: Hash,
+    next_to_commit: U256,
     _notify: Notify,
 }
 
@@ -62,7 +63,7 @@ impl ChainReplicationDecision {
             peer_messenger,
             inflight_blks: HashMap::new(),
             commit_ready: HashSet::new(),
-            next_to_commit: Hash::one(),
+            next_to_commit: U256::one(),
             _notify: Notify::new(),
         }
     }
@@ -110,7 +111,7 @@ impl Decision for ChainReplicationDecision {
 
     async fn commit_ready(&self) -> Result<(), CopycatError> {
         loop {
-            if self.commit_ready.contains(&self.next_to_commit) {
+            if self.commit_ready.contains(&Hash(self.next_to_commit)) {
                 return Ok(());
             }
             self._notify.notified().await;
@@ -118,12 +119,12 @@ impl Decision for ChainReplicationDecision {
     }
 
     async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
-        assert!(self.commit_ready.remove(&self.next_to_commit));
-        let blk_id = self.next_to_commit;
+        let blk_id = Hash(self.next_to_commit);
+        assert!(self.commit_ready.remove(&blk_id));
         let blk = self.inflight_blks.remove(&blk_id).unwrap();
         let txns = blk.txns.clone();
-        self.next_to_commit += Hash::one();
-        Ok((blk_id.as_u64(), txns))
+        self.next_to_commit += U256::one();
+        Ok((blk_id.0.as_u64(), txns))
     }
 
     async fn timeout(&self) -> Result<(), CopycatError> {

@@ -33,7 +33,7 @@ pub enum AvalancheTxn {
 impl AvalancheTxn {
     pub fn compute_id(&self) -> Result<Hash, CopycatError> {
         let id = match self {
-            AvalancheTxn::PlaceHolder => U256::zero(),
+            AvalancheTxn::PlaceHolder => Hash(U256::zero()),
             _ => sha256(&self)?,
         };
 
