@@ -1,5 +1,5 @@
 use super::BlockDissemination;
-use crate::context::BlkCtx;
+use crate::context::{BlkCtx, BlkData};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::threshold_signature::{SignPart, ThresholdSignature};
@@ -82,6 +82,9 @@ impl NarwhalBlockDissemination {
     ) -> Result<(), CopycatError> {
         // do nothing if a conflicting block has already finished dissemination
         if self.disseminated_blks.contains_key(&(sender, round)) {
+            if voter == self.me {
+                self.ready_tails.push_back((sender, round, digest));
+            }
             return Ok(());
         }
 
@@ -248,12 +251,18 @@ impl BlockDissemination for NarwhalBlockDissemination {
     async fn get_disseminated(
         &mut self,
     ) -> Result<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>), CopycatError> {
-        let tail_id = self.ready_tails.pop_front().unwrap();
-        if let Some((src, blk)) = self.blk_pool.remove(&tail_id) {
-            return Ok((src, vec![blk]));
+        let (sender, round, digest) = self.ready_tails.pop_front().unwrap();
+        let certificate = self
+            .disseminated_blks
+            .get(&(sender, round))
+            .unwrap()
+            .clone(); // TODO: remove clone()
+
+        if let Some((src, (blk, ctx))) = self.blk_pool.get(&(sender, round, digest)) {
+            let new_ctx = Arc::new(ctx.with_data(BlkData::Aptos { certificate }));
+            return Ok((*src, vec![(blk.clone(), new_ctx)]));
         }
 
-        let (sender, round, _) = tail_id;
         let header = BlockHeader::Aptos {
             sender,
             round,
@@ -261,7 +270,10 @@ impl BlockDissemination for NarwhalBlockDissemination {
             merkle_root: Hash(U256::zero()),
             signature: vec![],
         };
-        let ctx = Arc::new(BlkCtx::from_header_and_txns(&header, vec![])?); // TODO: add CoA
+        let ctx = Arc::new(
+            BlkCtx::from_header_and_txns(&header, vec![])?
+                .with_data(BlkData::Aptos { certificate }),
+        );
         let block = Arc::new(Block {
             header,
             txns: vec![],

@@ -16,7 +16,7 @@ impl DummyCommit {
 
 #[async_trait]
 impl Commit for DummyCommit {
-    async fn commit(&self, _txn_batch: &Vec<Arc<Txn>>) -> Result<(), CopycatError> {
+    async fn commit(&mut self, _txn_batch: &Vec<Arc<Txn>>) -> Result<(), CopycatError> {
         Ok(())
     }
 }

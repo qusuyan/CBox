@@ -1,6 +1,8 @@
 mod dummy;
 use dummy::DummyCommit;
-use tokio_metrics::TaskMonitor;
+
+mod execute;
+use execute::ExecuteCommit;
 
 use crate::config::ChainConfig;
 use crate::consts::COMMIT_DELAY_INTERVAL;
@@ -14,20 +16,21 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
+use tokio_metrics::TaskMonitor;
 
 #[async_trait]
 trait Commit: Sync + Send {
-    async fn commit(&self, block: &Vec<Arc<Txn>>) -> Result<(), CopycatError>;
+    async fn commit(&mut self, block: &Vec<Arc<Txn>>) -> Result<(), CopycatError>;
 }
 
-fn get_commit(_id: NodeId, config: ChainConfig) -> Box<dyn Commit> {
+fn get_commit(id: NodeId, config: ChainConfig, delay: Arc<DelayPool>) -> Box<dyn Commit> {
     match config {
         ChainConfig::Dummy { .. } => Box::new(DummyCommit::new()),
         ChainConfig::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::Diem { .. } => Box::new(DummyCommit::new()),    // TODO:
-        ChainConfig::Aptos { .. } => Box::new(DummyCommit::new()),   // TODO:
+        ChainConfig::Aptos { .. } => Box::new(ExecuteCommit::new(id, delay)), // TODO:
     }
 }
 
@@ -41,10 +44,10 @@ pub async fn commit_thread(
 ) {
     pf_info!(id; "commit stage starting...");
 
-    let _delay = Arc::new(DelayPool::new());
+    let delay = Arc::new(DelayPool::new());
     let mut insert_delay_time = Instant::now() + COMMIT_DELAY_INTERVAL;
 
-    let commit_stage = get_commit(id, config);
+    let mut commit_stage = get_commit(id, config, delay);
 
     let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();

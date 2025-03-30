@@ -95,14 +95,9 @@ fn get_blk_creation(
             delay,
             peer_messenger,
         ),
-        ChainConfig::Aptos { config } => aptos::new(
-            id,
-            p2p_signature,
-            threshold_signature,
-            config,
-            delay,
-            peer_messenger,
-        ),
+        ChainConfig::Aptos { config } => {
+            aptos::new(id, p2p_signature, threshold_signature, config, delay)
+        }
     }
 }
 

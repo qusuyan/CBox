@@ -244,7 +244,7 @@ impl FlowGen for AptosFlowGen {
             .values()
             .map(|info| {
                 let num_committed = if info.chain_length > 0 {
-                    (2..info.chain_length + 1)
+                    (1..info.chain_length + 1)
                         .map(|height| info.txn_count.get(&height).unwrap())
                         .sum()
                 } else {

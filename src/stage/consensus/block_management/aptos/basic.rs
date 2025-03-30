@@ -1,7 +1,6 @@
 use super::{BlockManagement, CurBlockState};
 use crate::config::AptosDiemConfig;
 use crate::context::{BlkCtx, TxnCtx};
-use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::threshold_signature::ThresholdSignature;
@@ -43,7 +42,6 @@ pub struct AptosBlockManagement {
     cur_block_size: usize,
     cur_block_timeout: Option<Instant>,
     // p2p communication
-    peer_messenger: Arc<PeerMessenger>,
     signature_scheme: SignatureScheme,
     peer_pks: HashMap<NodeId, PubKey>,
     sk: PrivKey,
@@ -60,7 +58,6 @@ impl AptosBlockManagement {
         threshold_signature: Arc<dyn ThresholdSignature>,
         config: AptosDiemConfig,
         delay: Arc<DelayPool>,
-        peer_messenger: Arc<PeerMessenger>,
     ) -> Self {
         let (signature_scheme, peer_pks, sk) = p2p_signature;
 
@@ -92,7 +89,6 @@ impl AptosBlockManagement {
             block_merkle: DummyMerkleTree::new(),
             cur_block_size: 0,
             cur_block_timeout: None,
-            peer_messenger,
             signature_scheme,
             peer_pks,
             sk,
@@ -205,7 +201,7 @@ impl BlockManagement for AptosBlockManagement {
 
     async fn validate_block(
         &mut self,
-        src: NodeId,
+        _src: NodeId,
         block: Arc<Block>,
         ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
@@ -253,6 +249,9 @@ impl BlockManagement for AptosBlockManagement {
                     continue;
                 }
                 valid_needed -= 1;
+                if valid_needed == 0 {
+                    break;
+                }
             }
 
             if valid_needed > 0 {
@@ -276,8 +275,8 @@ impl BlockManagement for AptosBlockManagement {
 
     async fn handle_peer_blk_req(
         &mut self,
-        peer: NodeId,
-        msg: Vec<u8>,
+        _peer: NodeId,
+        _msg: Vec<u8>,
     ) -> Result<(), CopycatError> {
         todo!()
     }

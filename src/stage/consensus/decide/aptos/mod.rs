@@ -10,7 +10,6 @@ use crate::stage::DelayPool;
 use crate::NodeId;
 
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 pub fn new(
     id: NodeId,
@@ -18,7 +17,6 @@ pub fn new(
     threshold_signature: Arc<dyn ThresholdSignature>,
     config: AptosConfig,
     peer_messenger: Arc<PeerMessenger>,
-    pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
     delay: Arc<DelayPool>,
 ) -> Box<dyn Decision> {
     match config {
@@ -28,7 +26,6 @@ pub fn new(
             threshold_signature,
             config,
             peer_messenger,
-            pmaker_feedback_send,
             delay,
         )),
     }

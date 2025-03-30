@@ -106,6 +106,11 @@ pub async fn block_dissemination_thread(
         delay,
     );
 
+    let mut blks_recv = 0usize;
+    let mut txns_recv = 0usize;
+    let mut blks_sent = 0usize;
+    let mut txns_sent = 0usize;
+
     let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();
 
@@ -121,6 +126,9 @@ pub async fn block_dissemination_thread(
                         return;
                     }
                 };
+
+                blks_recv += new_tail.len();
+                txns_recv += new_tail.iter().map(|(blk, _)| blk.txns.len()).sum::<usize>();
 
                 let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
@@ -147,8 +155,12 @@ pub async fn block_dissemination_thread(
                 }
 
                 match block_dissemination_stage.get_disseminated().await {
-                    Ok(blks) => {
-                        if let Err(e) = block_ready_send.send(blks).await {
+                    Ok((src, blks)) => {
+
+                        blks_sent += blks.len();
+                        txns_sent += blks.iter().map(|(blk, _)| blk.txns.len()).sum::<usize>();
+
+                        if let Err(e) = block_ready_send.send((src, blks)).await {
                             pf_error!(id; "failed to send disseminated block: {:?}", e);
                             continue
                         }
@@ -185,6 +197,13 @@ pub async fn block_dissemination_thread(
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
                 }
+
+                pf_info!(id; "In the last minute: blks_recv: {}, txns_recv: {}, blks_sent: {}, txns_sent: {}", blks_recv, txns_recv, blks_sent, txns_sent);
+                blks_recv = 0;
+                txns_recv = 0;
+                blks_sent = 0;
+                txns_sent = 0;
+
                 let metrics = task_interval.next().unwrap();
                 let sched_count = metrics.total_scheduled_count;
                 let mean_sched_dur = metrics.mean_scheduled_duration().as_secs_f64();

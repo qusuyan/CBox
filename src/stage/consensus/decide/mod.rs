@@ -79,7 +79,6 @@ fn get_decision(
             threshold_signature,
             config,
             peer_messenger,
-            pmaker_feedback_send,
             delay,
         ),
     }

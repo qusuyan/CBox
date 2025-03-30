@@ -729,8 +729,8 @@ mod diem_block_management_test {
             .validate_block(blk1_leader, blk1, blk1_ctx.clone())
             .await?;
         assert!(ret.len() == 2);
-        assert!(ret[0].1 == blk1_ctx);
-        assert!(ret[1].1 == blk2_ctx);
+        assert!(ret[0].1.id == blk1_ctx.id);
+        assert!(ret[1].1.id == blk2_ctx.id);
 
         Ok(())
     }

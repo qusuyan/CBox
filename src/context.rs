@@ -1,5 +1,6 @@
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::Hash;
+use crate::protocol::types::aptos::CoA;
 use crate::transaction::Txn;
 use crate::CopycatError;
 
@@ -8,16 +9,21 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TxnCtx {
     pub id: Hash,
 }
 
-#[derive(Eq, PartialEq)]
 pub struct BlkCtx {
     pub id: Hash,
     pub invalid: bool,
     pub txn_ctx: Vec<Arc<TxnCtx>>,
+    pub data: Option<BlkData>,
+}
+
+#[derive(Clone, Debug)]
+pub enum BlkData {
+    Aptos { certificate: CoA },
 }
 
 impl TxnCtx {
@@ -40,6 +46,7 @@ impl BlkCtx {
             id: blk_id,
             invalid: false,
             txn_ctx,
+            data: None,
         })
     }
 
@@ -53,6 +60,7 @@ impl BlkCtx {
             id: blk_id,
             invalid: false,
             txn_ctx,
+            data: None,
         })
     }
 
@@ -61,6 +69,7 @@ impl BlkCtx {
             id,
             invalid: false,
             txn_ctx,
+            data: None,
         }
     }
 
@@ -69,6 +78,16 @@ impl BlkCtx {
             id: self.id,
             invalid: true,
             txn_ctx: self.txn_ctx.clone(),
+            data: self.data.clone(),
+        }
+    }
+
+    pub fn with_data(&self, data: BlkData) -> Self {
+        Self {
+            id: self.id,
+            invalid: self.invalid,
+            txn_ctx: self.txn_ctx.clone(),
+            data: Some(data),
         }
     }
 }

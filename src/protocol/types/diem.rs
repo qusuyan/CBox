@@ -1,5 +1,4 @@
 use crate::{
-    context::TxnCtx,
     protocol::crypto::{sha256, threshold_signature::SignComb, Hash, Signature},
     CopycatError, NodeId,
 };
@@ -7,7 +6,7 @@ use crate::{
 use get_size::GetSize;
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use lazy_static::lazy_static;
 
@@ -76,7 +75,7 @@ impl GetSize for DiemBlock {
 }
 
 impl DiemBlock {
-    pub fn compute_id(&self, txn_ctxs: &Vec<Arc<TxnCtx>>) -> Result<Hash, CopycatError> {
+    pub fn compute_id<T: Serialize>(&self, txn_ctxs: &T) -> Result<Hash, CopycatError> {
         let serialized = bincode::serialize(&(
             self.proposer,
             self.round,
