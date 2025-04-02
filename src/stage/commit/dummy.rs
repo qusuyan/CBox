@@ -1,4 +1,5 @@
 use super::Commit;
+use crate::context::TxnCtx;
 use crate::transaction::Txn;
 use crate::utils::CopycatError;
 
@@ -16,7 +17,11 @@ impl DummyCommit {
 
 #[async_trait]
 impl Commit for DummyCommit {
-    async fn commit(&mut self, _txn_batch: &Vec<Arc<Txn>>) -> Result<(), CopycatError> {
-        Ok(())
+    async fn commit(
+        &mut self,
+        txn_batch: Vec<Arc<Txn>>,
+        _txn_batch_ctx: Vec<Arc<TxnCtx>>,
+    ) -> Result<Vec<Arc<Txn>>, CopycatError> {
+        Ok(txn_batch)
     }
 }

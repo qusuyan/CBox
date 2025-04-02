@@ -1,5 +1,5 @@
 use crate::config::AptosDiemConfig;
-use crate::context::{BlkCtx, BlkData};
+use crate::context::{BlkCtx, BlkData, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::signature::P2PSignature;
@@ -67,7 +67,8 @@ pub struct AptosDiemDecision {
     //
     quorum_store: HashMap<(NodeId, u64), (Arc<Block>, Arc<BlkCtx>)>,
     pending_queue: VecDeque<(NodeId, u64)>,
-    pending_blk_pool: HashSet<(NodeId, u64)>,
+    committed_pool: HashSet<(NodeId, u64)>,
+    block_under_construction: Vec<CoA>,
     cur_proposal_timeout: Option<Instant>,
     // diem
     blk_pool: HashMap<Hash, (DiemBlock, Vec<CoA>)>,
@@ -87,6 +88,7 @@ pub struct AptosDiemDecision {
     threshold_signature: Arc<dyn ThresholdSignature>,
     //
     commit_blks: VecDeque<Hash>,
+    committed_blk_pool: HashSet<Hash>,
     commit_queue: VecDeque<(NodeId, u64)>,
     commit_depth: u64,
     queried_blks: HashSet<Hash>,
@@ -133,7 +135,8 @@ impl AptosDiemDecision {
             _vote_timeout: vote_timeout,
             quorum_store: HashMap::new(),
             pending_queue: VecDeque::new(),
-            pending_blk_pool: HashSet::new(),
+            committed_pool: HashSet::new(),
+            block_under_construction: vec![],
             cur_proposal_timeout,
             blk_pool: HashMap::new(),
             current_round,
@@ -150,6 +153,10 @@ impl AptosDiemDecision {
             sk,
             threshold_signature,
             commit_blks: VecDeque::new(),
+            committed_blk_pool: HashSet::from([
+                GENESIS_QC.vote_info.blk_id,
+                GENESIS_QC.vote_info.parent_id,
+            ]),
             commit_queue: VecDeque::new(),
             commit_depth: 0,
             queried_blks: HashSet::new(),
@@ -358,37 +365,46 @@ impl AptosDiemDecision {
 
         self.process_certificate_qc(&qc).await?;
         self.cur_proposal_timeout = Some(Instant::now() + self.proposal_timeout);
+        if !self.blk_pool.contains_key(&qc.vote_info.blk_id) {
+            // TODO: fetch the missing block
+        }
 
         Ok(())
     }
 
     async fn commit_pending_blks(&mut self) -> Result<(), CopycatError> {
         loop {
-            let next_blk_id = match self.commit_blks.pop_front() {
+            let next_blk_id = match self.commit_blks.front() {
                 Some(id) => id,
                 None => return Ok(()), // nothing to commit
             };
 
-            pf_debug!(self.id; "adding block {} to commit queue", next_blk_id);
+            if self.committed_blk_pool.contains(next_blk_id) {
+                self.commit_blks.pop_front();
+                continue;
+            }
 
-            let (_, next_blk_payload) = match self.blk_pool.get(&next_blk_id) {
+            let (_, next_blk_payload) = match self.blk_pool.get(next_blk_id) {
                 Some(blk) => blk,
                 None => {
                     if !self.queried_blks.contains(&next_blk_id) {
-                        // TODO: request block body from sender of next_blk
+                        // TODO: do not query blocks yet since it will arrive soon
                         let msg = DiemConsensusMsg::FetchBlockReq {
-                            blk_id: next_blk_id,
+                            blk_id: *next_blk_id,
                         };
                         self.peer_messenger
                             .broadcast(MsgType::ConsensusMsg {
                                 msg: bincode::serialize(&msg)?,
                             })
                             .await?;
-                        self.queried_blks.insert(next_blk_id);
+                        self.queried_blks.insert(*next_blk_id);
                     }
                     return Ok(());
                 }
             };
+
+            self.committed_blk_pool.insert(*next_blk_id);
+            self.commit_blks.pop_front();
 
             // add payloads to pending queue
             for batch in next_blk_payload {
@@ -439,8 +455,9 @@ impl Decision for AptosDiemDecision {
                 }
                 Entry::Vacant(e) => {
                     e.insert((blk, ctx));
-                    self.pending_queue.push_back((sender, round));
-                    self.pending_blk_pool.insert((sender, round));
+                    if !self.committed_pool.contains(&(sender, round)) {
+                        self.pending_queue.push_back((sender, round));
+                    }
                 }
             }
         }
@@ -459,27 +476,37 @@ impl Decision for AptosDiemDecision {
         }
     }
 
-    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
+    async fn next_to_commit(
+        &mut self,
+    ) -> Result<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)), CopycatError> {
         let batch_key = self.commit_queue.pop_front().unwrap();
-        let (batch_blk, _) = self.quorum_store.get(&batch_key).unwrap();
+        let (batch_blk, batch_ctx) = self.quorum_store.get(&batch_key).unwrap();
         self.commit_depth += 1;
-        return Ok((self.commit_depth, batch_blk.txns.clone()));
+        return Ok((
+            self.commit_depth,
+            (batch_blk.txns.clone(), batch_ctx.txn_ctx.clone()),
+        ));
     }
 
     async fn timeout(&self) -> Result<(), CopycatError> {
         // propose only if I am leader
         if let Some(timeout) = self.cur_proposal_timeout {
-            // already enough content, start proposing
-            if self.pending_blk_pool.len() >= self.blk_len {
+            // make sure we have seen the parent before proposing
+            if self.high_qc.vote_info.blk_id == GENESIS_QC.vote_info.blk_id
+                || self.blk_pool.contains_key(&self.high_qc.vote_info.blk_id)
+            {
+                // already enough content, start proposing
+                if self.pending_queue.len() >= self.blk_len {
+                    return Ok(());
+                }
+
+                // wait for timeout
+                if timeout > Instant::now() + Duration::from_millis(1) {
+                    tokio::time::sleep_until(timeout).await;
+                }
+
                 return Ok(());
             }
-
-            // wait for timeout
-            if timeout > Instant::now() + Duration::from_millis(1) {
-                tokio::time::sleep_until(timeout).await;
-            }
-
-            return Ok(());
         }
 
         // TODO: add vote timeout
@@ -491,11 +518,10 @@ impl Decision for AptosDiemDecision {
 
     async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
         if let Some(timeout) = self.cur_proposal_timeout {
-            if self.pending_blk_pool.len() >= self.blk_len
+            if self.pending_queue.len() >= self.blk_len
                 || timeout <= Instant::now() + Duration::from_millis(1)
             {
                 // propose new block
-                let mut payload = vec![];
                 loop {
                     // TODO: order blocks according to dependency (certificates)
                     let next_batch = match self.pending_queue.pop_front() {
@@ -503,21 +529,31 @@ impl Decision for AptosDiemDecision {
                         None => break,
                     };
 
-                    if !self.pending_blk_pool.remove(&next_batch) {
+                    if self.committed_pool.contains(&next_batch) {
                         // batch has already committed
                         continue;
                     }
+
+                    self.committed_pool.insert(next_batch);
 
                     let (_, ctx) = self.quorum_store.get(&next_batch).unwrap();
                     let certificate = match ctx.data.as_ref().unwrap() {
                         BlkData::Aptos { certificate } => certificate,
                     };
-                    payload.push(certificate.clone()); // TODO: remove clone()
-                    if payload.len() >= self.blk_len {
+                    self.block_under_construction.push(certificate.clone()); // TODO: remove clone()
+                    if self.block_under_construction.len() >= self.blk_len {
                         break;
                     }
                 }
 
+                // do not propose yet if block is not full and timeout has not reached
+                if self.block_under_construction.len() < self.blk_len
+                    && timeout > Instant::now() + Duration::from_millis(1)
+                {
+                    return Ok(());
+                }
+
+                let payload = std::mem::replace(&mut self.block_under_construction, vec![]);
                 let round = self.current_round;
                 let parent_id = self.high_qc.vote_info.blk_id;
                 let parent_round = self.high_qc.vote_info.round;
@@ -669,9 +705,9 @@ impl Decision for AptosDiemDecision {
                 let parent_id = block.qc.vote_info.blk_id;
                 let grand_parent_id = block.qc.vote_info.parent_id;
 
-                // TODO: remove from pending queue for now since all blocks will commit
+                // TODO: insert to committed pool right away for now since all blocks will commit
                 for batch in payload.iter() {
-                    self.pending_blk_pool.remove(&(batch.sender, batch.round));
+                    self.committed_pool.insert((batch.sender, batch.round));
                 }
 
                 self.blk_pool.insert(blk_id, (block, payload));

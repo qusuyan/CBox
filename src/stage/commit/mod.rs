@@ -6,6 +6,7 @@ use execute::ExecuteCommit;
 
 use crate::config::ChainConfig;
 use crate::consts::COMMIT_DELAY_INTERVAL;
+use crate::context::TxnCtx;
 use crate::protocol::transaction::Txn;
 use crate::stage::{pass, DelayPool};
 use crate::vcores::VCoreGroup;
@@ -20,7 +21,11 @@ use tokio_metrics::TaskMonitor;
 
 #[async_trait]
 trait Commit: Sync + Send {
-    async fn commit(&mut self, block: &Vec<Arc<Txn>>) -> Result<(), CopycatError>;
+    async fn commit(
+        &mut self,
+        block: Vec<Arc<Txn>>,
+        ctx: Vec<Arc<TxnCtx>>,
+    ) -> Result<Vec<Arc<Txn>>, CopycatError>;
 }
 
 fn get_commit(id: NodeId, config: ChainConfig, delay: Arc<DelayPool>) -> Box<dyn Commit> {
@@ -37,7 +42,7 @@ fn get_commit(id: NodeId, config: ChainConfig, delay: Arc<DelayPool>) -> Box<dyn
 pub async fn commit_thread(
     id: NodeId,
     config: ChainConfig,
-    mut commit_recv: mpsc::Receiver<(u64, Vec<Arc<Txn>>)>,
+    mut commit_recv: mpsc::Receiver<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>))>,
     executed_send: mpsc::Sender<(NodeId, (u64, Vec<Arc<Txn>>))>,
     core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
@@ -64,7 +69,7 @@ pub async fn commit_thread(
                     }
                 };
 
-                let (height, txn_batch) = match new_batch {
+                let (height, (txn_batch, txn_batch_ctx)) = match new_batch {
                     Some(blk) => blk,
                     None => {
                         pf_error!(id; "commit pipe closed unexpectedly");
@@ -74,14 +79,17 @@ pub async fn commit_thread(
 
                 pf_debug!(id; "got new txn batch at height {} ({} txns)", height, txn_batch.len());
 
-                if let Err(e) = commit_stage.commit(&txn_batch).await {
-                    pf_error!(id; "failed to commit: {:?}", e);
-                    continue;
-                }
+                let correct_batch = match commit_stage.commit(txn_batch, txn_batch_ctx).await {
+                    Ok(batch) => batch,
+                    Err(e) => {
+                        pf_error!(id; "failed to commit: {:?}", e);
+                        continue;
+                    }
+                };
 
                 drop(_permit);
 
-                if let Err(e) = executed_send.send((id, (height, txn_batch))).await {
+                if let Err(e) = executed_send.send((id, (height, correct_batch))).await {
                     pf_error!(id; "failed to send committed txns: {:?}", e);
                     continue;
                 }

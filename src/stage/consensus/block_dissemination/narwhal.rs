@@ -37,7 +37,7 @@ pub struct NarwhalBlockDissemination {
     disseminated_blks: HashMap<(NodeId, u64), CoA>,
     signatures: HashMap<(NodeId, u64, Hash), HashMap<NodeId, SignPart>>,
     conflict_set: HashMap<(NodeId, u64), (HashSet<Hash>, Option<Hash>)>,
-    pending_blks: HashMap<u64, HashMap<NodeId, Hash>>,
+    future_blks: HashMap<u64, HashMap<NodeId, Hash>>,
     // P2P
     peer_messenger: Arc<PeerMessenger>,
     threshold_signature: Arc<dyn ThresholdSignature>,
@@ -63,7 +63,7 @@ impl NarwhalBlockDissemination {
             signatures: HashMap::new(),
             conflict_set: HashMap::new(),
             disseminated_blks: HashMap::new(),
-            pending_blks: HashMap::new(),
+            future_blks: HashMap::new(),
             peer_messenger,
             threshold_signature,
             pmaker_feedback_send,
@@ -170,7 +170,7 @@ impl BlockDissemination for NarwhalBlockDissemination {
                 .await?;
             if self.round < round {
                 self.round = round;
-                if let Some(pending) = self.pending_blks.remove(&self.round) {
+                if let Some(pending) = self.future_blks.remove(&self.round) {
                     for (pending_sender, pending_digest) in pending {
                         pf_debug!(self.me; "voting for block (sender: {}, round: {}, digest: {})", pending_sender, self.round, pending_digest);
 
@@ -207,7 +207,7 @@ impl BlockDissemination for NarwhalBlockDissemination {
             if round < self.round {
                 return Ok(());
             } else if round > self.round {
-                let pending = self.pending_blks.entry(round).or_insert(HashMap::new());
+                let pending = self.future_blks.entry(round).or_insert(HashMap::new());
                 if !pending.contains_key(&sender) {
                     // first block seen at this position
                     pending.insert(sender, digest);

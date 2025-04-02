@@ -1,6 +1,6 @@
 use super::{Decision, VoteMsg};
 use crate::config::AvalancheVoteNoConfig;
-use crate::context::BlkCtx;
+use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::signature::P2PSignature;
@@ -97,7 +97,9 @@ impl Decision for AvalancheVoteNoDecision {
         Ok(())
     }
 
-    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
+    async fn next_to_commit(
+        &mut self,
+    ) -> Result<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)), CopycatError> {
         unreachable!()
     }
 

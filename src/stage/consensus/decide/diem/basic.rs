@@ -1,6 +1,6 @@
 use super::Decision;
 use crate::config::DiemBasicConfig;
-use crate::context::BlkCtx;
+use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::signature::P2PSignature;
@@ -338,12 +338,13 @@ impl Decision for DiemDecision {
         }
     }
 
-    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
+    async fn next_to_commit(
+        &mut self,
+    ) -> Result<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)), CopycatError> {
         let blk_id = self.commit_queue.remove(&self.next_commit_height).unwrap();
         self.next_commit_height += 1;
-        let (blk, _, height) = self.blk_pool.get(&blk_id).unwrap();
-        let txns = blk.txns.clone();
-        Ok((*height, txns))
+        let (blk, blk_ctx, height) = self.blk_pool.get(&blk_id).unwrap();
+        Ok((*height, (blk.txns.clone(), blk_ctx.txn_ctx.clone())))
     }
 
     async fn timeout(&self) -> Result<(), CopycatError> {

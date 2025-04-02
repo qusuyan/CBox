@@ -9,7 +9,7 @@ use chain_replication::ChainReplicationDecision;
 use tokio_metrics::TaskMonitor;
 
 use crate::consts::DECIDE_DELAY_INTERVAL;
-use crate::context::BlkCtx;
+use crate::context::{BlkCtx, TxnCtx};
 use crate::get_report_timer;
 use crate::protocol::block::Block;
 use crate::protocol::crypto::signature::P2PSignature;
@@ -34,7 +34,9 @@ trait Decision: Sync + Send {
         new_tail: Vec<(Arc<Block>, Arc<BlkCtx>)>,
     ) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
-    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
+    async fn next_to_commit(
+        &mut self,
+    ) -> Result<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)), CopycatError>;
     async fn timeout(&self) -> Result<(), CopycatError>;
     async fn handle_timeout(&mut self) -> Result<(), CopycatError>;
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError>;
@@ -92,7 +94,7 @@ pub async fn decision_thread(
     peer_messenger: Arc<PeerMessenger>,
     mut peer_consensus_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
-    commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
+    commit_send: mpsc::Sender<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>))>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
     core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
@@ -174,10 +176,10 @@ pub async fn decision_thread(
                     }
                 };
 
-                pf_debug!(id; "committing new block of length {:?}, height {}", block_to_commit.len(), height);
+                pf_debug!(id; "committing new block of length {:?}, height {}", block_to_commit.0.len(), height);
 
                 blks_sent += 1;
-                txns_sent += block_to_commit.len();
+                txns_sent += block_to_commit.0.len();
 
                 drop(_permit);
 

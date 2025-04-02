@@ -564,14 +564,16 @@ impl Decision for BlizzardDecision {
         Ok(())
     }
 
-    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
+    async fn next_to_commit(
+        &mut self,
+    ) -> Result<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)), CopycatError> {
         let (blk_id, txn_hashes) = self.commit_queue.pop_front().unwrap();
-        let txns: Vec<Arc<Txn>> = txn_hashes
+        let (txns, txn_ctxs): (Vec<_>, Vec<_>) = txn_hashes
             .into_iter()
-            .map(|hash| self.txn_pool.get(&hash).unwrap().0.clone())
-            .collect();
+            .map(|hash| self.txn_pool.get(&hash).unwrap().clone())
+            .unzip();
         pf_debug!(self.id; "committing {} txns", txns.len());
-        Ok((blk_id, txns))
+        Ok((blk_id, (txns, txn_ctxs)))
     }
 
     async fn timeout(&self) -> Result<(), CopycatError> {

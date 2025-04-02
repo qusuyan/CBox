@@ -11,11 +11,12 @@ use ::std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 pub struct AptosPmaker {
-    _id: NodeId,
+    id: NodeId,
     num_faulty: usize,
     all_nodes: Vec<NodeId>,
     certificates: HashMap<u64, Vec<CoA>>,
     pending: VecDeque<u64>,
+    self_coa_formed: HashSet<u64>,
     sent: HashSet<u64>,
     _notify: Notify,
 }
@@ -29,11 +30,12 @@ impl AptosPmaker {
         let num_faulty = (all_nodes.len() - 1) / 3;
 
         Self {
-            _id: id,
+            id,
             all_nodes,
             num_faulty,
             certificates: HashMap::new(),
             pending: VecDeque::new(),
+            self_coa_formed: HashSet::new(),
             sent: HashSet::new(),
             _notify: Notify::new(),
         }
@@ -53,12 +55,21 @@ impl Pacemaker for AptosPmaker {
     async fn get_propose_msg(&mut self) -> Result<Vec<u8>, CopycatError> {
         let pending_round = self.pending.pop_front().unwrap();
         let coa_list = self.certificates.remove(&pending_round).unwrap();
-        Ok((bincode::serialize(&coa_list))?)
+        // heuristic: if the previous round failed, retry the same block
+        let self_parent_round_success = if pending_round - 1 == 0 {
+            true
+        } else {
+            self.self_coa_formed.contains(&(pending_round - 1))
+        };
+        Ok((bincode::serialize(&(coa_list, self_parent_round_success)))?)
     }
 
     async fn handle_feedback(&mut self, feedback: Vec<u8>) -> Result<(), CopycatError> {
         let coa: CoA = bincode::deserialize(&feedback)?;
         let round = coa.round;
+        if coa.sender == self.id {
+            self.self_coa_formed.insert(round);
+        }
         let certificate_list = match self.certificates.entry(round) {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {

@@ -36,11 +36,11 @@ pub struct AptosBlockManagement {
     coa_lists: HashMap<u64, Vec<CoA>>,
     num_faulty: usize,
     // building blocks
-    block_under_construction: Vec<Arc<Txn>>,
-    block_under_construction_ctx: Vec<Arc<TxnCtx>>,
+    block_under_construction: (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>),
     block_merkle: DummyMerkleTree,
     cur_block_size: usize,
     cur_block_timeout: Option<Instant>,
+    proposed_blks: HashMap<u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)>,
     // p2p communication
     signature_scheme: SignatureScheme,
     peer_pks: HashMap<NodeId, PubKey>,
@@ -84,11 +84,11 @@ impl AptosBlockManagement {
             round: 0,
             coa_lists,
             num_faulty,
-            block_under_construction: vec![],
-            block_under_construction_ctx: vec![],
+            block_under_construction: (vec![], vec![]),
             block_merkle: DummyMerkleTree::new(),
             cur_block_size: 0,
             cur_block_timeout: None,
+            proposed_blks: HashMap::new(),
             signature_scheme,
             peer_pks,
             sk,
@@ -122,7 +122,13 @@ impl BlockManagement for AptosBlockManagement {
 
     async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError> {
         let mut txns_inserted = 0;
+        let (block_under_construction, block_under_construction_ctx) =
+            &mut self.block_under_construction;
         let state = loop {
+            if self.cur_block_size >= self.blk_size {
+                break CurBlockState::Full;
+            }
+
             let next_txn_id = match self.pending_txns.pop_front() {
                 Some(txn_id) => txn_id,
                 None => break CurBlockState::EmptyMempool,
@@ -135,16 +141,13 @@ impl BlockManagement for AptosBlockManagement {
             let (next_txn, next_txn_ctx) = self.txn_pool.get(&next_txn_id).unwrap();
             let txn_size = GetSize::get_size(next_txn.as_ref());
 
-            self.block_under_construction.push(next_txn.clone());
-            self.block_under_construction_ctx.push(next_txn_ctx.clone());
+            block_under_construction.push(next_txn.clone());
+            block_under_construction_ctx.push(next_txn_ctx.clone());
             if self.cur_block_timeout.is_none() {
                 self.cur_block_timeout = Some(Instant::now() + self.batch_timeout);
             }
             txns_inserted += 1;
             self.cur_block_size += txn_size;
-            if self.cur_block_size >= self.blk_size {
-                break CurBlockState::Full;
-            }
         };
 
         let dur = self.block_merkle.append(txns_inserted)?;
@@ -168,13 +171,17 @@ impl BlockManagement for AptosBlockManagement {
     }
 
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
-        let txns = std::mem::replace(&mut self.block_under_construction, vec![]);
-        let txn_ctx = std::mem::replace(&mut self.block_under_construction_ctx, vec![]);
+        let (txns, txn_ctx) = match self.proposed_blks.remove(&(self.round - 1)) {
+            Some(blk) => blk, // retry old block
+            None => std::mem::replace(&mut self.block_under_construction, (vec![], vec![])), // propose new blocks
+        };
 
         let certificates = self.coa_lists.remove(&self.round).unwrap();
         self.round += 1;
-        let merkle_root = self.block_merkle.get_root();
+        self.proposed_blks
+            .insert(self.round, (txns.clone(), txn_ctx.clone()));
 
+        let merkle_root = self.block_merkle.get_root();
         let header_content = (&self.id, &self.round, &certificates, &merkle_root);
         let serialized = bincode::serialize(&header_content)?;
         let (signature, dur) = self.signature_scheme.sign(&self.sk, &serialized)?;
@@ -189,6 +196,8 @@ impl BlockManagement for AptosBlockManagement {
         };
         let blk_ctx = Arc::new(BlkCtx::from_header_and_txns(&header, txn_ctx)?);
         let block = Arc::new(Block { header, txns });
+
+        pf_debug!(self.id; "round advanced, proposing new batch {:?}", (self.id, self.round));
 
         self.blks_seen.insert((self.id, self.round));
 
@@ -266,9 +275,12 @@ impl BlockManagement for AptosBlockManagement {
     }
 
     async fn handle_pmaker_msg(&mut self, msg: Vec<u8>) -> Result<(), CopycatError> {
-        let coa_list: Vec<CoA> = bincode::deserialize(&msg)?;
+        let (coa_list, parent_round_success): (Vec<CoA>, bool) = bincode::deserialize(&msg)?;
         let round = coa_list.first().unwrap().round;
-        pf_debug!(self.id; "got coa list for round {}, current round is {} (curblock len: {}, curblock size: {}, curblock timeout: {:?})", round, self.round, self.block_under_construction.len(), self.cur_block_size, self.cur_block_timeout);
+        if parent_round_success {
+            self.proposed_blks.remove(&(round - 1));
+        }
+        pf_debug!(self.id; "got coa list for round {}, current round is {} (curblock len: {}, curblock size: {}, curblock timeout: {:?})", round, self.round, self.block_under_construction.0.len(), self.cur_block_size, self.cur_block_timeout);
         self.coa_lists.insert(round, coa_list);
         Ok(())
     }

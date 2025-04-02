@@ -1,5 +1,5 @@
 use super::Decision;
-use crate::context::BlkCtx;
+use crate::context::{BlkCtx, TxnCtx};
 use crate::protocol::block::Block;
 use crate::transaction::Txn;
 use crate::utils::CopycatError;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 
 pub struct DummyDecision {
-    blocks_to_commit: VecDeque<Arc<Block>>,
+    blocks_to_commit: VecDeque<(Arc<Block>, Arc<BlkCtx>)>,
     blocks_committed: u64,
     _notify: Notify,
 }
@@ -34,8 +34,7 @@ impl Decision for DummyDecision {
         _src: NodeId,
         new_tail: Vec<(Arc<Block>, Arc<BlkCtx>)>,
     ) -> Result<(), CopycatError> {
-        let blocks_to_commit = new_tail.into_iter().map(|(blk, _)| blk);
-        self.blocks_to_commit.extend(blocks_to_commit);
+        self.blocks_to_commit.extend(new_tail);
         Ok(())
     }
 
@@ -48,11 +47,16 @@ impl Decision for DummyDecision {
         }
     }
 
-    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
+    async fn next_to_commit(
+        &mut self,
+    ) -> Result<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)), CopycatError> {
         match self.blocks_to_commit.pop_front() {
-            Some(block) => {
+            Some((block, blk_ctx)) => {
                 self.blocks_committed += 1;
-                Ok((self.blocks_committed, block.txns.clone()))
+                Ok((
+                    self.blocks_committed,
+                    (block.txns.clone(), blk_ctx.txn_ctx.clone()),
+                ))
             }
             None => Err(CopycatError(String::from("no blocks to commit"))),
         }
