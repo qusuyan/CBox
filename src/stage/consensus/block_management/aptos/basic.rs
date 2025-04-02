@@ -285,7 +285,7 @@ impl BlockManagement for AptosBlockManagement {
         if parent_round_success {
             self.proposed_blks.remove(&(round - 1));
         }
-        pf_info!(self.id; "got coa list for round {}, current round is {} - will retry previous round: {} (curblock len: {}, curblock size: {}, curblock timeout: {:?})", round, self.round, !parent_round_success, self.block_under_construction.0.len(), self.cur_block_size, self.cur_block_timeout);
+        pf_debug!(self.id; "got coa list for round {}, current round is {} - will retry previous round: {} (curblock len: {}, curblock size: {}, curblock timeout: {:?})", round, self.round, !parent_round_success, self.block_under_construction.0.len(), self.cur_block_size, self.cur_block_timeout);
         self.coa_lists.insert(round, coa_list);
         Ok(())
     }

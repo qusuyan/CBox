@@ -6,7 +6,7 @@ chain-type = "aptos"
 cluster-threads = 32
 conn-multiply = 1
 correct-type = "Basic"
-correct-config = ""
+correct-config = ["diem_blk_len=16", "diem_blk_len=4"]
 txn-crypto = "dummy-ecdsa"
 p2p-crypto = "dummy-ecdsa"
 threshold-crypto = "dummy-ecdsa"
