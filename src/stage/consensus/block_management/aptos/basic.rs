@@ -171,9 +171,12 @@ impl BlockManagement for AptosBlockManagement {
     }
 
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
-        let (txns, txn_ctx) = match self.proposed_blks.remove(&(self.round - 1)) {
-            Some(blk) => blk, // retry old block
-            None => std::mem::replace(&mut self.block_under_construction, (vec![], vec![])), // propose new blocks
+        let ((txns, txn_ctx), should_cleanup) = match self.proposed_blks.remove(&(self.round - 1)) {
+            Some(blk) => (blk, false), // retry old block
+            None => (
+                std::mem::replace(&mut self.block_under_construction, (vec![], vec![])),
+                true,
+            ), // propose new blocks
         };
 
         let certificates = self.coa_lists.remove(&self.round).unwrap();
@@ -201,9 +204,11 @@ impl BlockManagement for AptosBlockManagement {
 
         self.blks_seen.insert((self.id, self.round));
 
-        self.cur_block_size = 0;
         self.cur_block_timeout = None;
-        self.block_merkle = DummyMerkleTree::new();
+        if should_cleanup {
+            self.cur_block_size = 0;
+            self.block_merkle = DummyMerkleTree::new();
+        }
 
         Ok((block, blk_ctx))
     }
@@ -280,7 +285,7 @@ impl BlockManagement for AptosBlockManagement {
         if parent_round_success {
             self.proposed_blks.remove(&(round - 1));
         }
-        pf_debug!(self.id; "got coa list for round {}, current round is {} (curblock len: {}, curblock size: {}, curblock timeout: {:?})", round, self.round, self.block_under_construction.0.len(), self.cur_block_size, self.cur_block_timeout);
+        pf_info!(self.id; "got coa list for round {}, current round is {} - will retry previous round: {} (curblock len: {}, curblock size: {}, curblock timeout: {:?})", round, self.round, !parent_round_success, self.block_under_construction.0.len(), self.cur_block_size, self.cur_block_timeout);
         self.coa_lists.insert(round, coa_list);
         Ok(())
     }
