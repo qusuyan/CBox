@@ -16,7 +16,7 @@ pub struct CoA {
 
 impl CoA {
     pub fn validate(&self, comb_key: &dyn ThresholdSignature) -> Result<(bool, f64), CopycatError> {
-        let content = (self.sender, self.round, self.digest);
+        let content = (&self.sender, &self.round, &self.digest);
         let serialized = bincode::serialize(&content)?;
         comb_key.verify(&serialized, &self.signature)
     }

@@ -2,27 +2,25 @@
 num_iterations = 1
 
 [parameters]
-chain-type = "avalanche"
+chain-type = "diem"
 cluster-threads = 32
 conn-multiply = 1
-correct-config = "vote_timeout_secs=610"
 correct-type = "Basic"
-crypto = "dummy-ecdsa"
-disable-txn-dissem = true
+correct-config = "blk_size=1048576"
+txn-crypto = "dummy-ecdsa"
+p2p-crypto = "dummy-ecdsa"
+threshold-crypto = "dummy-ecdsa"
 exp-prefix = "test/"
-exp-time = 610
+exp-time = 310
 frequency = 0
-mailbox-workers = 16
-max-inflight-txns = 50000
+max-inflight-txns = 1000000
 network-delay = 30
-num-accounts = 2000
-num-clients = 10
-num-faulty = 0
+num-accounts = 1000
+num-clients = 1
 num-machines = 1
-num-nodes = 20
-per-node-concurrency = 4
-topo-degree = 100                        # all-to-all communication
-# topo-skewness = 0.5
+num-nodes = [4, 8, 16]
+per-node-concurrency = 16
 txn-span = 0
-nic-bw = 12500000000
+disable-txn-dissem = true
+nic-bw = 125000000
 network-bw = 12500000

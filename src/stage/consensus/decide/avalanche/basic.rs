@@ -574,13 +574,13 @@ impl Decision for AvalancheDecision {
             self.record_votes(blk_id, self.id, votes).await?;
         } else {
             // otherwise, send votes to peer that queries the block
-            let msg_content = (blk_id, votes);
+            let msg_content = (&blk_id, &votes);
             let serialized_msg = &bincode::serialize(&msg_content)?;
             let (signature, stime) = self.signature_scheme.sign(&self.sk, serialized_msg)?;
             self.delay.process_illusion(stime).await;
             let vote_msg = VoteMsg {
-                round: msg_content.0,
-                votes: msg_content.1,
+                round: blk_id,
+                votes,
                 signature,
             };
             self.peer_messenger

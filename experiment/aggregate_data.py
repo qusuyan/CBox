@@ -30,8 +30,14 @@ import pandas as pd
 # exp_dir = "results/Crosschain-Scale"
 # configs = ["chain-type", "num-nodes"]
 
-exp_dir = "results/Aptos-Scale"
-configs = ["num-nodes"]
+# exp_dir = "results/Aptos-Scale"
+# configs = ["num-nodes", "correct-config"]
+
+exp_dir = "results/Aptos-vs-Diem"
+configs = ["chain-type", "correct-config",  "num-nodes"]
+
+# exp_dir = "results/Btc-Scale"
+# configs = ["num-nodes"]
 
 metrics = ["avg_tput", "avg_cpu", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms"]
 

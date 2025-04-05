@@ -76,14 +76,14 @@ impl GetSize for DiemBlock {
 
 impl DiemBlock {
     pub fn compute_id<T: Serialize>(&self, txn_ctxs: &T) -> Result<Hash, CopycatError> {
-        let serialized = bincode::serialize(&(
+        let input = (
             self.proposer,
             self.round,
             txn_ctxs,
             self.qc.vote_info.blk_id,
             self.qc.signatures.clone(),
-        ))?;
-        sha256(&serialized)
+        );
+        sha256(&input)
     }
 }
 

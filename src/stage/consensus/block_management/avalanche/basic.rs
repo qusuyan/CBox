@@ -304,7 +304,7 @@ impl BlockManagement for AvalancheBlockManagement {
         let mut merkle_tree = DummyMerkleTree::new();
         let merkle_dur = merkle_tree.append(txn_hashs.len())?;
         let merkle_root = merkle_tree.get_root();
-        let serialized = bincode::serialize(&(self.blk_counter, 0, merkle_root))?;
+        let serialized = bincode::serialize(&(&self.blk_counter, 0, &merkle_root))?;
         let (signature, signature_dur) = self.signature_scheme.sign(&serialized, &self.sk)?;
         self.delay
             .process_illusion(merkle_dur + signature_dur)
@@ -354,7 +354,7 @@ impl BlockManagement for AvalancheBlockManagement {
                 return Ok(vec![]);
             }
         };
-        let serialized = bincode::serialize(&(self.blk_counter, 0, merkle_root))?;
+        let serialized = bincode::serialize(&(&self.blk_counter, 0, &merkle_root))?;
         let mut check_time = 0f64;
         let (valid, dur) = self
             .signature_scheme
@@ -648,7 +648,7 @@ impl BlockManagement for AvalancheBlockManagement {
         let mut merkle_tree = DummyMerkleTree::new();
         let merkle_dur = merkle_tree.append(txns.len())?;
         let merkle_root = merkle_tree.get_root();
-        let serialized = bincode::serialize(&(self.blk_counter, 0, merkle_root))?;
+        let serialized = bincode::serialize(&(&self.blk_counter, 0, &merkle_root))?;
         let (signature, signature_dur) = self.signature_scheme.sign(&serialized, &self.sk)?;
         self.delay
             .process_illusion(merkle_dur + signature_dur)

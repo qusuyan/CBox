@@ -20,7 +20,7 @@ bar_width = 14
 tput_ax.axvline(x = 210, color=cbox_color_dark, linestyle="--", linewidth=0.7)
 tput_ax.plot(sim_df["num-nodes"], sim_df["avg_tput"], 'o-', color=sim_color, label = "BlockSim")
 tput_ax.plot(cbox_df["num-nodes"], cbox_df[("avg_tput", "mean")], 's-', color=cbox_color, label = "CBox")
-tput_ax.set_ylabel('Tput (ktps.)', labelpad=-4)
+tput_ax.set_ylabel('Tput (tps.)', labelpad=-4)
 tput_ax.set_ylim((0, 110))
 tput_ax.legend(loc=(0.5, 0.05))
 
