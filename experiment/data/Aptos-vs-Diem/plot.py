@@ -26,7 +26,7 @@ ax.plot(aptos_1_df["num-nodes"], aptos_1_df[("avg_tput", "mean")] / 1000, "s-", 
 ax.plot(aptos_4_df["num-nodes"], aptos_4_df[("avg_tput", "mean")] / 1000, "^-", color=aptos_4_color, label="Aptos 256KB")
 ax.plot(aptos_16_df["num-nodes"], aptos_16_df[("avg_tput", "mean")] / 1000, "v-", color=aptos_16_color, label="Aptos 64KB")
 ax.set_ylabel('Tput (ktps.)', labelpad=-1)
-ax.set_ylim((0, 22))
+ax.set_ylim((0, 50))
 
 ax.set_xlabel('# Validators', labelpad=-1)
 ax.set_xticks(data["num-nodes"])

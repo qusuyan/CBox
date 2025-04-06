@@ -17,6 +17,7 @@ use crate::transaction::Txn;
 use crate::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
+use mailbox_client::SizedMsg;
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +63,7 @@ pub struct AptosDiemDecision {
     id: NodeId,
     num_faulty: usize,
     blk_len: usize,
+    blk_size: usize,
     proposal_timeout: Duration,
     _vote_timeout: Duration, // TODO
     //
@@ -69,6 +71,7 @@ pub struct AptosDiemDecision {
     pending_queue: VecDeque<(NodeId, u64)>,
     committed_pool: HashSet<(NodeId, u64)>,
     block_under_construction: Vec<CoA>,
+    cur_block_size: usize,
     cur_proposal_timeout: Option<Instant>,
     // diem
     blk_pool: HashMap<Hash, (DiemBlock, Vec<CoA>)>,
@@ -131,12 +134,14 @@ impl AptosDiemDecision {
             id,
             num_faulty: (all_nodes.len() + 1) / 3,
             blk_len: config.diem_blk_len,
+            blk_size: config.diem_blk_size,
             proposal_timeout,
             _vote_timeout: vote_timeout,
             quorum_store: HashMap::new(),
             pending_queue: VecDeque::new(),
             committed_pool: HashSet::new(),
             block_under_construction: vec![],
+            cur_block_size: 0,
             cur_proposal_timeout,
             blk_pool: HashMap::new(),
             current_round,
@@ -164,6 +169,20 @@ impl AptosDiemDecision {
             delay,
             _notify: Notify::new(),
         }
+    }
+
+    #[inline]
+    fn is_cur_block_full(&self) -> bool {
+        self.block_under_construction.len() >= self.blk_len || self.cur_block_size >= self.blk_size
+    }
+
+    #[inline]
+    fn has_batched_enough(&self) -> bool {
+        self.pending_queue.len() + self.block_under_construction.len() >= self.blk_len
+            || self.pending_queue.len()
+            * ((self.all_nodes.len() - self.num_faulty) * 64 + 48)  // size of each CoA
+            + self.cur_block_size
+                >= self.blk_size
     }
 
     fn validate_qc_signatures(&self, qc: &QuorumCert) -> Result<(bool, f64), CopycatError> {
@@ -496,7 +515,7 @@ impl Decision for AptosDiemDecision {
                 || self.blk_pool.contains_key(&self.high_qc.vote_info.blk_id)
             {
                 // already enough content, start proposing
-                if self.pending_queue.len() >= self.blk_len {
+                if self.has_batched_enough() {
                     return Ok(());
                 }
 
@@ -540,15 +559,15 @@ impl Decision for AptosDiemDecision {
                     let certificate = match ctx.data.as_ref().unwrap() {
                         BlkData::Aptos { certificate } => certificate,
                     };
+                    self.cur_block_size += certificate.size()?;
                     self.block_under_construction.push(certificate.clone()); // TODO: remove clone()
-                    if self.block_under_construction.len() >= self.blk_len {
+                    if self.is_cur_block_full() {
                         break;
                     }
                 }
 
                 // do not propose yet if block is not full and timeout has not reached
-                if self.block_under_construction.len() < self.blk_len
-                    && timeout > Instant::now() + Duration::from_millis(1)
+                if !self.is_cur_block_full() && timeout > Instant::now() + Duration::from_millis(1)
                 {
                     return Ok(());
                 }
