@@ -41,7 +41,7 @@ fn get_pacemaker(
 ) -> Box<dyn Pacemaker> {
     match config {
         ChainConfig::Dummy { .. } => Box::new(DummyPacemaker::new()),
-        ChainConfig::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO
+        ChainConfig::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO: difficulty adjustment
         ChainConfig::Avalanche { config } => match config {
             AvalancheConfig::Basic { config } => {
                 Box::new(FixedInflightBlkPacemaker::new(config.max_inflight_blk))
@@ -51,7 +51,7 @@ fn get_pacemaker(
             }
             AvalancheConfig::VoteNo { .. } => Box::new(DummyPacemaker::new()),
         },
-        ChainConfig::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,
+        ChainConfig::ChainReplication { .. } => Box::new(DummyPacemaker::new()),
         ChainConfig::Diem { .. } => Box::new(DiemPacemaker::new(id, peer_messenger)),
         ChainConfig::Aptos { config } => aptos::new(id, config, p2p_signature),
     }

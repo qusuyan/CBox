@@ -35,7 +35,7 @@ fn get_commit(id: NodeId, config: ChainConfig, delay: Arc<DelayPool>) -> Box<dyn
         ChainConfig::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::Diem { .. } => Box::new(DummyCommit::new()),    // TODO:
-        ChainConfig::Aptos { .. } => Box::new(ExecuteCommit::new(id, delay)), // TODO:
+        ChainConfig::Aptos { .. } => Box::new(ExecuteCommit::new(id, delay)),
     }
 }
 

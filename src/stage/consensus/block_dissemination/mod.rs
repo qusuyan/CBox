@@ -114,7 +114,6 @@ pub async fn block_dissemination_thread(
     let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();
 
-    // TODO: avoid possible deadlock on semaphore
     loop {
         tokio::select! {
             new_blk = new_block_recv.recv() => {

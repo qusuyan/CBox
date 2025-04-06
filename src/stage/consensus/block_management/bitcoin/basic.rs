@@ -344,7 +344,11 @@ impl BlockManagement for BitcoinBlockManagement {
         let header = BlockHeader::Bitcoin {
             proposer: self.id,
             parent_id: self.chain_tail.clone(),
-            merkle_root: self.merkle_root.clone().unwrap().get_root(), // TODO
+            merkle_root: self
+                .merkle_root
+                .as_ref()
+                .map(|tree| tree.get_root())
+                .unwrap(),
             nonce: 1, // use nonce = 1 to indicate valid pow
         };
         let block_ctx = Arc::new(BlkCtx::from_header_and_txns(&header, txn_ctxs)?);

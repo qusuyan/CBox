@@ -24,6 +24,7 @@ struct ChainInfo {
 }
 
 pub struct DiemFlowGen {
+    script_size: usize,
     max_inflight: usize,
     batch_frequency: usize,
     batch_size: usize,
@@ -42,6 +43,7 @@ impl DiemFlowGen {
         id: FlowGenId,
         client_list: Vec<ClientId>,
         num_accounts: usize,
+        script_size: Option<usize>,
         max_inflight: usize,
         frequency: usize,
         crypto: SignatureScheme,
@@ -60,7 +62,6 @@ impl DiemFlowGen {
                 i += 1;
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
                 let addr = (seed as u128).to_ne_bytes();
-                // TODO: fill addr with seed
                 accounts.entry(*client).or_insert(vec![]).push((
                     addr.try_into().unwrap(),
                     (pubkey, privkey),
@@ -79,6 +80,7 @@ impl DiemFlowGen {
         };
 
         Self {
+            script_size: script_size.unwrap_or(16 + 8), // recver_addr + amount for send txns
             max_inflight,
             batch_frequency,
             batch_size,
@@ -151,7 +153,7 @@ impl FlowGen for DiemFlowGen {
                 *sender_addr,
                 *sender_seq_no,
                 DiemPayload {
-                    script_bytes: 16,
+                    script_bytes: self.script_size,
                     script_runtime_sec: 0f64,
                     script_succeed: true,
                     distinct_writes: 1,

@@ -42,9 +42,9 @@ fn get_txn_dissemination(
     match config.get_txn_dissem() {
         DissemPattern::Broadcast => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)),
         DissemPattern::Gossip => Box::new(GossipTxnDissemination::new(id, peer_messenger)),
-        DissemPattern::Sample { .. } => todo!(), // TODO: use gossip for now
+        DissemPattern::Sample { .. } => todo!(),
         DissemPattern::Passthrough => Box::new(PassthroughTxnDissemination::new()),
-        DissemPattern::Linear { .. } => todo!(), // TODO: use passthrough for now
+        DissemPattern::Linear { .. } => todo!(),
         DissemPattern::Narwhal { .. } => unreachable!(),
     }
 }

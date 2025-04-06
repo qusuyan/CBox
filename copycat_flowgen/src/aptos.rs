@@ -24,6 +24,7 @@ struct ChainInfo {
 }
 
 pub struct AptosFlowGen {
+    script_size: usize,
     max_inflight: usize,
     batch_frequency: usize,
     batch_size: usize,
@@ -42,6 +43,7 @@ impl AptosFlowGen {
         id: FlowGenId,
         client_list: Vec<ClientId>,
         num_accounts: usize,
+        script_size: Option<usize>,
         max_inflight: usize,
         frequency: usize,
         crypto: SignatureScheme,
@@ -61,7 +63,6 @@ impl AptosFlowGen {
                 let (pubkey, privkey) = crypto.gen_key_pair(seed);
                 let addr =
                     get_aptos_addr(&pubkey).expect("error computing aptos addr from pub key");
-                // TODO: fill addr with seed
                 accounts.entry(*client).or_insert(vec![]).push((
                     addr.try_into().unwrap(),
                     (pubkey, privkey),
@@ -80,6 +81,7 @@ impl AptosFlowGen {
         };
 
         Self {
+            script_size: script_size.unwrap_or(32 + 8), // recver_addr + amount for send txns
             max_inflight,
             batch_frequency,
             batch_size,
@@ -147,7 +149,7 @@ impl FlowGen for AptosFlowGen {
                 accounts.get_mut(sender_idx).unwrap();
             *sender_seq_no += 1;
             let payload = AptosPayload {
-                script_bytes: 16,
+                script_bytes: self.script_size,
                 script_runtime_sec: 0f64,
                 script_succeed: true,
                 distinct_writes: 1,

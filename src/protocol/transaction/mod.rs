@@ -19,8 +19,6 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::crypto::Hash;
 use crate::{CopycatError, SignatureScheme};
 
-// TODO: for better accuracy, we should implement GetSize manually so that message size
-// matches the size after marshalling.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Txn {
     Dummy { txn: DummyTxn },

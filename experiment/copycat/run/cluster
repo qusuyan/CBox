@@ -20,6 +20,7 @@ FREQUENCY=${15}
 CONFLICT_RATE=${16}
 TXN_SPAN=${17}
 DISABLE_TXN_DISSEM=${18}
+SCRIPT_SIZE=${19}
 
 export RUST_LOG=info
 export RUST_BACKTRACE=full
@@ -32,6 +33,12 @@ else
     DISABLE_TXN_DISSEM="--disable-txn-dissem"
 fi
 
+if [[ $SCRIPT_SIZE == "" ]]; then 
+    SCRIPT_SIZE=""
+else
+    SCRIPT_SIZE="-z ${SCRIPT_SIZE}"
+fi
+
 if (($ID < $CLIENTS_REMAINDER)); then
     CLIENTS=$((NUM_CLIENTS + 1))
 else
@@ -42,4 +49,5 @@ fi
     -w ${MAILBOX_WORKERS} -m bench_machines.json -n bench_network.json -c ${CHAIN_TYPE} \
     --config bench_validators.json -x ${TXN_CRYPTO} -p ${P2P_CRYPTO} -h ${THRESHOLD_CRYPTO} \
     -o ${CONN_MULTIPLY} -l ${CLIENTS} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} \
-    -s ${TXN_SPAN} -r ${CONFLICT_RATE} ${DISABLE_TXN_DISSEM} --topology bench_topo.json
+    -s ${TXN_SPAN} -r ${CONFLICT_RATE} ${DISABLE_TXN_DISSEM} --topology bench_topo.json \
+    ${SCRIPT_SIZE}

@@ -388,7 +388,7 @@ impl AptosDiemDecision {
                 Some(blk) => blk,
                 None => {
                     if !self.queried_blks.contains(&next_blk_id) {
-                        // TODO: do not query blocks yet since it will arrive soon
+                        // TODO: do not query blocks yet since it may arrive soon
                         let msg = DiemConsensusMsg::FetchBlockReq {
                             blk_id: *next_blk_id,
                         };

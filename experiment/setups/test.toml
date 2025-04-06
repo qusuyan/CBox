@@ -2,25 +2,23 @@
 num_iterations = 1
 
 [parameters]
-chain-type = "diem"
+chain-type = "bitcoin"
 cluster-threads = 32
-conn-multiply = 1
+correct-config = "difficulty=32"
 correct-type = "Basic"
-correct-config = "blk_size=1048576"
-txn-crypto = "dummy-ecdsa"
-p2p-crypto = "dummy-ecdsa"
-threshold-crypto = "dummy-ecdsa"
+crypto = "dummy-ecdsa"
+disable-txn-dissem = true
 exp-prefix = "test/"
-exp-time = 310
-frequency = 0
-max-inflight-txns = 1000000
+exp-time = 910
+mailbox-workers = 64
+max-inflight-txns = 200000
 network-delay = 30
 num-accounts = 1000
-num-clients = 1
+num-clients = 10
 num-machines = 1
-num-nodes = [4, 8, 16]
-per-node-concurrency = 16
+num-nodes = 40
+per-node-concurrency = 32
+topo-degree = 5
+topo-skewness = 0
 txn-span = 0
-disable-txn-dissem = true
-nic-bw = 125000000
-network-bw = 12500000
+script-size = 400

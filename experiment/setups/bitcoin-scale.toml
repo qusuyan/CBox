@@ -1,5 +1,5 @@
 [experiment]
-num_iterations = 1
+num_iterations = 5
 
 [parameters]
 chain-type = "bitcoin"
@@ -9,7 +9,7 @@ correct-type = "Basic"
 crypto = "dummy-ecdsa"
 disable-txn-dissem = true
 exp-prefix = "Btc-Scale/"
-exp-time = 310
+exp-time = 910
 mailbox-workers = 64
 max-inflight-txns = 200000
 network-delay = 30
@@ -21,3 +21,4 @@ per-node-concurrency = 32
 topo-degree = 5
 topo-skewness = 0
 txn-span = 0
+script-size = 400

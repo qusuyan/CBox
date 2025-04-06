@@ -26,6 +26,7 @@ pub struct AvalancheFlowGen {
     batch_frequency: usize,
     batch_size: usize,
     conflict_rate: f64,
+    script_size: usize,
     next_batch_time: Instant,
     crypto: SignatureScheme,
     client_list: Vec<ClientId>,
@@ -50,6 +51,7 @@ impl AvalancheFlowGen {
         id: FlowGenId,
         client_list: Vec<ClientId>,
         num_accounts: usize,
+        script_size: Option<usize>,
         max_inflight: usize,
         frequency: usize,
         conflict_rate: f64,
@@ -92,6 +94,7 @@ impl AvalancheFlowGen {
             batch_frequency,
             batch_size,
             conflict_rate,
+            script_size: script_size.unwrap_or(0),
             next_batch_time: Instant::now(),
             crypto,
             client_list,
@@ -201,7 +204,7 @@ impl FlowGen for AvalancheFlowGen {
                         out_utxo,
                         remainder,
                         sender_signature,
-                        payload_size: 0,
+                        payload_size: self.script_size,
                     },
                 });
 
@@ -269,7 +272,7 @@ impl FlowGen for AvalancheFlowGen {
                         out_utxo: value,
                         remainder: 0,
                         sender_signature: sender_signature.clone(),
-                        payload_size: 0,
+                        payload_size: self.script_size,
                     },
                 });
                 let base_txn1_hash = txn1.compute_id()?;
@@ -290,7 +293,7 @@ impl FlowGen for AvalancheFlowGen {
                         out_utxo: value,
                         remainder: 0,
                         sender_signature,
-                        payload_size: 0,
+                        payload_size: self.script_size,
                     },
                 });
                 let base_txn2_hash = txn2.compute_id()?;
@@ -333,7 +336,7 @@ impl FlowGen for AvalancheFlowGen {
                             out_utxo: value,
                             remainder: 0,
                             sender_signature: sender_signature1,
-                            payload_size: 0,
+                            payload_size: self.script_size,
                         },
                     });
                     txn1_hash = txn1.compute_id()?;
@@ -358,7 +361,7 @@ impl FlowGen for AvalancheFlowGen {
                             out_utxo: value,
                             remainder: 0,
                             sender_signature: sender_signature2,
-                            payload_size: 0,
+                            payload_size: self.script_size,
                         },
                     });
                     txn2_hash = txn2.compute_id()?;

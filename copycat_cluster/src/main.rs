@@ -17,8 +17,6 @@ use tokio::time::Duration;
 use clap::Parser;
 use sysinfo::{MemoryRefreshKind, System};
 
-
-// TODO: add parameters to config individual node configs
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct CliArgs {
@@ -73,6 +71,10 @@ struct CliArgs {
     /// Number of user accounts for flow generation
     #[arg(long, short = 'a', default_value = "10000")]
     accounts: usize,
+
+    /// Number of user accounts for flow generation
+    #[arg(long, short = 'z')]
+    script_size: Option<usize>,
 
     /// Maximum number of inflight transaction requests, 0 means unlimited
     #[arg(long, short = 'f', default_value = "100000")]
@@ -230,10 +232,6 @@ fn main() {
         req_dsts.insert(client_list[idx], dsts);
     }
 
-    let max_inflight = args.max_inflight;
-    let frequency = args.frequency;
-    let num_accounts = args.accounts;
-
     // collect system information
     let mut sys = System::new();
     sys.refresh_cpu_usage();
@@ -308,9 +306,10 @@ fn main() {
         let mut flow_gen = get_flow_gen(
             id, 
             client_list,
-            num_accounts,
-            max_inflight,
-            frequency,
+            args.accounts,
+            args.script_size,
+            args.max_inflight,
+            args.frequency,
             args.conflict_rate,
             args.chain,
             args.txn_signature_scheme,
