@@ -1,6 +1,7 @@
 use crate::protocol::crypto::{Hash, PubKey, Signature};
 use crate::{CopycatError, SignatureScheme};
 
+use mailbox_client::{MailboxError, SizedMsg};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -17,11 +18,13 @@ impl DummyTxn {
         Ok(self.id)
     }
 
-    pub fn get_size(&self) -> usize {
-        self.content.len() + self.signature.len() + 64
-    }
-
     pub fn validate(&self, crypto: SignatureScheme) -> Result<(bool, f64), CopycatError> {
         crypto.verify(&self.pub_key, &self.content, &self.signature)
+    }
+}
+
+impl SizedMsg for DummyTxn {
+    fn size(&self) -> Result<usize, MailboxError> {
+        Ok(32 + self.content.size()? + 32 + self.signature.len())
     }
 }

@@ -1,4 +1,4 @@
-use get_size::GetSize;
+use mailbox_client::{MailboxError, SizedMsg};
 use primitive_types::U256;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
@@ -56,14 +56,13 @@ pub enum BlockHeader {
     },
 }
 
-// TODO: use len() instead of get_size() for signatures
-impl GetSize for BlockHeader {
-    fn get_size(&self) -> usize {
+impl SizedMsg for BlockHeader {
+    fn size(&self) -> Result<usize, MailboxError> {
         match self {
-            BlockHeader::Dummy => 0,
-            BlockHeader::Bitcoin { .. } => 76,
-            BlockHeader::Avalanche { signature, .. } => 56 + signature.len(),
-            BlockHeader::ChainReplication { .. } => 32,
+            BlockHeader::Dummy => Ok(0),
+            BlockHeader::Bitcoin { .. } => Ok(32 + 32 + 4 + 8),
+            BlockHeader::Avalanche { signature, .. } => Ok(8 + 8 + 32 + 8 + signature.len()),
+            BlockHeader::ChainReplication { .. } => Ok(32),
             BlockHeader::Diem {
                 block,
                 last_round_tc,
@@ -71,16 +70,16 @@ impl GetSize for BlockHeader {
                 signature,
             } => {
                 let tc_size = match last_round_tc {
-                    Some(tc) => 1 + tc.get_size(),
+                    Some(tc) => 1 + tc.size()?,
                     None => 1,
                 };
-                block.get_size() + tc_size + high_commit_qc.get_size() + signature.len()
+                Ok(block.size()? + tc_size + high_commit_qc.size()? + signature.len())
             }
             BlockHeader::Aptos {
                 certificates,
                 signature,
                 ..
-            } => 48 + certificates.get_size() + signature.len(),
+            } => Ok(8 + 8 + certificates.size()? + 32 + signature.len()),
         }
     }
 }
@@ -123,80 +122,14 @@ impl Block {
     }
 }
 
-impl GetSize for Block {
-    fn get_size(&self) -> usize {
-        self.header.get_size()
-            + self
-                .txns
-                .iter()
-                .map(|txn| txn.as_ref().get_size())
-                .sum::<usize>()
-    }
-}
-
 impl Debug for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         self.header.fmt(f)
     }
 }
 
-#[cfg(test)]
-mod blk_header_get_size_test {
-    use super::BlockHeader;
-    use crate::protocol::crypto::Hash;
-    use crate::protocol::types::aptos::CoA;
-    use crate::protocol::types::diem::DiemBlock;
-    use crate::protocol::types::diem::GENESIS_QC;
-
-    use get_size::GetSize;
-    use primitive_types::U256;
-
-    #[test]
-    fn blk_header_get_size() {
-        let dummy_header = BlockHeader::Dummy;
-        println!("{}", dummy_header.get_size());
-
-        let cr_header = BlockHeader::ChainReplication {
-            blk_id: Hash(U256::zero()),
-        };
-        println!("{}", cr_header.get_size());
-
-        let avax_header = BlockHeader::Avalanche {
-            proposer: 0,
-            id: 0,
-            merkle_root: Hash(U256::zero()),
-            depth: 0,
-            signature: vec![0u8; 64],
-        };
-        println!("{}", avax_header.get_size());
-
-        let diem_block = DiemBlock {
-            proposer: 0,
-            round: 0,
-            state_id: Hash(U256::zero()),
-            qc: GENESIS_QC.clone(),
-        };
-        let diem_header = BlockHeader::Diem {
-            block: diem_block,
-            last_round_tc: None,
-            high_commit_qc: GENESIS_QC.clone(),
-            signature: vec![0u8; 64],
-        };
-        println!("{}", diem_header.get_size());
-
-        let coa = CoA {
-            sender: 0,
-            round: 0,
-            digest: Hash(U256::zero()),
-            signature: vec![0u8; 64],
-        };
-        let aptos_header = BlockHeader::Aptos {
-            sender: 0,
-            round: 0,
-            certificates: vec![coa; 3],
-            merkle_root: Hash(U256::zero()),
-            signature: vec![0u8; 64],
-        };
-        println!("{}", aptos_header.get_size());
+impl SizedMsg for Block {
+    fn size(&self) -> Result<usize, MailboxError> {
+        Ok(self.header.size()? + self.txns.size()?)
     }
 }

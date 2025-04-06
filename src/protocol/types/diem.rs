@@ -3,20 +3,31 @@ use crate::{
     CopycatError, NodeId,
 };
 
-use get_size::GetSize;
+use mailbox_client::{MailboxError, SizedMsg};
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use lazy_static::lazy_static;
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, GetSize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct VoteInfo {
     pub blk_id: Hash,
     pub round: u64,
     pub parent_id: Hash,
     pub parent_round: u64,
     pub exec_state_hash: Hash,
+}
+
+impl SizedMsg for VoteInfo {
+    fn size(&self) -> Result<usize, MailboxError> {
+        let size = 32 // blk_id
+            + 8              // round
+            + 32             // parent_id
+            + 8              // parent_round
+            + 32; // exec_state_hash
+        Ok(size)
+    }
 }
 
 impl VoteInfo {
@@ -31,13 +42,14 @@ pub struct LedgerCommitInfo {
     pub vote_info_hash: Hash,
 }
 
-impl GetSize for LedgerCommitInfo {
-    fn get_size(&self) -> usize {
-        let commit_id_size = match self.commit_state_id {
-            Some(id) => 1 + id.get_size(),
+impl SizedMsg for LedgerCommitInfo {
+    fn size(&self) -> Result<usize, MailboxError> {
+        let commit_state_id_size = match &self.commit_state_id {
+            Some(_) => 1 + 32,
             None => 1,
         };
-        commit_id_size + 32
+        let size = commit_state_id_size + 32; // vote_info_hash
+        Ok(size)
     }
 }
 
@@ -50,13 +62,12 @@ pub struct QuorumCert {
     pub author_signature: Signature,
 }
 
-impl GetSize for QuorumCert {
-    fn get_size(&self) -> usize {
-        self.vote_info.get_size()
-            + self.commit_info.get_size()
-            + self.signatures.len()
-            + 8 // NodeId is 8 bytes
-            + self.author_signature.len()
+impl SizedMsg for QuorumCert {
+    fn size(&self) -> Result<usize, MailboxError> {
+        let size = self.vote_info.size()? + self.commit_info.size()? + self.signatures.len()
+            + 8 // author
+            + self.author_signature.len(); // author_signature
+        Ok(size)
     }
 }
 
@@ -66,12 +77,6 @@ pub struct DiemBlock {
     pub round: u64,
     pub state_id: Hash,
     pub qc: QuorumCert,
-}
-
-impl GetSize for DiemBlock {
-    fn get_size(&self) -> usize {
-        48 + self.qc.get_size()
-    }
 }
 
 impl DiemBlock {
@@ -87,18 +92,19 @@ impl DiemBlock {
     }
 }
 
+impl SizedMsg for DiemBlock {
+    fn size(&self) -> Result<usize, MailboxError> {
+        let size = 8 + 8 + 32 + self.qc.size()?;
+        Ok(size)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimeoutInfo {
     pub round: u64,
     pub high_qc: QuorumCert,
     pub sender: NodeId,
     pub signature: Signature,
-}
-
-impl GetSize for TimeoutInfo {
-    fn get_size(&self) -> usize {
-        16 + self.high_qc.get_size() + self.signature.len()
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -108,14 +114,16 @@ pub struct TimeCert {
     pub tmo_signatures: HashMap<NodeId, Signature>,
 }
 
-impl GetSize for TimeCert {
-    fn get_size(&self) -> usize {
-        8 + self.tmo_high_qc_rounds.len() * (8 + 8)
-            + self
-                .tmo_signatures
-                .iter()
-                .map(|(_, signature)| 8 + signature.len())
-                .sum::<usize>()
+impl SizedMsg for TimeCert {
+    fn size(&self) -> Result<usize, MailboxError> {
+        assert!(self.tmo_high_qc_rounds.len() == self.tmo_signatures.len());
+        let signature_size = self
+            .tmo_signatures
+            .iter()
+            .map(|(_, sig)| sig.len())
+            .sum::<usize>();
+        let size = 8 + self.tmo_high_qc_rounds.len() * (8 + 8) + signature_size;
+        Ok(size)
     }
 }
 

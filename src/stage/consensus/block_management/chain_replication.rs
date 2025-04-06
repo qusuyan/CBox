@@ -7,7 +7,7 @@ use crate::protocol::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
-use get_size::GetSize;
+use mailbox_client::SizedMsg;
 use primitive_types::U256;
 
 use std::sync::Arc;
@@ -73,7 +73,7 @@ impl BlockManagement for ChainReplicationBlockManagement {
 
             let (next_txn, _) = &self.mem_pool[self.curr_batch_len];
             self.curr_batch_len += 1;
-            self.curr_batch_size += next_txn.get_size();
+            self.curr_batch_size += next_txn.size()?;
         };
 
         // pf_debug!(self.id; "blk_full: {}, curr_batch_size: {}, curr_batch_len: {}, mem_pool size: {}", blk_full, self.curr_batch_size, self.curr_batch_len, self.mem_pool.len());

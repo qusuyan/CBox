@@ -1,4 +1,4 @@
-use get_size::GetSize;
+use mailbox_client::{MailboxError, SizedMsg};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -19,7 +19,7 @@ pub enum BitcoinTxn {
         out_utxo: u64,               // how much money will be sent to the receiver
         remainder: u64,              // how much money left
         sender_signature: Signature, // signature of sender
-        script_bytes: u64,           // size of the script
+        script_bytes: usize,         // size of the script
         script_runtime_sec: f64,     // how long does it take to run the script
         script_succeed: bool,        // if the script should fail
     },
@@ -50,14 +50,33 @@ impl BitcoinTxn {
             BitcoinTxn::Grant { .. } | BitcoinTxn::Incentive { .. } => Ok((true, 0f64)),
         }
     }
-
-    pub fn get_size(&self) -> usize {
-        let mut size = GetSize::get_size(self);
-        if let BitcoinTxn::Send { script_bytes, .. } = self {
-            size += *script_bytes as usize;
-        }
-        size
-    }
 }
 
-impl GetSize for BitcoinTxn {}
+impl SizedMsg for BitcoinTxn {
+    fn size(&self) -> Result<usize, MailboxError> {
+        let size = match self {
+            BitcoinTxn::Incentive { receiver, .. } => {
+                8 + receiver.len() // out_utxo + receiver
+            }
+            BitcoinTxn::Send {
+                sender,
+                in_utxo,
+                receiver,
+                script_bytes,
+                sender_signature,
+                ..
+            } => {
+                sender.len()                // sender pubkey
+                + 8 + 32 * in_utxo.len()    // in_utxo: length + content
+                + receiver.len()            // receiver pubkey
+                + 8 + 8                     // out_utxo + remainder
+                + sender_signature.len()    // sender_signature
+                + *script_bytes // script
+            }
+            BitcoinTxn::Grant { receiver, .. } => {
+                8 + receiver.len() // out_utxo + receiver
+            }
+        };
+        Ok(size)
+    }
+}

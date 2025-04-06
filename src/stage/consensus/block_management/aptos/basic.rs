@@ -12,7 +12,7 @@ use crate::transaction::Txn;
 use crate::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
-use get_size::GetSize;
+use mailbox_client::SizedMsg;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -139,7 +139,7 @@ impl BlockManagement for AptosBlockManagement {
             }
 
             let (next_txn, next_txn_ctx) = self.txn_pool.get(&next_txn_id).unwrap();
-            let txn_size = GetSize::get_size(next_txn.as_ref());
+            let txn_size = next_txn.size()?;
 
             block_under_construction.push(next_txn.clone());
             block_under_construction_ctx.push(next_txn_ctx.clone());

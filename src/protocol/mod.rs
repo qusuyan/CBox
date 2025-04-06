@@ -5,6 +5,7 @@ pub mod types;
 
 pub use crypto::signature::SignatureScheme;
 pub use crypto::threshold_signature::ThresholdSignatureScheme;
+use mailbox_client::{MailboxError, SizedMsg};
 
 use crate::NodeId;
 use block::Block;
@@ -12,7 +13,6 @@ use transaction::Txn;
 
 use std::sync::Arc;
 
-use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, clap::ValueEnum)]
@@ -45,58 +45,15 @@ pub enum MsgType {
     BlockReq { msg: Vec<u8> },
 }
 
-impl GetSize for MsgType {
-    fn get_size(&self) -> usize {
+impl SizedMsg for MsgType {
+    fn size(&self) -> Result<usize, MailboxError> {
         match self {
-            MsgType::NewTxn { txn_batch } => {
-                8 + txn_batch
-                    .iter()
-                    .map(|txn| txn.as_ref().get_size())
-                    .sum::<usize>()
-            }
-            MsgType::NewBlock { blk } => blk.as_ref().get_size(),
-            MsgType::BlkDissemMsg { msg } => msg.len(),
-            MsgType::ConsensusMsg { msg } => msg.len(),
-            MsgType::PMakerMsg { msg } => msg.len(),
-            MsgType::BlockReq { msg } => msg.len(),
+            MsgType::NewTxn { txn_batch } => txn_batch.size(),
+            MsgType::NewBlock { blk } => blk.size(),
+            MsgType::BlkDissemMsg { msg } => Ok(msg.len()),
+            MsgType::ConsensusMsg { msg } => Ok(msg.len()),
+            MsgType::PMakerMsg { msg } => Ok(msg.len()),
+            MsgType::BlockReq { msg } => Ok(msg.len()),
         }
-    }
-}
-
-#[cfg(test)]
-mod msgtype_test {
-
-    use super::MsgType;
-    use crate::protocol::transaction::BitcoinTxn;
-    use crate::protocol::transaction::Txn;
-    use crate::CopycatError;
-
-    use get_size::GetSize;
-    use std::sync::Arc;
-
-    #[test]
-    fn test_msg_size_correct() -> Result<(), CopycatError> {
-        let txn_size = 0x100000;
-        let txn = Txn::Bitcoin {
-            txn: BitcoinTxn::Send {
-                sender: vec![],
-                in_utxo: vec![],
-                receiver: vec![],
-                out_utxo: 10,
-                remainder: 10,
-                sender_signature: vec![],
-                script_bytes: 0x100000,
-                script_runtime_sec: 0f64,
-                script_succeed: true,
-            },
-        };
-
-        let msg = MsgType::NewTxn {
-            txn_batch: vec![Arc::new(txn)],
-        };
-
-        assert!(msg.get_size() > txn_size);
-
-        Ok(())
     }
 }

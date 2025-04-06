@@ -16,6 +16,7 @@ use crate::stage::DelayPool;
 use crate::transaction::{DiemAccountAddress, DiemTxn, Txn};
 use crate::{CopycatError, NodeId, SignatureScheme};
 
+use mailbox_client::SizedMsg;
 use primitive_types::U256;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -24,7 +25,6 @@ use std::time::Duration;
 use tokio::sync::Notify;
 
 use async_trait::async_trait;
-use get_size::GetSize;
 
 pub struct DiemBlockManagement {
     id: NodeId,
@@ -335,7 +335,7 @@ impl BlockManagement for DiemBlockManagement {
                 },
             }
 
-            let txn_size = GetSize::get_size(next_txn.as_ref());
+            let txn_size = next_txn.size()?;
             txns.push(next_txn.clone());
             txn_ctxs.push(next_txn_ctx.clone());
             blk_size += txn_size;

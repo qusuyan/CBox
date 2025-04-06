@@ -12,13 +12,13 @@ use crate::utils::{CopycatError, NodeId};
 use crate::SignatureScheme;
 
 use async_trait::async_trait;
+use mailbox_client::SizedMsg;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 
-use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 
 struct DagNode {
@@ -265,7 +265,7 @@ impl BlockManagement for AvalancheBlockManagement {
             }
 
             let (txn, _) = self.txn_pool.get(&next_txn).unwrap();
-            self.curr_batch_size += GetSize::get_size(txn.as_ref());
+            self.curr_batch_size += txn.size()?;
             self.curr_batch.push(next_txn);
         };
 

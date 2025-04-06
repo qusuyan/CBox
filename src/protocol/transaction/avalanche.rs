@@ -1,4 +1,4 @@
-use get_size::GetSize;
+use mailbox_client::{MailboxError, SizedMsg};
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
 
@@ -57,15 +57,30 @@ impl AvalancheTxn {
             }
         }
     }
-
-    pub fn get_size(&self) -> usize {
-        let mut size = GetSize::get_size(self);
-        if let AvalancheTxn::Send { payload_size, .. } = self {
-            size -= GetSize::get_size(payload_size);
-            size += payload_size;
-        }
-        size
-    }
 }
 
-impl GetSize for AvalancheTxn {}
+impl SizedMsg for AvalancheTxn {
+    fn size(&self) -> Result<usize, MailboxError> {
+        let size = match self {
+            AvalancheTxn::Send {
+                in_utxo,
+                payload_size,
+                receiver,
+                sender_signature,
+                ..
+            } => {
+                32                          // sender pubkey
+                 + 8 + 32 * in_utxo.len()   // in_utxo
+                 + receiver.len() + 8 + 8   // receiver pubkey + out_utxo + remainder
+                 + sender_signature.len()   // sender_signature 
+                 + *payload_size // script
+            }
+            AvalancheTxn::Grant { receiver, .. } => {
+                8 + receiver.len() + 8 // out_utxo + receiver + nonce
+            }
+            AvalancheTxn::Noop { parents } => parents.len() * 32,
+            AvalancheTxn::PlaceHolder => 0,
+        };
+        Ok(size)
+    }
+}

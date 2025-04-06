@@ -6,7 +6,7 @@ use crate::protocol::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
-use get_size::GetSize;
+use mailbox_client::SizedMsg;
 
 use std::sync::Arc;
 use tokio::time::{Duration, Instant};
@@ -43,8 +43,7 @@ impl BlockManagement for DummyBlockManagement {
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         loop {
             let now = Instant::now();
-            if self.mem_pool.get_size() >= 0x100000
-                || now - self.last_block >= Duration::from_secs(10)
+            if self.mem_pool.size()? >= 0x100000 || now - self.last_block >= Duration::from_secs(10)
             {
                 return Ok(());
             }

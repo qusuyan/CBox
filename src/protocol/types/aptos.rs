@@ -2,7 +2,7 @@ use crate::protocol::crypto::threshold_signature::{SignComb, ThresholdSignature}
 use crate::protocol::crypto::Hash;
 use crate::{CopycatError, NodeId};
 
-use get_size::GetSize;
+use mailbox_client::{MailboxError, SizedMsg};
 use serde::{Deserialize, Serialize};
 
 // certificate of availability
@@ -22,8 +22,9 @@ impl CoA {
     }
 }
 
-impl GetSize for CoA {
-    fn get_size(&self) -> usize {
-        48 + self.signature.len()
+impl SizedMsg for CoA {
+    fn size(&self) -> Result<usize, MailboxError> {
+        let size = 8 + 8 + 32 + self.signature.len();
+        Ok(size)
     }
 }

@@ -6,7 +6,6 @@ use crate::utils::CopycatError;
 
 use std::fmt::Display;
 
-use get_size::GetSize;
 use primitive_types::U256;
 use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
@@ -25,12 +24,6 @@ pub fn sha256<T: Serialize>(input: &T) -> Result<Hash, CopycatError> {
     context.update(&serialized);
     let digest = context.finish();
     Ok(Hash(U256::from_little_endian(digest.as_ref())))
-}
-
-impl GetSize for Hash {
-    fn get_size(&self) -> usize {
-        32
-    }
 }
 
 impl Display for Hash {

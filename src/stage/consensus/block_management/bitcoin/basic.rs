@@ -12,7 +12,7 @@ use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 
 use async_trait::async_trait;
-use get_size::GetSize;
+use mailbox_client::SizedMsg;
 use primitive_types::U256;
 use rand::Rng;
 
@@ -279,7 +279,7 @@ impl BlockManagement for BitcoinBlockManagement {
                             if *remainder > 0 {
                                 self.new_utxo.insert((txn_hash.clone(), sender.clone()));
                             }
-                            self.cur_block_size += GetSize::get_size(txn.as_ref());
+                            self.cur_block_size += txn.size()?;
                             modified = true;
                         } else {
                             self.pending_txns.push_back(txn_hash); // some dependencies might be missing, retry later
@@ -289,7 +289,7 @@ impl BlockManagement for BitcoinBlockManagement {
                         // bypass double spending check
                         self.block_under_construction.push(txn_hash.clone());
                         self.new_utxo.insert((txn_hash.clone(), receiver.clone()));
-                        self.cur_block_size += txn.get_size();
+                        self.cur_block_size += txn.size()?;
                         modified = true;
                     }
                     BitcoinTxn::Incentive { .. } => unreachable!(),
@@ -371,9 +371,9 @@ impl BlockManagement for BitcoinBlockManagement {
             (Instant::now() - pow_start_time).as_secs_f64(),
             pow_time,
             self.core_group.get_unused(),
-            block.header.get_size(),
-            block.txns.get_size(),
-            block.get_size(),
+            block.header.size()?,
+            block.txns.size()?,
+            block.size()?,
             block.txns.len(),
             self.cur_block_size,
             self.pending_txns.len(),

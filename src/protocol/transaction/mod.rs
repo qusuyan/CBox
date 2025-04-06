@@ -13,7 +13,7 @@ pub use diem::{DiemAccountAddress, DiemPayload, DiemTxn};
 mod aptos;
 pub use aptos::{get_aptos_addr, AptosAccountAddress, AptosPayload, AptosTxn};
 
-use get_size::GetSize;
+use mailbox_client::{MailboxError, SizedMsg};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::crypto::Hash;
@@ -52,18 +52,18 @@ impl Txn {
     }
 }
 
-impl GetSize for Txn {
-    fn get_size(&self) -> usize {
-        match self {
-            Txn::Dummy { txn } => DummyTxn::get_size(&txn),
-            Txn::Avalanche { txn } => AvalancheTxn::get_size(&txn),
-            Txn::Bitcoin { txn } => BitcoinTxn::get_size(&txn),
-            Txn::Diem { txn } => DiemTxn::get_size(&txn),
-            Txn::Aptos { txn } => AptosTxn::get_size(&txn),
-        }
-    }
-}
-
 // since transactions are created and never modified
 unsafe impl Sync for Txn {}
 unsafe impl Send for Txn {}
+
+impl SizedMsg for Txn {
+    fn size(&self) -> Result<usize, MailboxError> {
+        match self {
+            Txn::Dummy { txn } => txn.size(),
+            Txn::Bitcoin { txn } => txn.size(),
+            Txn::Avalanche { txn } => txn.size(),
+            Txn::Diem { txn } => txn.size(),
+            Txn::Aptos { txn } => txn.size(),
+        }
+    }
+}

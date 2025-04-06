@@ -9,7 +9,7 @@ use k256::ecdsa::{
     SigningKey, VerifyingKey,
 };
 
-// ECDSA keys are 64 bytes
+// ECDSA keys are 32 bytes
 pub fn gen_key_pair(seed: u64) -> (PubKey, PrivKey) {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let signing_key = SigningKey::random(&mut rng);
