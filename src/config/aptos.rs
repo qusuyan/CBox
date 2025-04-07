@@ -24,6 +24,8 @@ pub struct AptosDiemConfig {
     pub diem_vote_timeout_secs: f64,
     #[serde(default = "AptosDiemConfig::get_default_txn_dissem")]
     pub txn_dissem: DissemPattern,
+    #[serde(default = "AptosDiemConfig::get_default_commit")]
+    pub commit: bool,
 }
 
 impl Default for AptosDiemConfig {
@@ -36,6 +38,7 @@ impl Default for AptosDiemConfig {
             diem_batching_timeout_secs: 5.0,
             diem_vote_timeout_secs: 5.0,
             txn_dissem: DissemPattern::Broadcast,
+            commit: true, // eagerly commit txn content or not
         }
     }
 }

@@ -193,14 +193,14 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
                 files.append((addr, (stats_file, lat_file)))
     print(files)
 
-    stats = { "peak_tput": 0 }
-    cumulative = {"tput": 0, "cpu_util": 0}
+    stats = { "peak_tput": 0.0 }
+    cumulative = {"tput": 0.0, "cpu_util": 0.0}
     start_rt = None
     end_rt = None
     for (addr, (stats_file, lat_file)) in files:
         cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
         cluster.copy_from(addr, f"/tmp/{lat_file}", f"./results/{exp_name}/{lat_file}")
-        df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
+        df = pd.read_csv(f"./results/{exp_name}/{stats_file}", dtype=float)
         lat = pd.read_csv(f"./results/{exp_name}/{lat_file}")
         first_commit = df["Throughput (txn/s)"].ne(0).idxmax()
         last_record = (df["Available Memory"] > 3e8).idxmin()  # 300 MB

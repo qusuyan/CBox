@@ -290,7 +290,7 @@ impl BlockManagement for AvalancheBlockManagement {
     }
 
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
-        //TODO: add noop txns to drive consensus as needed
+        // TODO: add noop txns to drive consensus as needed
         assert!(self.blk_quota > 0);
         let txn_hashs: Vec<Hash> = self.curr_batch.drain(0..).collect();
         self.curr_batch_size = 0;
@@ -305,7 +305,7 @@ impl BlockManagement for AvalancheBlockManagement {
         let merkle_dur = merkle_tree.append(txn_hashs.len())?;
         let merkle_root = merkle_tree.get_root();
         let serialized = bincode::serialize(&(&self.blk_counter, 0, &merkle_root))?;
-        let (signature, signature_dur) = self.signature_scheme.sign(&serialized, &self.sk)?;
+        let (signature, signature_dur) = self.signature_scheme.sign(&self.sk, &serialized)?;
         self.delay
             .process_illusion(merkle_dur + signature_dur)
             .await;
@@ -649,7 +649,7 @@ impl BlockManagement for AvalancheBlockManagement {
         let merkle_dur = merkle_tree.append(txns.len())?;
         let merkle_root = merkle_tree.get_root();
         let serialized = bincode::serialize(&(&self.blk_counter, 0, &merkle_root))?;
-        let (signature, signature_dur) = self.signature_scheme.sign(&serialized, &self.sk)?;
+        let (signature, signature_dur) = self.signature_scheme.sign(&self.sk, &serialized)?;
         self.delay
             .process_illusion(merkle_dur + signature_dur)
             .await;

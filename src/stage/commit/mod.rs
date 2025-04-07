@@ -4,7 +4,7 @@ use dummy::DummyCommit;
 mod execute;
 use execute::ExecuteCommit;
 
-use crate::config::ChainConfig;
+use crate::config::{AptosConfig, ChainConfig};
 use crate::consts::COMMIT_DELAY_INTERVAL;
 use crate::context::TxnCtx;
 use crate::protocol::transaction::Txn;
@@ -35,7 +35,15 @@ fn get_commit(id: NodeId, config: ChainConfig, delay: Arc<DelayPool>) -> Box<dyn
         ChainConfig::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::Diem { .. } => Box::new(DummyCommit::new()),    // TODO:
-        ChainConfig::Aptos { .. } => Box::new(ExecuteCommit::new(id, delay)),
+        ChainConfig::Aptos { config } => match config {
+            AptosConfig::Basic { config } => {
+                if config.commit {
+                    Box::new(ExecuteCommit::new(id, delay))
+                } else {
+                    Box::new(DummyCommit::new())
+                }
+            }
+        },
     }
 }
 
