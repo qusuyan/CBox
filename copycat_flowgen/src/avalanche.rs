@@ -158,7 +158,7 @@ impl FlowGen for AvalancheFlowGen {
                 }
                 return Ok(());
             }
-            tokio::task::yield_now().await;
+            self._notify.notified().await;
         }
     }
 

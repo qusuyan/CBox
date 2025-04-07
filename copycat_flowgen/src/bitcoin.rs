@@ -133,7 +133,7 @@ impl FlowGen for BitcoinFlowGen {
                 }
                 return Ok(());
             }
-            tokio::task::yield_now().await;
+            self._notify.notified().await;
         }
     }
 

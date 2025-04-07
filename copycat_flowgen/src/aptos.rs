@@ -6,9 +6,9 @@ use copycat::transaction::{AptosTxn, Txn};
 use copycat::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
+use rand::seq::SliceRandom;
 use rand::Rng;
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -19,8 +19,7 @@ const MAX_BATCH_FREQ: usize = 20;
 
 struct ChainInfo {
     chain_length: u64,
-    txn_count: HashMap<u64, u64>,
-    total_committed: u64, // includes false commits
+    total_committed: u64,
 }
 
 pub struct AptosFlowGen {
@@ -33,7 +32,7 @@ pub struct AptosFlowGen {
     client_list: Vec<ClientId>,
     accounts: HashMap<ClientId, Vec<(AptosAccountAddress, (PubKey, PrivKey), u64, u64)>>, // addr, (pk, sk), seqno, balance
     in_flight: HashMap<(AptosAccountAddress, u64), Instant>,
-    chain_info: HashMap<NodeId, ChainInfo>,
+    chain_info: ChainInfo,
     latencies: Vec<f64>,
     _notify: Notify,
 }
@@ -91,7 +90,10 @@ impl AptosFlowGen {
             accounts,
             in_flight: HashMap::new(),
             latencies: vec![],
-            chain_info: HashMap::new(),
+            chain_info: ChainInfo {
+                chain_length: 0,
+                total_committed: 0,
+            },
             _notify: Notify::new(),
         }
     }
@@ -130,7 +132,7 @@ impl FlowGen for AptosFlowGen {
                 }
                 return Ok(());
             }
-            tokio::task::yield_now().await;
+            self._notify.notified().await;
         }
     }
 
@@ -141,12 +143,12 @@ impl FlowGen for AptosFlowGen {
         } else {
             std::cmp::min(self.batch_size, self.max_inflight - self.in_flight.len())
         };
+        let mut rng = rand::thread_rng();
         for _ in 0..batch_size {
-            let node = self.client_list[rand::random::<usize>() % self.client_list.len()];
+            let node = *self.client_list.choose(&mut rng).unwrap();
             let accounts = self.accounts.get_mut(&node).unwrap();
-            let sender_idx = rand::random::<usize>() % accounts.len();
             let (sender_addr, (sender_pk, sender_sk), sender_seq_no, _) =
-                accounts.get_mut(sender_idx).unwrap();
+                accounts.choose_mut(&mut rng).unwrap();
             *sender_seq_no += 1;
             let payload = AptosPayload {
                 script_bytes: self.script_size,
@@ -203,27 +205,22 @@ impl FlowGen for AptosFlowGen {
 
     async fn txn_committed(
         &mut self,
-        node: NodeId,
+        _node: NodeId,
         txns: Vec<Arc<Txn>>,
         blk_height: u64,
     ) -> Result<(), CopycatError> {
-        // avoid counting blocks that are
-        let chain_info = match self.chain_info.entry(node) {
-            Entry::Occupied(e) => e.into_mut(),
-            Entry::Vacant(e) => e.insert(ChainInfo {
-                chain_length: 1,
-                txn_count: HashMap::new(),
-                total_committed: 0,
-            }),
-        };
-
-        assert!(blk_height <= chain_info.chain_length + 1); // make sure we are not skipping over some parents
-        for height in blk_height..chain_info.chain_length + 1 {
-            chain_info.txn_count.remove(&height);
+        // ignore same block committed by different nodes
+        if self.chain_info.chain_length >= blk_height {
+            return Ok(());
+        } else if self.chain_info.chain_length + 1 != blk_height {
+            return Err(CopycatError(format!(
+                "AptosFlowGen: blk_height {} is not sequential to {}",
+                blk_height, self.chain_info.chain_length
+            )));
         }
-        chain_info.txn_count.insert(blk_height, txns.len() as u64);
-        chain_info.chain_length = blk_height; // blk_height starts with 1
-        chain_info.total_committed += txns.len() as u64;
+
+        self.chain_info.chain_length = blk_height;
+        self.chain_info.total_committed += txns.len() as u64;
 
         for txn in txns {
             let txn_id = match txn.as_ref() {
@@ -245,44 +242,13 @@ impl FlowGen for AptosFlowGen {
     }
 
     fn get_stats(&mut self) -> Stats {
-        let (num_committed, chain_length, acc_commit_confidence) = self
-            .chain_info
-            .values()
-            .map(|info| {
-                let num_committed = if info.chain_length > 0 {
-                    (1..info.chain_length + 1)
-                        .map(|height| info.txn_count.get(&height).unwrap())
-                        .sum()
-                } else {
-                    0
-                };
-                (
-                    num_committed,
-                    info.chain_length,
-                    num_committed as f64 / info.total_committed as f64,
-                )
-            })
-            .reduce(|acc, e| {
-                (
-                    std::cmp::max(acc.0, e.0),
-                    std::cmp::max(acc.1, e.1),
-                    (acc.2 + e.2),
-                )
-            })
-            .unwrap_or((0, 0, 0f64));
-        let commit_confidence = if self.chain_info.len() == 0 {
-            1f64
-        } else {
-            acc_commit_confidence / self.chain_info.len() as f64
-        };
-
         let latencies = std::mem::replace(&mut self.latencies, vec![]);
 
         Stats {
             latencies,
-            num_committed,
-            chain_length,
-            commit_confidence,
+            num_committed: self.chain_info.total_committed,
+            chain_length: self.chain_info.chain_length,
+            commit_confidence: 1.0, // since commits in aptos are final
             inflight_txns: self.in_flight.len(),
         }
     }
