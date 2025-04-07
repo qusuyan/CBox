@@ -62,6 +62,8 @@ pub async fn commit_thread(
 
     let mut commit_stage = get_commit(id, config, delay);
 
+    let mut txns_recved = 0usize;
+    let mut txns_committed = 0usize;
     let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();
 
@@ -87,6 +89,7 @@ pub async fn commit_thread(
 
                 pf_debug!(id; "got new txn batch at height {} ({} txns)", height, txn_batch.len());
 
+                txns_recved += txn_batch.len();
                 let correct_batch = match commit_stage.commit(txn_batch, txn_batch_ctx).await {
                     Ok(batch) => batch,
                     Err(e) => {
@@ -94,6 +97,7 @@ pub async fn commit_thread(
                         continue;
                     }
                 };
+                txns_committed += correct_batch.len();
 
                 drop(_permit);
 
@@ -112,6 +116,10 @@ pub async fn commit_thread(
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
                 }
+
+                pf_info!(id; "In the last minute: txns_recved: {}, txns_committed: {}", txns_recved, txns_committed);
+                txns_recved = 0;
+                txns_committed = 0;
 
                 let metrics = task_interval.next().unwrap();
                 let sched_count = metrics.total_scheduled_count;

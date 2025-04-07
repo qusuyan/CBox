@@ -1,6 +1,6 @@
 use super::{FlowGen, Stats};
 use crate::{ClientId, FlowGenId};
-use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
+use copycat::protocol::crypto::{PrivKey, PubKey};
 use copycat::transaction::{get_aptos_addr, AptosAccountAddress, AptosPayload};
 use copycat::transaction::{AptosTxn, Txn};
 use copycat::{CopycatError, NodeId, SignatureScheme};
@@ -32,7 +32,7 @@ pub struct AptosFlowGen {
     crypto: SignatureScheme,
     client_list: Vec<ClientId>,
     accounts: HashMap<ClientId, Vec<(AptosAccountAddress, (PubKey, PrivKey), u64, u64)>>, // addr, (pk, sk), seqno, balance
-    in_flight: HashMap<Hash, Instant>,
+    in_flight: HashMap<(AptosAccountAddress, u64), Instant>,
     chain_info: HashMap<NodeId, ChainInfo>,
     latencies: Vec<f64>,
     _notify: Notify,
@@ -185,7 +185,7 @@ impl FlowGen for AptosFlowGen {
                 },
             });
 
-            let txn_id = txn.compute_id()?;
+            let txn_id = (*sender_addr, *sender_seq_no);
             self.in_flight.insert(txn_id, Instant::now());
             batch.push((node, txn));
         }
@@ -227,8 +227,13 @@ impl FlowGen for AptosFlowGen {
         chain_info.total_committed += txns.len() as u64;
 
         for txn in txns {
-            let hash = txn.compute_id()?;
-            let start_time = match self.in_flight.remove(&hash) {
+            let txn_id = match txn.as_ref() {
+                Txn::Aptos {
+                    txn: AptosTxn::Txn { sender, seqno, .. },
+                } => (*sender, *seqno),
+                _ => continue,
+            };
+            let start_time = match self.in_flight.remove(&txn_id) {
                 Some(time) => time,
                 None => continue, // unrecognized txn, possibly generated from another node
             };
