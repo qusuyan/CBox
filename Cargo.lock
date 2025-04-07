@@ -374,6 +374,7 @@ dependencies = [
  "log",
  "primitive-types",
  "rand",
+ "serde",
  "tokio",
 ]
 

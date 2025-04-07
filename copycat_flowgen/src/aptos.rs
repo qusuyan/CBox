@@ -1,5 +1,5 @@
 use super::{FlowGen, Stats};
-use crate::{ClientId, FlowGenId};
+use crate::{mock_sign, ClientId, FlowGenId};
 use copycat::protocol::crypto::{PrivKey, PubKey};
 use copycat::transaction::{get_aptos_addr, AptosAccountAddress, AptosPayload};
 use copycat::transaction::{AptosTxn, Txn};
@@ -167,8 +167,7 @@ impl FlowGen for AptosFlowGen {
                 &expiration_timestamp_secs,
                 &chain_id,
             );
-            let serialized = bincode::serialize(&data)?;
-            let (signature, _) = self.crypto.sign(&sender_sk, &serialized)?;
+            let signature = mock_sign(self.crypto, &sender_sk, &data)?;
 
             let txn = Arc::new(Txn::Aptos {
                 txn: AptosTxn::Txn {

@@ -1,5 +1,5 @@
 use super::{FlowGen, Stats};
-use crate::{ClientId, FlowGenId};
+use crate::{mock_sign, ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{BitcoinTxn, Txn};
 use copycat::{CopycatError, NodeId, SignatureScheme};
@@ -165,8 +165,7 @@ impl FlowGen for BitcoinFlowGen {
 
                 let (in_utxo_raw, amount) = sender_utxos.pop_front().unwrap();
                 let in_utxo = vec![in_utxo_raw];
-                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-                let (sender_signature, _) = self.crypto.sign(sender_sk, &serialized_in_utxo)?;
+                let sender_signature = mock_sign(self.crypto, &sender_sk, &in_utxo)?;
                 let out_utxo = std::cmp::min(amount, 10);
                 let remainder = amount - out_utxo;
                 let txn = Arc::new(Txn::Bitcoin {

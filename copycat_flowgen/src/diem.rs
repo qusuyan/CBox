@@ -1,5 +1,5 @@
 use super::{FlowGen, Stats};
-use crate::{ClientId, FlowGenId};
+use crate::{mock_sign, ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::transaction::{DiemAccountAddress, DiemPayload};
 use copycat::transaction::{DiemTxn, Txn};
@@ -149,38 +149,33 @@ impl FlowGen for DiemFlowGen {
                 accounts.get_mut(sender_idx).unwrap();
             *sender_seq_no += 1;
 
+            let payload = DiemPayload {
+                script_bytes: self.script_size,
+                script_runtime_sec: 0f64,
+                script_succeed: true,
+                distinct_writes: 1,
+            };
+            let max_gas_amount = 5;
+            let gas_unit_price = 0;
+            let expiration_timestamp_secs = 1611792876;
+            let chain_id = 4;
+
             let data = (
-                *sender_addr,
+                sender_addr.as_ref(),
                 *sender_seq_no,
-                DiemPayload {
-                    script_bytes: self.script_size,
-                    script_runtime_sec: 0f64,
-                    script_succeed: true,
-                    distinct_writes: 1,
-                },
-                5,
-                0,
+                &payload,
+                &max_gas_amount,
+                &gas_unit_price,
                 // "XUS".to_owned(),
-                1611792876,
-                4,
+                &expiration_timestamp_secs,
+                &chain_id,
             );
-            let serialized = bincode::serialize(&data)?;
-            let (signature, _) = self.crypto.sign(&sender_sk, &serialized)?;
-            let (
-                sender,
-                seqno,
-                payload,
-                max_gas_amount,
-                gas_unit_price,
-                // gas_currency_code,
-                expiration_timestamp_secs,
-                chain_id,
-            ) = data;
+            let signature = mock_sign(self.crypto, &sender_sk, &data)?;
 
             let txn = Arc::new(Txn::Diem {
                 txn: DiemTxn::Txn {
-                    sender, // address
-                    seqno,
+                    sender: *sender_addr, // address
+                    seqno: *sender_seq_no,
                     payload,
                     max_gas_amount,
                     gas_unit_price,

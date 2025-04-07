@@ -59,7 +59,7 @@ impl ChainReplicationFlowGen {
         let txn_size = script_size.unwrap_or(1024);
         let txn_content = Arc::new(vec![0u8; txn_size]);
         let (pub_key, priv_key) = crypto.gen_key_pair(0);
-        let signature = crypto.sign(&priv_key, &txn_content).unwrap().0;
+        let (signature, _) = crypto.sign(&priv_key, &txn_content).unwrap();
 
         Self {
             max_inflight,

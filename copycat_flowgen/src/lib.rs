@@ -1,5 +1,4 @@
 mod chain_replication;
-use aptos::AptosFlowGen;
 use chain_replication::ChainReplicationFlowGen;
 
 mod bitcoin;
@@ -12,9 +11,16 @@ mod diem;
 use diem::DiemFlowGen;
 
 mod aptos;
+use aptos::AptosFlowGen;
 
 use async_trait::async_trait;
-use copycat::{transaction::Txn, ChainType, CopycatError, NodeId, SignatureScheme};
+use serde::Serialize;
+
+use copycat::{
+    protocol::crypto::{PrivKey, Signature},
+    transaction::Txn,
+    ChainType, CopycatError, NodeId, SignatureScheme,
+};
 
 use std::sync::Arc;
 
@@ -101,4 +107,21 @@ pub fn get_flow_gen(
             crypto,
         )),
     }
+}
+
+fn mock_sign<T: Serialize>(
+    scheme: SignatureScheme,
+    sk: &PrivKey,
+    input: &T,
+) -> Result<Signature, CopycatError> {
+    let serialized = match scheme {
+        SignatureScheme::Dummy | SignatureScheme::DummyECDSA => {
+            // avoid extra serialization
+            vec![]
+        }
+        SignatureScheme::ECDSA => bincode::serialize(&input)?,
+    };
+
+    let (signature, _) = scheme.sign(sk, &serialized)?;
+    Ok(signature)
 }

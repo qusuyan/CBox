@@ -1,5 +1,5 @@
 use super::{FlowGen, Stats};
-use crate::{ClientId, FlowGenId};
+use crate::{mock_sign, ClientId, FlowGenId};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{AvalancheTxn, Txn};
 use copycat::{CopycatError, NodeId, SignatureScheme};
@@ -187,8 +187,7 @@ impl FlowGen for AvalancheFlowGen {
                 assert!(accounts.len() > 1);
 
                 let in_utxo = vec![in_utxo_raw];
-                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-                let (sender_signature, _) = self.crypto.sign(&sender_sk, &serialized_in_utxo)?;
+                let sender_signature = mock_sign(self.crypto, &sender_sk, &in_utxo)?;
                 let out_utxo = std::cmp::min(in_utxo_amount, 10);
                 let remainder = in_utxo_amount - out_utxo;
                 let mut recver_idx = rand::random::<usize>() % (accounts.len() - 1);
@@ -256,8 +255,7 @@ impl FlowGen for AvalancheFlowGen {
                 let (sender_pk, sender_sk) = &accounts[sender_idx];
 
                 let in_utxo = vec![in_txn_hash];
-                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-                let (sender_signature, _) = self.crypto.sign(&sender_sk, &serialized_in_utxo)?;
+                let sender_signature = mock_sign(self.crypto, &sender_sk, &in_utxo)?;
 
                 let mut recver1_idx = rand::random::<usize>() % (accounts.len() - 1);
                 if recver1_idx >= sender_idx {
@@ -325,9 +323,7 @@ impl FlowGen for AvalancheFlowGen {
                     let (recver1_pk, _) = &accounts[recver1_idx];
 
                     let in_utxo1 = vec![txn1_hash];
-                    let serialized_in_utxo1 = bincode::serialize(&in_utxo1)?;
-                    let (sender_signature1, _) =
-                        self.crypto.sign(&sender1_sk, &serialized_in_utxo1)?;
+                    let sender_signature1 = mock_sign(self.crypto, &sender1_sk, &in_utxo1)?;
                     let txn1 = Arc::new(Txn::Avalanche {
                         txn: AvalancheTxn::Send {
                             sender: sender1_pk.clone(),
@@ -350,9 +346,7 @@ impl FlowGen for AvalancheFlowGen {
                     let (recver2_pk, _) = &accounts[recver2_idx];
 
                     let in_utxo2 = vec![txn2_hash];
-                    let serialized_in_utxo2 = bincode::serialize(&in_utxo2)?;
-                    let (sender_signature2, _) =
-                        self.crypto.sign(&sender2_sk, &serialized_in_utxo2)?;
+                    let sender_signature2 = mock_sign(self.crypto, &sender2_sk, &in_utxo2)?;
                     let txn2 = Arc::new(Txn::Avalanche {
                         txn: AvalancheTxn::Send {
                             sender: sender2_pk.clone(),
