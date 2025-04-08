@@ -33,6 +33,8 @@ cluster = [
   ["conflict_rate", "0"],
   ["txn_span", "0"],
   ["disable_txn_dissem", "false"],
+  ["mailbox_threshold", ""],
+  ["SCRIPT_SIZE", ""],
 ]
 date = []
 mailbox = [

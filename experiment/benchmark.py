@@ -92,6 +92,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     if params["network-config"] == "":
         network_config = {
             "default_delay_millis": params["network-delay"],
+            "default_jitter_millis": params["network-jitter"],
             "default_bandwidth": params["network-bw"],
             "default_nic_bandwidth": params["nic-bw"],
             "pipes": [],
@@ -147,7 +148,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox-workers"], params["chain-type"], 
                     txn_crypto, p2p_crypto, params["threshold-crypto"], params["conn-multiply"], SETUP_TIME, 
                     clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["conflict_rate"], 
-                    params["txn-span"], params["disable-txn-dissem"], params["script-size"]]
+                    params["txn-span"], params["disable-txn-dissem"], params["mailbox-threshold"], params["script-size"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -258,6 +259,7 @@ if __name__ == "__main__":
         "mailbox-threads": 8,
         "cluster-threads": 40,
         "network-delay": 30, # in millis
+        "network-jitter": 10, # in millis
         "network-bw": 12500000, # 100 Mbps = 12.5 MB/s
         "nic-bw": 12500000,
         "chain-type": "bitcoin",
@@ -289,6 +291,7 @@ if __name__ == "__main__":
         "validator-config": "",
         "exp-prefix": "",
         "script-size": "",
+        "mailbox-threshold": 10,
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)
