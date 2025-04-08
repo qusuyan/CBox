@@ -1,5 +1,5 @@
 use super::{FlowGen, Stats};
-use crate::{mock_sign, ClientId, FlowGenId};
+use crate::{mock_sign, ClientId, FlowGenId, LAT_SAMPLE_RATE};
 use copycat::protocol::crypto::{PrivKey, PubKey};
 use copycat::transaction::{get_aptos_addr, AptosAccountAddress, AptosPayload};
 use copycat::transaction::{AptosTxn, Txn};
@@ -222,6 +222,7 @@ impl FlowGen for AptosFlowGen {
         self.chain_info.chain_length = blk_height;
         self.chain_info.total_committed += txns.len() as u64;
 
+        let mut rng = rand::thread_rng();
         for txn in txns {
             let txn_id = match txn.as_ref() {
                 Txn::Aptos {
@@ -234,8 +235,10 @@ impl FlowGen for AptosFlowGen {
                 None => continue, // unrecognized txn, possibly generated from another node
             };
 
-            let commit_latency = Instant::now() - start_time;
-            self.latencies.push(commit_latency.as_secs_f64());
+            if rng.gen::<f64>() < *LAT_SAMPLE_RATE {
+                let commit_latency = Instant::now() - start_time;
+                self.latencies.push(commit_latency.as_secs_f64());
+            }
         }
 
         Ok(())

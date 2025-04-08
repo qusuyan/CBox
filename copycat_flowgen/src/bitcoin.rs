@@ -1,5 +1,5 @@
 use super::{FlowGen, Stats};
-use crate::{mock_sign, ClientId, FlowGenId};
+use crate::{mock_sign, ClientId, FlowGenId, LAT_SAMPLE_RATE};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{BitcoinTxn, Txn};
 use copycat::{CopycatError, NodeId, SignatureScheme};
@@ -234,6 +234,7 @@ impl FlowGen for BitcoinFlowGen {
         chain_info.chain_length = blk_height; // blk_height starts with 1
         chain_info.total_committed += txns.len() as u64;
 
+        let mut rng = rand::thread_rng();
         for txn in txns {
             let hash = txn.compute_id()?;
             let start_time = match self.in_flight.remove(&hash) {
@@ -241,8 +242,10 @@ impl FlowGen for BitcoinFlowGen {
                 None => continue, // unrecognized txn, possibly generated from another node
             };
 
-            let commit_latency = Instant::now() - start_time;
-            self.latencies.push(commit_latency.as_secs_f64());
+            if rng.gen::<f64>() < *LAT_SAMPLE_RATE {
+                let commit_latency = Instant::now() - start_time;
+                self.latencies.push(commit_latency.as_secs_f64());
+            }
         }
 
         Ok(())

@@ -1,5 +1,5 @@
 use super::{FlowGen, Stats};
-use crate::ClientId;
+use crate::{ClientId, LAT_SAMPLE_RATE};
 use copycat::protocol::crypto::{Hash, PubKey, Signature};
 use copycat::protocol::transaction::{DummyTxn, Txn};
 use copycat::{CopycatError, NodeId, SignatureScheme};
@@ -152,6 +152,7 @@ impl FlowGen for ChainReplicationFlowGen {
         log_info.num_blks += 1;
         log_info.num_txns += txns.len() as u64;
 
+        let mut rng = rand::thread_rng();
         for txn in txns {
             let hash = txn.compute_id()?;
             let start_time = match self.in_flight.remove(&hash) {
@@ -161,8 +162,10 @@ impl FlowGen for ChainReplicationFlowGen {
                 } // unrecognized txn, possibly generated from another node
             };
 
-            let commit_latency = Instant::now() - start_time;
-            self.latencies.push(commit_latency.as_secs_f64());
+            if rng.gen::<f64>() < *LAT_SAMPLE_RATE {
+                let commit_latency = Instant::now() - start_time;
+                self.latencies.push(commit_latency.as_secs_f64());
+            }
         }
 
         Ok(())

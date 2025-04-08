@@ -1,5 +1,5 @@
 use super::{FlowGen, Stats};
-use crate::{mock_sign, ClientId, FlowGenId};
+use crate::{mock_sign, ClientId, FlowGenId, LAT_SAMPLE_RATE};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{AvalancheTxn, Txn};
 use copycat::{CopycatError, NodeId, SignatureScheme};
@@ -415,13 +415,16 @@ impl FlowGen for AvalancheFlowGen {
         chain_info.num_blks += 1;
         chain_info.txn_count += txns.len() as u64;
 
+        let mut rng = rand::thread_rng();
         for txn in txns.iter() {
             let hash = txn.compute_id()?;
 
             // update commit latency
             if let Some(time) = self.in_flight.remove(&hash) {
-                let commit_latency = Instant::now() - time;
-                self.latencies.push(commit_latency.as_secs_f64());
+                if rng.gen::<f64>() < *LAT_SAMPLE_RATE {
+                    let commit_latency = Instant::now() - time;
+                    self.latencies.push(commit_latency.as_secs_f64());
+                }
             };
 
             // check for conflicts

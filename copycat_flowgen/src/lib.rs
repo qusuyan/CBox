@@ -14,6 +14,7 @@ mod aptos;
 use aptos::AptosFlowGen;
 
 use async_trait::async_trait;
+use lazy_static::lazy_static;
 use serde::Serialize;
 
 use copycat::{
@@ -26,6 +27,19 @@ use std::sync::Arc;
 
 pub type FlowGenId = u64;
 pub type ClientId = u64;
+
+lazy_static! {
+    static ref LAT_SAMPLE_RATE: f64 = std::env::var("LAT_SAMPLE_RATE")
+        .map(|rate| match rate.parse::<f64>() {
+            Ok(r) => Some(r),
+            Err(e) => {
+                log::warn!("Invalid LAT_SAMPLE_RATE: {e:?}, using default");
+                None
+            }
+        })
+        .unwrap_or(None)
+        .unwrap_or(0.1);
+}
 
 pub struct Stats {
     pub num_committed: u64,

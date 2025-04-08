@@ -8,9 +8,10 @@ version = "0.1.0"
 [dependencies]
 async-trait = "0.1.74"
 bincode = "1.3.3"
-copycat = { path = "../" }
+copycat = {path = "../"}
+lazy_static = "1.4.0"
 log = "0.4"
+primitive-types = {version = "0.12.2", features = ["serde"]}
 rand = "0.8.5"
-tokio = { version = "1.32.0", features = ["full"] }
-primitive-types = { version = "0.12.2", features = ["serde"] }
-serde = { version = "1.0", features = ["derive", "rc"] }
+serde = {version = "1.0", features = ["derive", "rc"]}
+tokio = {version = "1.32.0", features = ["full"]}
