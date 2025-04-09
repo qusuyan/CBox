@@ -11,6 +11,7 @@ disable-txn-dissem = true
 exp-prefix = "Narwhal-HS/" 
 exp-time = 250 
 frequency = 0 
+lat-sample-rate = 0.005 
 mailbox-threshold = 30 
 mailbox-workers = 40 
 max-inflight-txns = [1000000, 2000000] 

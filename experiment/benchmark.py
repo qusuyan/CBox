@@ -148,7 +148,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox-workers"], params["chain-type"], 
                     txn_crypto, p2p_crypto, params["threshold-crypto"], params["conn-multiply"], SETUP_TIME, 
                     clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["conflict_rate"], 
-                    params["txn-span"], params["disable-txn-dissem"], params["mailbox-threshold"], params["script-size"]]
+                    params["txn-span"], params["disable-txn-dissem"], params["mailbox-threshold"], params["lat-sample-rate"], params["script-size"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -292,6 +292,7 @@ if __name__ == "__main__":
         "exp-prefix": "",
         "script-size": "",
         "mailbox-threshold": 10,
+        "lat-sample-rate": 1    # collect latency for all txns
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

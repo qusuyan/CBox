@@ -34,7 +34,8 @@ cluster = [
   ["txn_span", "0"],
   ["disable_txn_dissem", "false"],
   ["mailbox_threshold", ""],
-  ["SCRIPT_SIZE", ""],
+  ["lat_sample_rate", "1"],
+  ["script_size", ""],
 ]
 date = []
 mailbox = [
