@@ -13,6 +13,7 @@ use crate::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 use mailbox_client::SizedMsg;
+use rand::prelude::IteratorRandom;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -124,6 +125,8 @@ impl BlockManagement for AptosBlockManagement {
         let mut txns_inserted = 0;
         let (block_under_construction, block_under_construction_ctx) =
             &mut self.block_under_construction;
+
+        // first add txns in pending list
         let state = loop {
             if self.cur_block_size >= self.blk_size {
                 break CurBlockState::Full;
@@ -131,7 +134,14 @@ impl BlockManagement for AptosBlockManagement {
 
             let next_txn_id = match self.pending_txns.pop_front() {
                 Some(txn_id) => txn_id,
-                None => break CurBlockState::EmptyMempool,
+                None => {
+                    // pending queue empty, get random elements from inclusion list
+                    let mut rng = rand::thread_rng();
+                    match self.pending_txns_pool.iter().choose(&mut rng) {
+                        Some(txn_id) => *txn_id,
+                        None => break CurBlockState::EmptyMempool,
+                    }
+                }
             };
 
             if self.pending_txns_pool.remove(&next_txn_id) == false {
@@ -190,6 +200,8 @@ impl BlockManagement for AptosBlockManagement {
         let (signature, dur) = self.signature_scheme.sign(&self.sk, &serialized)?;
         self.delay.process_illusion(dur).await;
 
+        pf_debug!(self.id; "round advanced, proposing new batch of {} txns: {:?}, pending_txns: {}, pending_txns_pool: {}", txns.len(), (self.id, self.round), self.pending_txns.len(), self.pending_txns_pool.len());
+
         let header = BlockHeader::Aptos {
             sender: self.id,
             round: self.round,
@@ -199,8 +211,6 @@ impl BlockManagement for AptosBlockManagement {
         };
         let blk_ctx = Arc::new(BlkCtx::from_header_and_txns(&header, txn_ctx)?);
         let block = Arc::new(Block { header, txns });
-
-        pf_debug!(self.id; "round advanced, proposing new batch {:?}", (self.id, self.round));
 
         self.blks_seen.insert((self.id, self.round));
 
@@ -275,6 +285,9 @@ impl BlockManagement for AptosBlockManagement {
         }
 
         self.blks_seen.insert((*sender, *round));
+        for txn_ctx in ctx.txn_ctx.iter() {
+            self.pending_txns_pool.remove(&txn_ctx.id);
+        }
 
         Ok(vec![(block, ctx)])
     }

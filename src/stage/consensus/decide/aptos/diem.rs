@@ -8,7 +8,7 @@ use crate::protocol::crypto::vector_snark::DummyMerkleTree;
 use crate::protocol::crypto::{sha256, Hash, PrivKey, PubKey, Signature};
 use crate::protocol::types::aptos::CoA;
 use crate::protocol::types::diem::{
-    DiemBlock, LedgerCommitInfo, QuorumCert, TimeCert, VoteInfo, GENESIS_QC,
+    DiemBlock, LedgerCommitInfo, QuorumCert, TimeCert, VoteInfo, GENESIS_QC, GENESIS_VOTE_INFO,
 };
 use crate::protocol::MsgType;
 use crate::stage::consensus::decide::Decision;
@@ -59,6 +59,12 @@ enum DiemConsensusMsg {
     },
 }
 
+#[derive(Hash, PartialEq, Eq)]
+enum PendingVoteDep {
+    Round { round: u64 },
+    Parent { blk_id: Hash },
+}
+
 pub struct AptosDiemDecision {
     id: NodeId,
     num_faulty: usize,
@@ -81,7 +87,8 @@ pub struct AptosDiemDecision {
     last_tc: Option<TimeCert>,
     highest_qc_round: u64,
     highest_vote_round: u64,
-    pending_votes: HashMap<Hash, HashMap<NodeId, SignPart>>,
+    received_votes: HashMap<Hash, HashMap<NodeId, SignPart>>,
+    pending_votes: HashMap<PendingVoteDep, (Hash, u64, Hash, u64, Hash)>,
     // P2P communication
     all_nodes: Vec<NodeId>,
     peer_messenger: Arc<PeerMessenger>,
@@ -90,7 +97,8 @@ pub struct AptosDiemDecision {
     sk: PrivKey,
     threshold_signature: Arc<dyn ThresholdSignature>,
     //
-    commit_blks: VecDeque<Hash>,
+    commit_ready_blks: VecDeque<Hash>,
+    commit_waiting_blks: HashMap<Hash, Hash>,
     committed_blk_pool: HashSet<Hash>,
     commit_queue: VecDeque<(NodeId, u64)>,
     commit_depth: u64,
@@ -128,7 +136,6 @@ impl AptosDiemDecision {
         } else {
             None
         };
-        pf_info!(id; "next block propose at {:?}", cur_proposal_timeout);
 
         Self {
             id,
@@ -150,6 +157,7 @@ impl AptosDiemDecision {
             last_tc: None,
             highest_qc_round: 0,
             highest_vote_round: 0,
+            received_votes: HashMap::new(),
             pending_votes: HashMap::new(),
             all_nodes,
             peer_messenger,
@@ -157,10 +165,11 @@ impl AptosDiemDecision {
             peer_pks: peer_pks,
             sk,
             threshold_signature,
-            commit_blks: VecDeque::new(),
+            commit_ready_blks: VecDeque::new(),
+            commit_waiting_blks: HashMap::new(),
             committed_blk_pool: HashSet::from([
-                GENESIS_QC.vote_info.blk_id,
-                GENESIS_QC.vote_info.parent_id,
+                GENESIS_VOTE_INFO.blk_id,
+                GENESIS_VOTE_INFO.parent_id,
             ]),
             commit_queue: VecDeque::new(),
             commit_depth: 0,
@@ -183,6 +192,13 @@ impl AptosDiemDecision {
             * ((self.all_nodes.len() - self.num_faulty) * 64 + 48)  // size of each CoA
             + self.cur_block_size
                 >= self.blk_size
+    }
+
+    #[inline]
+    fn blk_seen(&self, blk_id: &Hash) -> bool {
+        *blk_id == GENESIS_VOTE_INFO.blk_id
+            || *blk_id == GENESIS_VOTE_INFO.parent_id
+            || self.blk_pool.contains_key(blk_id)
     }
 
     fn validate_qc_signatures(&self, qc: &QuorumCert) -> Result<(bool, f64), CopycatError> {
@@ -248,9 +264,9 @@ impl AptosDiemDecision {
 
     async fn process_certificate_qc(&mut self, qc: &QuorumCert) -> Result<(), CopycatError> {
         let qc_round = qc.vote_info.round;
-        if let Some(id) = qc.commit_info.commit_state_id {
-            self.commit_blks.push_back(id);
-            self.commit_pending_blks().await?;
+        if let Some(grandparent_id) = qc.commit_info.commit_state_id {
+            // TODO: commit all parent blocks
+            self.add_to_commit_ready(qc.vote_info.parent_id, grandparent_id)?;
             if qc_round > self.high_commit_qc.vote_info.round {
                 self.high_commit_qc = qc.clone();
             }
@@ -288,9 +304,23 @@ impl AptosDiemDecision {
         round: u64,
         parent_id: Hash,
         parent_round: u64,
-        commit_state_id: Option<Hash>,
+        grand_parent_id: Hash,
     ) -> Result<(), CopycatError> {
         pf_debug!(self.id; "voting for new block: {}", blk_id);
+
+        if self.highest_qc_round < parent_round {
+            self.highest_qc_round = parent_round;
+        }
+
+        if self.highest_vote_round < round {
+            self.highest_vote_round = round;
+        }
+
+        let commit_state_id = if parent_round + 1 == round {
+            Some(grand_parent_id)
+        } else {
+            None
+        };
 
         let next_leader = Self::get_leader(round + 1, &self.all_nodes);
         let vote_info = VoteInfo {
@@ -344,7 +374,7 @@ impl AptosDiemDecision {
     ) -> Result<(), CopycatError> {
         let vote_id = sha256(&ledger_commit_info)?;
 
-        let votes = self.pending_votes.entry(vote_id).or_insert(HashMap::new());
+        let votes = self.received_votes.entry(vote_id).or_insert(HashMap::new());
         votes.insert(voter, signature);
 
         let signcomb = match self
@@ -357,7 +387,7 @@ impl AptosDiemDecision {
             }
             Err(e) => {
                 pf_warn!(self.id; "failed to aggregate votes: {:?}", e);
-                self.pending_votes.remove(&vote_id);
+                self.received_votes.remove(&vote_id);
                 // self.closed_votes.insert(vote_id);
                 return Ok(());
             }
@@ -368,7 +398,7 @@ impl AptosDiemDecision {
                 let (author_signature, dur) =
                     self.signature_scheme.sign(&self.sk, &signature).unwrap();
                 self.delay.process_illusion(dur).await;
-                self.pending_votes.remove(&vote_id);
+                self.received_votes.remove(&vote_id);
                 QuorumCert {
                     vote_info,
                     commit_info: ledger_commit_info,
@@ -380,34 +410,70 @@ impl AptosDiemDecision {
             None => return Ok(()),
         };
 
-        pf_debug!(self.id; "formed qc for block: {}", qc.vote_info.blk_id);
+        pf_debug!(self.id; "formed qc for block {}", qc.vote_info.blk_id);
 
         self.process_certificate_qc(&qc).await?;
         self.cur_proposal_timeout = Some(Instant::now() + self.proposal_timeout);
-        if !self.blk_pool.contains_key(&qc.vote_info.blk_id) {
+        if !self.blk_seen(&qc.vote_info.blk_id) {
             // TODO: fetch the missing block
         }
 
         Ok(())
     }
 
-    async fn commit_pending_blks(&mut self) -> Result<(), CopycatError> {
+    fn add_to_commit_ready(&mut self, blk_id: Hash, parent_id: Hash) -> Result<(), CopycatError> {
+        if self.committed_blk_pool.contains(&blk_id) {
+            return Ok(());
+        }
+
+        let mut cur_blk_id = blk_id;
+        let mut cur_parent_id = parent_id;
+
         loop {
-            let next_blk_id = match self.commit_blks.front() {
+            if self.committed_blk_pool.contains(&cur_parent_id) {
+                // this parent is already committed, commit cur_blk_id and all its children
+                let mut next_to_commit = cur_blk_id;
+                loop {
+                    pf_debug!(self.id; "adding block {} to commit queue", next_to_commit);
+                    self.commit_ready_blks.push_back(next_to_commit);
+                    self.committed_blk_pool.insert(next_to_commit);
+                    next_to_commit = match self.commit_waiting_blks.remove(&next_to_commit) {
+                        Some(blk) => blk,
+                        None => return Ok(()),
+                    }
+                }
+            }
+
+            if let Some(sibling) = self.commit_waiting_blks.get(&cur_parent_id) {
+                // otherwise we have a conflict
+                assert!(*sibling == cur_blk_id);
+                // all ancestors are already in pending, wait for some ancestor block before committing
+                return Ok(());
+            }
+
+            self.commit_waiting_blks.insert(cur_parent_id, cur_blk_id);
+
+            cur_blk_id = cur_parent_id;
+            cur_parent_id = match self.blk_pool.get(&cur_blk_id) {
+                Some((blk, _)) => blk.qc.vote_info.blk_id,
+                None => return Ok(()), // we do not know who the parent is, wait to get block with cur_blk_id - TODO: actively fetch the block
+            }
+        }
+    }
+
+    async fn handle_commit_ready_blks(&mut self) -> Result<(), CopycatError> {
+        loop {
+            let next_blk_id = match self.commit_ready_blks.front() {
                 Some(id) => id,
                 None => return Ok(()), // nothing to commit
             };
-
-            if self.committed_blk_pool.contains(next_blk_id) {
-                self.commit_blks.pop_front();
-                continue;
-            }
 
             let (_, next_blk_payload) = match self.blk_pool.get(next_blk_id) {
                 Some(blk) => blk,
                 None => {
                     if !self.queried_blks.contains(&next_blk_id) {
                         // TODO: do not query blocks yet since it may arrive soon
+                        pf_debug!(self.id; "fetch block {:?} from peers", next_blk_id);
                         let msg = DiemConsensusMsg::FetchBlockReq {
                             blk_id: *next_blk_id,
                         };
@@ -422,8 +488,7 @@ impl AptosDiemDecision {
                 }
             };
 
-            self.committed_blk_pool.insert(*next_blk_id);
-            self.commit_blks.pop_front();
+            self.commit_ready_blks.pop_front();
 
             // add payloads to pending queue
             for batch in next_blk_payload {
@@ -449,6 +514,38 @@ impl AptosDiemDecision {
                 }
             }
         }
+    }
+
+    async fn process_waiting_actions(
+        &mut self,
+        blk_id: Hash,
+        parent_id: Hash,
+    ) -> Result<(), CopycatError> {
+        // process commit waiting blocks
+        if self.commit_waiting_blks.contains_key(&blk_id) {
+            self.add_to_commit_ready(blk_id, parent_id)?;
+        }
+
+        // process commit queue
+        self.handle_commit_ready_blks().await?;
+
+        // make pending votes
+        if let Some((blk_id, round, parent_id, parent_round, grandparent_id)) = self
+            .pending_votes
+            .remove(&PendingVoteDep::Parent { blk_id })
+        {
+            if round > self.current_round {
+                self.pending_votes.insert(
+                    PendingVoteDep::Round { round: round },
+                    (blk_id, round, parent_id, parent_round, grandparent_id),
+                );
+            } else {
+                self.make_vote(blk_id, round, parent_id, parent_round, grandparent_id)
+                    .await?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -511,9 +608,7 @@ impl Decision for AptosDiemDecision {
         // propose only if I am leader
         if let Some(timeout) = self.cur_proposal_timeout {
             // make sure we have seen the parent before proposing
-            if self.high_qc.vote_info.blk_id == GENESIS_QC.vote_info.blk_id
-                || self.blk_pool.contains_key(&self.high_qc.vote_info.blk_id)
-            {
+            if self.blk_seen(&self.high_qc.vote_info.blk_id) {
                 // already enough content, start proposing
                 if self.has_batched_enough() {
                     return Ok(());
@@ -528,6 +623,13 @@ impl Decision for AptosDiemDecision {
             }
         }
 
+        // we have advanced round and need to make a vote
+        if self.pending_votes.contains_key(&PendingVoteDep::Round {
+            round: self.current_round,
+        }) {
+            return Ok(());
+        }
+
         // TODO: add vote timeout
 
         loop {
@@ -536,10 +638,9 @@ impl Decision for AptosDiemDecision {
     }
 
     async fn handle_timeout(&mut self) -> Result<(), CopycatError> {
+        let current = Instant::now();
         if let Some(timeout) = self.cur_proposal_timeout {
-            if self.pending_queue.len() >= self.blk_len
-                || timeout <= Instant::now() + Duration::from_millis(1)
-            {
+            if self.has_batched_enough() || timeout <= current + Duration::from_millis(1) {
                 // propose new block
                 loop {
                     // TODO: order blocks according to dependency (certificates)
@@ -567,8 +668,7 @@ impl Decision for AptosDiemDecision {
                 }
 
                 // do not propose yet if block is not full and timeout has not reached
-                if !self.is_cur_block_full() && timeout > Instant::now() + Duration::from_millis(1)
-                {
+                if !self.is_cur_block_full() && timeout > current + Duration::from_millis(1) {
                     return Ok(());
                 }
 
@@ -576,11 +676,7 @@ impl Decision for AptosDiemDecision {
                 let round = self.current_round;
                 let parent_id = self.high_qc.vote_info.blk_id;
                 let parent_round = self.high_qc.vote_info.round;
-                let commit_state_id = if parent_round + 1 == round {
-                    Some(self.high_qc.vote_info.parent_id)
-                } else {
-                    None
-                };
+                let grand_parent_id = self.high_qc.vote_info.parent_id;
 
                 let diem_blk = DiemBlock {
                     proposer: self.id,
@@ -593,6 +689,9 @@ impl Decision for AptosDiemDecision {
                 let (signature, dur) = self.signature_scheme.sign(&self.sk, &serialized)?;
                 self.delay.process_illusion(dur).await;
                 let last_round_tc = std::mem::replace(&mut self.last_tc, None);
+
+                pf_debug!(self.id; "round {} proposing new block {}: num_batches: {}, content: {:?}", round, blk_id, payload.len(), payload);
+
                 let proposal = DiemConsensusMsg::Proposal {
                     block: diem_blk,
                     last_round_tc,
@@ -601,14 +700,13 @@ impl Decision for AptosDiemDecision {
                     payload,
                 };
 
-                pf_debug!(self.id; "proposing new block: {}", blk_id);
-
                 self.peer_messenger
                     .broadcast(MsgType::ConsensusMsg {
                         msg: bincode::serialize(&proposal)?,
                     })
                     .await?;
 
+                self.cur_block_size = 0;
                 self.cur_proposal_timeout = None;
                 if let DiemConsensusMsg::Proposal { block, payload, .. } = proposal {
                     self.blk_pool.insert(blk_id, (block, payload)); // avoid extra copy
@@ -616,7 +714,24 @@ impl Decision for AptosDiemDecision {
                     unreachable!()
                 }
 
-                self.make_vote(blk_id, round, parent_id, parent_round, commit_state_id)
+                self.make_vote(blk_id, round, parent_id, parent_round, grand_parent_id)
+                    .await?;
+            }
+        }
+
+        // make vote for current round
+        if let Some((blk_id, round, parent_id, parent_round, grandparent_id)) =
+            self.pending_votes.remove(&PendingVoteDep::Round {
+                round: self.current_round,
+            })
+        {
+            if !self.blk_seen(&parent_id) {
+                self.pending_votes.insert(
+                    PendingVoteDep::Parent { blk_id: parent_id },
+                    (blk_id, round, parent_id, parent_round, grandparent_id),
+                );
+            } else {
+                self.make_vote(blk_id, round, parent_id, parent_round, grandparent_id)
                     .await?;
             }
         }
@@ -713,16 +828,16 @@ impl Decision for AptosDiemDecision {
                     return Ok(()); // invalid proposal, do nothing
                 }
 
-                let round = self.current_round;
+                let round = block.round;
                 let leader = Self::get_leader(round, &self.all_nodes);
-                if block.round != round || block.proposer != leader || src != leader {
-                    return Ok(());
+                if block.proposer != leader || src != leader {
+                    return Ok(()); // proposal not from the leader, do nothing
                 }
 
                 // decide if we should vote for proposal
                 let qc_round = block.qc.vote_info.round;
                 let parent_id = block.qc.vote_info.blk_id;
-                let grand_parent_id = block.qc.vote_info.parent_id;
+                let grandparent_id = block.qc.vote_info.parent_id;
 
                 // TODO: insert to committed pool right away for now since all blocks will commit
                 for batch in payload.iter() {
@@ -730,9 +845,12 @@ impl Decision for AptosDiemDecision {
                 }
 
                 self.blk_pool.insert(blk_id, (block, payload));
-                self.commit_pending_blks().await?;
+                self.process_waiting_actions(blk_id, parent_id).await?;
 
-                if round <= self.highest_vote_round || round <= qc_round {
+                if round < self.current_round
+                    || round <= self.highest_vote_round
+                    || round <= qc_round
+                {
                     return Ok(());
                 }
 
@@ -747,17 +865,20 @@ impl Decision for AptosDiemDecision {
 
                 if qc_safe || tc_safe {
                     // make vote
-                    if self.highest_qc_round < qc_round {
-                        self.highest_qc_round = qc_round;
+                    if round > self.current_round {
+                        self.pending_votes.insert(
+                            PendingVoteDep::Round { round: round },
+                            (blk_id, round, parent_id, qc_round, grandparent_id),
+                        );
+                    } else if !self.blk_seen(&parent_id) {
+                        self.pending_votes.insert(
+                            PendingVoteDep::Parent { blk_id: parent_id },
+                            (blk_id, round, parent_id, qc_round, grandparent_id),
+                        );
+                    } else {
+                        self.make_vote(blk_id, round, parent_id, qc_round, grandparent_id)
+                            .await?;
                     }
-
-                    if self.highest_vote_round < round {
-                        self.highest_vote_round = round;
-                    }
-
-                    let commit_state_id = if qc_safe { Some(grand_parent_id) } else { None };
-                    self.make_vote(blk_id, round, parent_id, qc_round, commit_state_id)
-                        .await?;
                 }
             }
             DiemConsensusMsg::Vote {
@@ -813,6 +934,7 @@ impl Decision for AptosDiemDecision {
             }
             DiemConsensusMsg::FetchBlockResp { blk, payload } => {
                 let blk_id = blk.compute_id(&payload)?;
+                let parent_id = blk.qc.vote_info.blk_id;
 
                 // already seen block, do nothing
                 if self.blk_pool.contains_key(&blk_id) {
@@ -832,7 +954,7 @@ impl Decision for AptosDiemDecision {
 
                 self.queried_blks.remove(&blk_id);
                 self.blk_pool.insert(blk_id, (blk, payload)); // this is safe assuming hash collision resistance
-                self.commit_pending_blks().await?;
+                self.process_waiting_actions(blk_id, parent_id).await?;
             }
             DiemConsensusMsg::FetchBatchReq { sender, round } => {
                 // TODO: for now, only let the sender respond

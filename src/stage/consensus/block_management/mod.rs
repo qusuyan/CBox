@@ -33,6 +33,7 @@ use dashmap::DashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+#[derive(Debug)]
 enum CurBlockState {
     Working,
     Full,

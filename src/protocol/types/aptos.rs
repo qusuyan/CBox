@@ -6,7 +6,7 @@ use mailbox_client::{MailboxError, SizedMsg};
 use serde::{Deserialize, Serialize};
 
 // certificate of availability
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct CoA {
     pub sender: NodeId,
     pub round: u64,
@@ -26,5 +26,14 @@ impl SizedMsg for CoA {
     fn size(&self) -> Result<usize, MailboxError> {
         let size = 8 + 8 + 32 + self.signature.len();
         Ok(size)
+    }
+}
+
+impl std::fmt::Debug for CoA {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoA")
+            .field("sender", &self.sender)
+            .field("round", &self.round)
+            .finish()
     }
 }
