@@ -8,6 +8,7 @@ pub enum AvalancheConfig {
     Basic { config: AvalancheBasicConfig },
     Blizzard { config: AvalancheBasicConfig }, //https://arxiv.org/pdf/2401.02811
     VoteNo { config: AvalancheVoteNoConfig },
+    NoCache { config: AvalancheBasicConfig },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFields)]

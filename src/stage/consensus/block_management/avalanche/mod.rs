@@ -21,14 +21,9 @@ pub fn new(
     delay: Arc<DelayPool>,
 ) -> Box<dyn BlockManagement> {
     match config {
-        AvalancheConfig::Basic { config } => Box::new(AvalancheBlockManagement::new(
-            id,
-            p2p_signature,
-            config,
-            peer_messenger,
-            delay,
-        )),
-        AvalancheConfig::Blizzard { config } => Box::new(AvalancheBlockManagement::new(
+        AvalancheConfig::Basic { config }
+        | AvalancheConfig::Blizzard { config }
+        | AvalancheConfig::NoCache { config } => Box::new(AvalancheBlockManagement::new(
             id,
             p2p_signature,
             config,

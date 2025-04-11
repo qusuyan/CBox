@@ -50,20 +50,9 @@ impl NodeConfig {
             ChainConfig::Bitcoin { .. } => {}
             ChainConfig::Avalanche { config } => {
                 match config {
-                    AvalancheConfig::Basic { config } => {
-                        let max_voters = neighbors.len() + 1; // including self
-                        if config.k > max_voters {
-                            log::warn!("not enough neighbors, setting k to {max_voters} instead");
-                            config.k = max_voters;
-                        }
-                        if config.alpha <= 0.5 {
-                            log::warn!(
-                                "alpha has to be greater than 0.5 to ensure majority vote, setting to 0.51"
-                            );
-                            config.alpha = 0.51
-                        }
-                    }
-                    AvalancheConfig::Blizzard { config } => {
+                    AvalancheConfig::Basic { config }
+                    | AvalancheConfig::Blizzard { config }
+                    | AvalancheConfig::NoCache { config } => {
                         let max_voters = neighbors.len() + 1; // including self
                         if config.k > max_voters {
                             log::warn!("not enough neighbors, setting k to {max_voters} instead");
@@ -120,8 +109,9 @@ impl ChainConfig {
                 BitcoinConfig::Eager { config } => config.txn_dissem.clone(),
             },
             ChainConfig::Avalanche { config } => match config {
-                AvalancheConfig::Basic { config } => config.txn_dissem.clone(),
-                AvalancheConfig::Blizzard { config } => config.txn_dissem.clone(),
+                AvalancheConfig::Basic { config }
+                | AvalancheConfig::Blizzard { config }
+                | AvalancheConfig::NoCache { config } => config.txn_dissem.clone(),
                 AvalancheConfig::VoteNo { .. } => DissemPattern::Passthrough,
             },
             ChainConfig::ChainReplication { .. } => DissemPattern::Passthrough,
@@ -142,10 +132,9 @@ impl ChainConfig {
                 BitcoinConfig::Eager { config } => config.blk_dissem.clone(),
             },
             ChainConfig::Avalanche { config } => match config {
-                AvalancheConfig::Basic { config } => DissemPattern::Sample {
-                    sample_size: config.k,
-                },
-                AvalancheConfig::Blizzard { config } => DissemPattern::Sample {
+                AvalancheConfig::Basic { config }
+                | AvalancheConfig::Blizzard { config }
+                | AvalancheConfig::NoCache { config } => DissemPattern::Sample {
                     sample_size: config.k,
                 },
                 AvalancheConfig::VoteNo { .. } => DissemPattern::Passthrough,

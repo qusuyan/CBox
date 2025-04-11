@@ -10,8 +10,9 @@ use crate::NodeId;
 
 pub fn new(id: NodeId, config: AvalancheConfig) -> Box<dyn TxnValidation> {
     match config {
-        AvalancheConfig::Basic { config } => Box::new(AvalancheTxnValidation::new(id, config)),
-        AvalancheConfig::Blizzard { config } => Box::new(AvalancheTxnValidation::new(id, config)),
+        AvalancheConfig::Basic { config }
+        | AvalancheConfig::Blizzard { config }
+        | AvalancheConfig::NoCache { config } => Box::new(AvalancheTxnValidation::new(id, config)),
         AvalancheConfig::VoteNo { config } => {
             Box::new(AvalancheVoteNoTxnValidation::new(id, config))
         }

@@ -7,6 +7,9 @@ use blizzard::BlizzardDecision;
 mod vote_no;
 use vote_no::AvalancheVoteNoDecision;
 
+mod no_cache;
+use no_cache::AvalancheNoCacheDecision;
+
 use super::Decision;
 use crate::config::AvalancheConfig;
 use crate::peers::PeerMessenger;
@@ -56,6 +59,14 @@ pub fn new(
             crypto_scheme,
             config,
             peer_messenger,
+            delay,
+        )),
+        AvalancheConfig::NoCache { config } => Box::new(AvalancheNoCacheDecision::new(
+            id,
+            crypto_scheme,
+            config,
+            peer_messenger,
+            pmaker_feedback_send,
             delay,
         )),
     }
