@@ -4,8 +4,7 @@ use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::signature::P2PSignature;
-use crate::protocol::crypto::vector_snark::DummyMerkleTree;
-use crate::protocol::crypto::{Hash, PrivKey, PubKey, Signature};
+use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::transaction::{AvalancheTxn, Txn};
 use crate::stage::DelayPool;
 use crate::utils::{CopycatError, NodeId};
@@ -49,14 +48,11 @@ pub struct AvalancheBlockManagement {
     _notify: Notify,
     // for requesting missing txns
     peer_messenger: Arc<PeerMessenger>,
-    pending_blks: HashMap<
-        (NodeId, u64, usize),
-        (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>, Vec<usize>, Hash, Signature),
-    >,
+    pending_blks: HashMap<(NodeId, u64, usize), (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>, Vec<usize>)>,
     delay: Arc<DelayPool>,
-    signature_scheme: SignatureScheme,
-    peer_pks: HashMap<NodeId, PubKey>,
-    sk: PrivKey,
+    _signature_scheme: SignatureScheme,
+    _peer_pks: HashMap<NodeId, PubKey>,
+    _sk: PrivKey,
     // for control loop
     blk_quota: usize,
     // for reporting data and debugging
@@ -91,9 +87,9 @@ impl AvalancheBlockManagement {
             _notify: Notify::new(),
             peer_messenger,
             pending_blks: HashMap::new(),
-            signature_scheme,
-            peer_pks,
-            sk,
+            _signature_scheme: signature_scheme,
+            _peer_pks: peer_pks,
+            _sk: sk,
             blk_quota: 0,
             blk_quota_recved: 0,
             blk_queries_sent: 0,
@@ -301,21 +297,10 @@ impl BlockManagement for AvalancheBlockManagement {
             .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone());
         let (txns, txn_ctx) = txns_with_ctx.unzip();
 
-        let mut merkle_tree = DummyMerkleTree::new();
-        let merkle_dur = merkle_tree.append(txn_hashs.len())?;
-        let merkle_root = merkle_tree.get_root();
-        let serialized = bincode::serialize(&(&self.blk_counter, 0, &merkle_root))?;
-        let (signature, signature_dur) = self.signature_scheme.sign(&self.sk, &serialized)?;
-        self.delay
-            .process_illusion(merkle_dur + signature_dur)
-            .await;
-
         let header = BlockHeader::Avalanche {
             proposer: self.id,
             id: self.blk_counter,
             depth: 0,
-            merkle_root,
-            signature,
         };
         let blk_ctx = BlkCtx::from_header_and_txns(&header, txn_ctx)?;
         pf_trace!(self.id; "sending block query {:?} ({} txns)", header, txn_hashs.len());
@@ -336,46 +321,14 @@ impl BlockManagement for AvalancheBlockManagement {
         pf_trace!(self.id; "Validating block {:?}", block);
         assert!(block.txns.len() == blk_ctx.txn_ctx.len());
 
-        let (proposer, blk_id, merkle_root, depth, signature) = match &block.header {
+        let (proposer, blk_id, depth) = match &block.header {
             BlockHeader::Avalanche {
                 proposer,
                 id,
-                merkle_root,
                 depth,
-                signature,
-            } => (*proposer, *id, merkle_root, *depth, signature),
+            } => (*proposer, *id, *depth),
             _ => unreachable!(),
         };
-
-        let proposer_pk = match self.peer_pks.get(&proposer) {
-            Some(pk) => pk,
-            None => {
-                pf_debug!(self.id; "Missing public key for proposer {}", proposer);
-                return Ok(vec![]);
-            }
-        };
-        let serialized = bincode::serialize(&(&self.blk_counter, 0, &merkle_root))?;
-        let mut check_time = 0f64;
-        let (valid, dur) = self
-            .signature_scheme
-            .verify(proposer_pk, &serialized, &signature)?;
-        check_time += dur;
-        if !valid {
-            pf_debug!(self.id; "Invalid signature for block {:?}", block);
-            self.delay.process_illusion(check_time).await;
-            return Ok(vec![]);
-        }
-
-        let mut merkle_tree = DummyMerkleTree::new();
-        let merkle_dur = merkle_tree.append(block.txns.len())?;
-        check_time += merkle_dur;
-        if !merkle_tree.verify_root(merkle_root)? {
-            pf_debug!(self.id; "Invalid merkle root for block {:?}", block);
-            self.delay.process_illusion(check_time).await;
-            return Ok(vec![]);
-        }
-
-        self.delay.process_illusion(check_time).await;
 
         let mut filtered_txns = vec![];
         let mut blk_txn_ctx = vec![];
@@ -504,13 +457,7 @@ impl BlockManagement for AvalancheBlockManagement {
             // record the current results
             self.pending_blks.insert(
                 (proposer, blk_id, depth),
-                (
-                    filtered_txns,
-                    blk_txn_ctx,
-                    recheck_txn_idx,
-                    *merkle_root,
-                    signature.clone(),
-                ),
+                (filtered_txns, blk_txn_ctx, recheck_txn_idx),
             );
 
             return Ok(vec![]);
@@ -518,11 +465,9 @@ impl BlockManagement for AvalancheBlockManagement {
 
         // if depth > 0, recursively check the blocks with smaller depth until we reach depth = 0
         let mut curr_depth = depth;
-        let mut curr_merkle_root = *merkle_root;
-        let mut curr_signature = signature.clone();
         while curr_depth > 0 {
             curr_depth -= 1;
-            let (mut curr_txns, mut curr_txn_ctx, recheck_idx, root, sig) =
+            let (mut curr_txns, mut curr_txn_ctx, recheck_idx) =
                 match self.pending_blks.remove(&(proposer, blk_id, curr_depth)) {
                     Some(record) => record,
                     None => {
@@ -530,9 +475,6 @@ impl BlockManagement for AvalancheBlockManagement {
                         return Ok(vec![]);
                     }
                 };
-
-            curr_merkle_root = root;
-            curr_signature = sig;
 
             // validate txns that did not get validated due to missing dependencies
             for idx in recheck_idx.into_iter() {
@@ -603,9 +545,7 @@ impl BlockManagement for AvalancheBlockManagement {
             header: BlockHeader::Avalanche {
                 proposer,
                 id: blk_id,
-                merkle_root: curr_merkle_root,
                 depth: curr_depth,
-                signature: curr_signature,
             },
             txns: filtered_txns,
         });
@@ -645,21 +585,10 @@ impl BlockManagement for AvalancheBlockManagement {
             .map(|res| res.unwrap().0.clone())
             .collect();
 
-        let mut merkle_tree = DummyMerkleTree::new();
-        let merkle_dur = merkle_tree.append(txns.len())?;
-        let merkle_root = merkle_tree.get_root();
-        let serialized = bincode::serialize(&(&self.blk_counter, 0, &merkle_root))?;
-        let (signature, signature_dur) = self.signature_scheme.sign(&self.sk, &serialized)?;
-        self.delay
-            .process_illusion(merkle_dur + signature_dur)
-            .await;
-
         let blk_header = BlockHeader::Avalanche {
             proposer,
             id: blk_id,
-            merkle_root,
             depth: depth + 1,
-            signature,
         };
 
         let blk = Arc::new(Block {

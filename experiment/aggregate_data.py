@@ -3,32 +3,38 @@
 import os, json, math
 import pandas as pd
 
-# exp_dir = "results/Avax-Scale/"
-# configs = ["crypto", "num-nodes"]
-
-# exp_dir = "results/Avax-BlkLen/"
-# configs = ["correct-config", "num-nodes"]
-
 # exp_dir = "results/ChainReplication-DummyECDSA/"
 # configs = ["per-node-concurrency", "num-nodes"]
 
 # exp_dir = "results/ChainReplication-NoEncrypt/"
 # configs = ["per-node-concurrency", "num-nodes"]
 
+# exp_dir = "results/Btc-Scale"
+# configs = ["num-nodes"]
+
+# exp_dir = "results/Btc-Few-Ecore"
+# configs = ["num-nodes"]
+
 # exp_dir = "results/Bitcoin-AsymmCompute/"
 # configs = ["validator-config"]
 
-# exp_dir = "results/Avax-Partition/"
-# configs = ["correct-type", "correct-config"]
+# exp_dir = "results/Avax-Scale/"
+# configs = ["crypto", "num-nodes"]
+
+# exp_dir = "results/Avax-BlkLen/"
+# configs = ["correct-config", "num-nodes"]
 
 # exp_dir = "results/Avax-Faulty/"
 # configs = ["correct-type", "num-faulty"]
 
-# exp_dir = "results/Diem-Scale-NIC1Gbps/"
-# configs = ["num-nodes", "per-node-concurrency"]
+# exp_dir = "results/Avax-Partition/"
+# configs = ["correct-type", "correct-config"]
 
-# exp_dir = "results/Crosschain-Scale"
-# configs = ["chain-type", "num-nodes"]
+# exp_dir = "results/Avax-Pref-Cache"
+# configs = ["correct-type", "num-faulty"]
+
+# exp_dir = "results/Diem-Scale/"
+# configs = ["num-nodes"]
 
 # exp_dir = "results/Aptos-Scale"
 # configs = ["num-nodes", "correct-config"]
@@ -36,8 +42,9 @@ import pandas as pd
 exp_dir = "results/Aptos-vs-Diem"
 configs = ["chain-type", "correct-config",  "num-nodes"]
 
-# exp_dir = "results/Btc-Scale"
-# configs = ["num-nodes"]
+# exp_dir = "results/Crosschain-Scale"
+# configs = ["chain-type", "num-nodes"]
+
 
 metrics = ["avg_tput", "avg_cpu", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms"]
 

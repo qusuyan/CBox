@@ -2,30 +2,30 @@
 num_iterations = 3
 
 [parameters]
-chain-type = "aptos"
-cluster-threads = 32
-conn-multiply = 1
-correct-type = "Basic"
+chain-type = "aptos" 
+cluster-threads = 32 
+conn-multiply = 1 
 correct-config = [
-    "narwhal_blk_size=65536+diem_blk_len=16",
-    "narwhal_blk_size=262144+diem_blk_len=4",
-    "narwhal_blk_size=1048576+diem_blk_len=1",
-]
-txn-crypto = "dummy-ecdsa"
-p2p-crypto = "dummy-ecdsa"
-threshold-crypto = "dummy-ecdsa"
-exp-prefix = "Aptos-vs-Diem/"
-exp-time = 310
-frequency = 0
-max-inflight-txns = 1000000
-network-delay = 30
-num-accounts = 1000
-num-clients = 1
-num-machines = 1
-num-nodes = [4, 8, 12, 16, 20, 24]
-per-node-concurrency = 16
-txn-span = 0
-disable-txn-dissem = true
-nic-bw = 125000000
-network-bw = 12500000
-mailbox-workers = 40
+  "narwhal_blk_size=65536+diem_blk_len=16",
+  "narwhal_blk_size=262144+diem_blk_len=4",
+  "narwhal_blk_size=1048576+diem_blk_len=1",
+] 
+correct-type = "Basic" 
+disable-txn-dissem = true 
+exp-prefix = "Aptos-vs-Diem/" 
+exp-time = 100 
+frequency = 0 
+mailbox-workers = 40 
+max-inflight-txns = 1000000 
+network-bw = 12500000 
+network-delay = 30 
+nic-bw = 125000000 
+num-accounts = 1000 
+num-clients = 240 
+num-machines = 1 
+num-nodes = 8 #[4, 8, 12, 16, 20, 24]
+p2p-crypto = "dummy-ecdsa" 
+per-node-concurrency = 16 
+threshold-crypto = "dummy-ecdsa" 
+txn-crypto = "dummy-ecdsa" 
+txn-span = 1
