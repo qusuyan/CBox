@@ -42,8 +42,12 @@ struct CliArgs {
     accounts: usize,
 
     /// Size of each script in bytes, can be used to control txn size
-    #[arg(long, short = 's', default_value = "10000")]
+    #[arg(long, short = 'z')]
     script_size: Option<usize>,
+
+    /// Runtime of each script in secs
+    #[arg(long, short = 'u')]
+    script_runtime_sec: Option<f64>,
 
     /// Maximum number of inflight transaction requests
     #[arg(long, short = 'f', default_value = "100000")]
@@ -172,6 +176,7 @@ pub fn main() {
             vec![id],
             args.accounts,
             args.script_size,
+            args.script_runtime_sec,
             args.max_inflight,
             args.frequency,
             args.conflict_rate,

@@ -44,6 +44,7 @@ impl ChainReplicationFlowGen {
     pub fn new(
         client_list: Vec<ClientId>,
         script_size: Option<usize>,
+        _script_runtime_sec: Option<f64>, // TODO
         max_inflight: usize,
         frequency: usize,
         crypto: SignatureScheme,

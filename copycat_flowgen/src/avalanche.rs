@@ -27,6 +27,7 @@ pub struct AvalancheFlowGen {
     batch_size: usize,
     conflict_rate: f64,
     script_size: usize,
+    _script_runtime_sec: f64, // TODO
     next_batch_time: Instant,
     crypto: SignatureScheme,
     client_list: Vec<ClientId>,
@@ -52,6 +53,7 @@ impl AvalancheFlowGen {
         client_list: Vec<ClientId>,
         num_accounts: usize,
         script_size: Option<usize>,
+        script_runtime_sec: Option<f64>,
         max_inflight: usize,
         frequency: usize,
         conflict_rate: f64,
@@ -95,6 +97,7 @@ impl AvalancheFlowGen {
             batch_size,
             conflict_rate,
             script_size: script_size.unwrap_or(0),
+            _script_runtime_sec: script_runtime_sec.unwrap_or(0f64),
             next_batch_time: Instant::now(),
             crypto,
             client_list,

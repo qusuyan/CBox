@@ -24,6 +24,7 @@ struct ChainInfo {
 
 pub struct AptosFlowGen {
     script_size: usize,
+    script_runtime_sec: f64,
     max_inflight: usize,
     batch_frequency: usize,
     batch_size: usize,
@@ -43,6 +44,7 @@ impl AptosFlowGen {
         client_list: Vec<ClientId>,
         num_accounts: usize,
         script_size: Option<usize>,
+        script_runtime_sec: Option<f64>,
         max_inflight: usize,
         frequency: usize,
         crypto: SignatureScheme,
@@ -81,6 +83,7 @@ impl AptosFlowGen {
 
         Self {
             script_size: script_size.unwrap_or(32 + 8), // recver_addr + amount for send txns
+            script_runtime_sec: script_runtime_sec.unwrap_or(0f64),
             max_inflight,
             batch_frequency,
             batch_size,
@@ -152,7 +155,7 @@ impl FlowGen for AptosFlowGen {
             *sender_seq_no += 1;
             let payload = AptosPayload {
                 script_bytes: self.script_size,
-                script_runtime_sec: 0f64,
+                script_runtime_sec: self.script_runtime_sec,
                 script_succeed: true,
                 distinct_writes: 1,
             };
