@@ -153,21 +153,30 @@ pub async fn block_dissemination_thread(
                     continue;
                 }
 
-                match block_dissemination_stage.get_disseminated().await {
-                    Ok((src, blks)) => {
+                let _permit = match core_group.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
 
-                        blks_sent += blks.len();
-                        txns_sent += blks.iter().map(|(blk, _)| blk.txns.len()).sum::<usize>();
-
-                        if let Err(e) = block_ready_send.send((src, blks)).await {
-                            pf_error!(id; "failed to send disseminated block: {:?}", e);
-                            continue
-                        }
-                    },
+                let (src, blks) = match block_dissemination_stage.get_disseminated().await {
+                    Ok(blk) => blk,
                     Err(e) => {
                         pf_error!(id; "failed to get disseminated block: {:?}", e);
                         continue;
                     }
+                };
+
+                drop(_permit);
+
+                blks_sent += blks.len();
+                txns_sent += blks.iter().map(|(blk, _)| blk.txns.len()).sum::<usize>();
+
+                if let Err(e) = block_ready_send.send((src, blks)).await {
+                    pf_error!(id; "failed to send disseminated block: {:?}", e);
+                    continue
                 }
             }
 
@@ -180,10 +189,20 @@ pub async fn block_dissemination_thread(
                     }
                 };
 
+                let _permit = match core_group.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
+                        continue;
+                    }
+                };
+
                 if let Err(e) = block_dissemination_stage.handle_peer_msg(src, msg).await {
                     pf_error!(id; "failed to handle peer block dissem message: {:?}", e);
                     continue;
                 }
+
+                drop(_permit);
             }
 
             _ = pass(), if Instant::now() > insert_delay_time => {
