@@ -286,7 +286,8 @@ impl FlowGen for BitcoinFlowGen {
             acc_commit_confidence / self.chain_info.len() as f64
         };
 
-        let latencies = std::mem::replace(&mut self.latencies, vec![]);
+        let num_latencies = self.latencies.len();
+        let latencies = std::mem::replace(&mut self.latencies, Vec::with_capacity(num_latencies));
 
         Stats {
             latencies,

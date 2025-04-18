@@ -672,7 +672,11 @@ impl Decision for AptosDiemDecision {
                     return Ok(());
                 }
 
-                let payload = std::mem::replace(&mut self.block_under_construction, vec![]);
+                let blk_len = self.block_under_construction.len();
+                let payload = std::mem::replace(
+                    &mut self.block_under_construction,
+                    Vec::with_capacity(blk_len),
+                );
                 let round = self.current_round;
                 let parent_id = self.high_qc.vote_info.blk_id;
                 let parent_round = self.high_qc.vote_info.round;

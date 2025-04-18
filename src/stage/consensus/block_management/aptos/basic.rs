@@ -183,10 +183,16 @@ impl BlockManagement for AptosBlockManagement {
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
         let ((txns, txn_ctx), should_cleanup) = match self.proposed_blks.remove(&(self.round - 1)) {
             Some(blk) => (blk, false), // retry old block
-            None => (
-                std::mem::replace(&mut self.block_under_construction, (vec![], vec![])),
-                true,
-            ), // propose new blocks
+            None => {
+                let blk_len = self.block_under_construction.0.len();
+                (
+                    std::mem::replace(
+                        &mut self.block_under_construction,
+                        (Vec::with_capacity(blk_len), Vec::with_capacity(blk_len)),
+                    ),
+                    true,
+                )
+            } // propose new blocks
         };
 
         let certificates = self.coa_lists.remove(&self.round).unwrap();
