@@ -6,7 +6,6 @@ from subprocess import check_output
 meta_log = "META.log"
 blk_gen_regex = "copycat::stage::consensus::block_management: \(([\d]+)\) In the last minute: self_blks_sent: ([\d]+)"
 
-
 def parse_total_blks_gen(log_dir):
     log_files = os.listdir(log_dir)
     blk_total = 0

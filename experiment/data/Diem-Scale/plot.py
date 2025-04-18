@@ -39,7 +39,7 @@ msg_delay_ax = msg_ax.twinx()
 msg_delay_ax.bar(cbox_df["num-nodes"], cbox_df[("deliver_late_dur_ms", "mean")], bar_width, color=cbox_color, alpha=0.35, zorder=0)
 msg_delay_ax.set_ylabel("Msg Late Time (ms)", labelpad=0)
 msg_delay_ax.set_ylim((0, 300))
-msg_ax.plot(cbox_df["num-nodes"], cbox_df[("deliver_late_chance", "mean")]*1000, 'o-', color=cbox_color, zorder=10)
+msg_ax.plot(cbox_df["num-nodes"], cbox_df[("deliver_late_chance", "mean")]*10000, 'o-', color=cbox_color, zorder=10)
 msg_ax.set_ylabel('Msg Late (‱)', labelpad=-0.5)
 msg_ax.set_ylim((0, 1.2))
 

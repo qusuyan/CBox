@@ -1,7 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 
-plt.rcParams["font.family"] = "GillSansC"
+plt.rcParams["font.family"] = "Gill Sans"
 plt.rcParams["font.size"] = "12"
 
 data = pd.read_csv("agg_results.csv", header=[0,1,2])
@@ -26,8 +26,6 @@ tput_ax.set_ylim((0, 16))
 tput_ax.set_yticks(range(0, 20, 5))
 
 # plot sched delay
-sched_ax.axvline(x = 12.5, color=dummy_color_dark, linestyle="--", linewidth=0.7)
-sched_ax.axvline(x = 32.5, color=ecdsa_color_dark, linestyle="--", linewidth=0.7)
 sched_ax.plot(ecdsa_df["num-nodes"], ecdsa_df[("sched_dur_ms", "mean")], 'o-', color=ecdsa_color, label="Signature")
 sched_ax.plot(dummy_df["num-nodes"], dummy_df[("sched_dur_ms", "mean")], 's-', color=dummy_color, label="No Signature")
 sched_ax.set_ylabel('Sched Delay (ms)', labelpad=8)
@@ -35,8 +33,6 @@ sched_ax.set_ylim((0, 2.5))
 sched_ax.legend()
 
 # plot msg delay
-msg_ax.axvline(x = 12.5, color=dummy_color_dark, linestyle="--", linewidth=0.7)
-msg_ax.axvline(x = 32.5, color=ecdsa_color_dark, linestyle="--", linewidth=0.7)
 msg_delay_ax = msg_ax.twinx()
 msg_delay_ax.bar(ecdsa_df["num-nodes"]-bar_width/2, ecdsa_df[("deliver_late_dur_ms", "mean")], bar_width, color=ecdsa_color, alpha=0.35)
 msg_delay_ax.bar(dummy_df["num-nodes"]+bar_width/2, dummy_df[("deliver_late_dur_ms", "mean")], bar_width, color=dummy_color, alpha=0.35)
@@ -48,8 +44,6 @@ msg_ax.set_ylabel('Msg Late (%)', labelpad=-0.2)
 msg_ax.set_ylim((0, 0.3))
 
 # plot cpu util
-cpu_ax.axvline(x = 12.5, color=dummy_color_dark, linestyle="--", linewidth=0.7)
-cpu_ax.axvline(x = 32.5, color=ecdsa_color_dark, linestyle="--", linewidth=0.7)
 cpu_ax.plot(ecdsa_df["num-nodes"], ecdsa_df[("avg_cpu", "mean")], 'o-', color=ecdsa_color)
 cpu_ax.plot(dummy_df["num-nodes"], dummy_df[("avg_cpu", "mean")], 's-', color=dummy_color)
 cpu_ax.set_ylabel('CPU (%)', labelpad=-4)
