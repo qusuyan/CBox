@@ -288,14 +288,12 @@ impl BlockManagement for AvalancheBlockManagement {
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
         // TODO: add noop txns to drive consensus as needed
         assert!(self.blk_quota > 0);
-        let txn_hashs: Vec<Hash> = self.curr_batch.drain(0..).collect();
+        let txn_hashs = self.curr_batch.drain(0..);
         self.curr_batch_size = 0;
         // let mut txn_hashs = vec![];
         // std::mem::swap(&mut txn_hashs, &mut self.curr_batch);
-        let txns_with_ctx = txn_hashs
-            .iter()
-            .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone());
-        let (txns, txn_ctx) = txns_with_ctx.unzip();
+        let txns_with_ctx = txn_hashs.map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone());
+        let (txns, txn_ctx): (Vec<_>, Vec<_>) = txns_with_ctx.unzip();
 
         let header = BlockHeader::Avalanche {
             proposer: self.id,
@@ -303,7 +301,7 @@ impl BlockManagement for AvalancheBlockManagement {
             depth: 0,
         };
         let blk_ctx = BlkCtx::from_header_and_txns(&header, txn_ctx)?;
-        pf_trace!(self.id; "sending block query {:?} ({} txns)", header, txn_hashs.len());
+        pf_trace!(self.id; "sending block query {:?} ({} txns)", header, txns.len());
         let blk = Arc::new(Block { header, txns });
 
         self.blk_counter += 1;

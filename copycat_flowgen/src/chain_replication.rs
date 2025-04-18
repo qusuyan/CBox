@@ -180,7 +180,8 @@ impl FlowGen for ChainReplicationFlowGen {
             .reduce(|acc, e| (std::cmp::max(acc.0, e.0), std::cmp::max(acc.1, e.1)))
             .unwrap_or((0, 0));
 
-        let latencies = std::mem::replace(&mut self.latencies, vec![]);
+        let num_latencies = self.latencies.len();
+        let latencies = std::mem::replace(&mut self.latencies, Vec::with_capacity(num_latencies));
 
         Stats {
             latencies,

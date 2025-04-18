@@ -469,7 +469,8 @@ impl FlowGen for AvalancheFlowGen {
             self.inflight_snapshot = inflight_snapshot;
         }
 
-        let latencies = std::mem::replace(&mut self.latencies, vec![]);
+        let num_latencies = self.latencies.len();
+        let latencies = std::mem::replace(&mut self.latencies, Vec::with_capacity(num_latencies));
 
         Stats {
             latencies,
