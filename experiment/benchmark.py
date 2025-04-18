@@ -14,6 +14,7 @@ from msg_delay import parse_msg_delay
 from sched_stats import parse_sched_stats
 from get_log_lines import get_log_lines
 from gen_validator_config import gen_validator_configs
+from parse_vcore import parse_vcore_util
 
 ENGINE = "home-runner"
 SETUP_TIME = 10
@@ -148,7 +149,8 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
         run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox-workers"], params["chain-type"], 
                     txn_crypto, p2p_crypto, params["threshold-crypto"], params["conn-multiply"], SETUP_TIME, 
                     clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["conflict_rate"], 
-                    params["txn-span"], params["disable-txn-dissem"], params["mailbox-threshold"], params["lat-sample-rate"], params["script-size"]]
+                    params["txn-span"], params["disable-txn-dissem"], params["mailbox-threshold"], params["lat-sample-rate"], 
+                    params["script-size"], params["script-runtime"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -235,6 +237,9 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     stats["sched_dur_ms"] = sched_stats["sched_dur_ms"]
     stats["poll_dur_ms"] = sched_stats["poll_dur_ms"]
 
+    ecore_utils = parse_vcore_util(log_dir, line_ranges=log_line_ranges)
+    stats["ecore_util"] = ecore_utils["avg"]
+
     logger.print(
 f'''
 msg delay stats:
@@ -261,7 +266,7 @@ if __name__ == "__main__":
         "network-delay": 30, # in millis
         "network-jitter": 10, # in millis
         "network-bw": 12500000, # 100 Mbps = 12.5 MB/s
-        "nic-bw": 12500000,
+        "nic-bw": 125000000, # 1 Gbps
         "chain-type": "bitcoin",
         "exp-time": 300, # in s
         "num-accounts": 10000,
@@ -291,6 +296,7 @@ if __name__ == "__main__":
         "validator-config": "",
         "exp-prefix": "",
         "script-size": "",
+        "script-runtime": "",
         "mailbox-threshold": 10,
         "lat-sample-rate": 1    # collect latency for all txns
     }

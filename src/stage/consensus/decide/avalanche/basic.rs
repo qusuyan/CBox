@@ -67,6 +67,9 @@ pub struct AvalancheDecision {
     commit_total: usize,
     commit_count: usize,
     txn_query_count: usize,
+    blk_query_answered: usize,
+    queries_succeeded: usize,
+    queries_failed: usize,
     // batch sleep time to reduce overhead
     delay: Arc<DelayPool>,
 }
@@ -113,6 +116,9 @@ impl AvalancheDecision {
             commit_total: 0,
             commit_count: 0,
             txn_query_count: 0,
+            blk_query_answered: 0,
+            queries_succeeded: 0,
+            queries_failed: 0,
             delay,
         }
     }
@@ -346,6 +352,7 @@ impl AvalancheDecision {
             if accept_votes[idx] >= self.vote_thresh {
                 // we gathered enough votes
                 pf_trace!(self.id; "looking at txn {} at block idx {}", txn_hash, idx);
+                self.queries_succeeded += 1;
                 // update the confidence and conflict set for all parents
                 let mut dedup = HashSet::new();
                 let mut commit_list = self.handle_votes_helper(&txn_hash, &mut dedup)?;
@@ -356,6 +363,7 @@ impl AvalancheDecision {
             } else {
                 // if not enough votes, reset counts to 0
                 pf_trace!(self.id; "vote failed for txn {}", txn_hash);
+                self.queries_failed += 1;
                 let mut dag_frontier = VecDeque::new();
                 let mut dedup = HashSet::new();
                 dag_frontier.push_back(txn_hash);
@@ -574,6 +582,7 @@ impl Decision for AvalancheDecision {
             self.record_votes(blk_id, self.id, votes).await?;
         } else {
             // otherwise, send votes to peer that queries the block
+            self.blk_query_answered += 1;
             let msg_content = (&blk_id, &votes);
             let serialized_msg = &bincode::serialize(&msg_content)?;
             let (signature, stime) = self.signature_scheme.sign(&self.sk, serialized_msg)?;
@@ -661,6 +670,13 @@ impl Decision for AvalancheDecision {
     }
 
     fn report(&mut self) {
+        pf_info!(self.id; "In the last minute: blk_queries_answered: {}", self.blk_query_answered);
+        self.blk_query_answered = 0;
+
+        pf_info!(self.id; "In the last minute: queries_succeeded: {}, queries_failed: {}", self.queries_succeeded, self.queries_failed);
+        self.queries_succeeded = 0;
+        self.queries_failed = 0;
+
         pf_info!(self.id; "In the last minute: is_strongly_preferred_calls: {}, is_preferred_checks: {}", self.is_strongly_preferred_calls, self.is_preferred_checks);
         pf_info!(self.id; "working set size: txn_dag: {}, perference_cache: {}", self.txn_dag.len(), self.preference_cache.len());
         let avg_commit_len = if self.commit_count == 0 {
@@ -668,6 +684,7 @@ impl Decision for AvalancheDecision {
         } else {
             self.commit_total / self.commit_count
         };
+
         pf_info!(self.id; "In the last minute: txns_queried: {}, commit_count: {}, avg_commit_len: {}", self.txn_query_count, self.commit_count, avg_commit_len);
         self.is_strongly_preferred_calls = 0;
         self.is_preferred_checks = 0;

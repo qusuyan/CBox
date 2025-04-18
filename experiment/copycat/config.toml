@@ -36,6 +36,7 @@ cluster = [
   ["mailbox_threshold", ""],
   ["lat_sample_rate", "1"],
   ["script_size", ""],
+  ["script_runtime", ""],
 ]
 date = []
 mailbox = [

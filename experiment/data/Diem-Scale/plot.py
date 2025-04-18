@@ -1,13 +1,17 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 
-plt.rcParams["font.family"] = "Gill Sans"
+plt.rcParams["font.family"] = ["Gill Sans", "DejaVu Sans"]
 plt.rcParams["font.size"] = "12"
 
 cbox_df = pd.read_csv("agg_results.csv", header=[0,1,2])
 cbox_df.columns = [cbox_df.columns[0][2]] + [(a, b) for (a, b, _) in cbox_df.columns[1:]]
 
+ieee2019_df = pd.read_csv("2019ieee.csv", header=[0])
+ieee2019_df = ieee2019_df[1:]
+
 cbox_color = "cornflowerblue"
+ieee2019_color = "crimson"
 cbox_color_dark = "royalblue"
 
 fig, (tput_ax, sched_ax, msg_ax, cpu_ax) = plt.subplots(4, 1, sharex = True, figsize=(3.5, 5))
@@ -15,10 +19,13 @@ bar_width = 14
 
 # plot tput
 # tput_ax.axvline(x = 210, color=cbox_color_dark, linestyle="--", linewidth=0.7)
-tput_ax.plot(cbox_df["num-nodes"], cbox_df[("avg_tput", "mean")] / 1000, 'o-', color=cbox_color, label = "CBox")
-tput_ax.set_ylabel('Tput (ktps.)', labelpad=8)
-tput_ax.set_ylim((0, 3.5))
-# tput_ax.legend(loc=(0.5, 0.05))
+cbox_normalized = cbox_df[("avg_tput", "mean")] / cbox_df.iloc[0][("avg_tput", "mean")]
+ieee2019_normalized = ieee2019_df["throughput"] / ieee2019_df.iloc[0]["throughput"]
+tput_ax.plot(cbox_df["num-nodes"], cbox_normalized, 'o-', color=cbox_color, label = "CBox")
+tput_ax.plot(ieee2019_df["num-nodes"], ieee2019_normalized, 's-', color=ieee2019_color, label = "2019 IEEE")
+tput_ax.set_ylabel('Tput (ktps.)', labelpad=-0.5)
+tput_ax.set_ylim((0, 1.1))
+tput_ax.legend()
 
 # plot sched delay
 # sched_ax.axvline(x = 210, color=cbox_color_dark, linestyle="--", linewidth=0.7)
@@ -32,9 +39,9 @@ msg_delay_ax = msg_ax.twinx()
 msg_delay_ax.bar(cbox_df["num-nodes"], cbox_df[("deliver_late_dur_ms", "mean")], bar_width, color=cbox_color, alpha=0.35, zorder=0)
 msg_delay_ax.set_ylabel("Msg Late Time (ms)", labelpad=0)
 msg_delay_ax.set_ylim((0, 300))
-msg_ax.plot(cbox_df["num-nodes"], cbox_df[("deliver_late_chance", "mean")]*100, 'o-', color=cbox_color, zorder=10)
-msg_ax.set_ylabel('Msg Late (%)', labelpad=-0.5)
-msg_ax.set_ylim((0, 0.25))
+msg_ax.plot(cbox_df["num-nodes"], cbox_df[("deliver_late_chance", "mean")]*10000, 'o-', color=cbox_color, zorder=10)
+msg_ax.set_ylabel('Msg Late (‱)', labelpad=-0.5)
+msg_ax.set_ylim((0, 1.2))
 
 # plot cpu util
 # cpu_ax.axvline(x = 210, color=cbox_color_dark, linestyle="--", linewidth=0.7)

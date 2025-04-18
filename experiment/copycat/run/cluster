@@ -23,6 +23,7 @@ DISABLE_TXN_DISSEM=${18}
 MAILBOX_THRESHOLD=${19}
 LAT_SAMPLE_RATE=${20}
 SCRIPT_SIZE=${21}
+SCRIPT_RUNTIME=${22}
 
 export RUST_LOG=info
 export RUST_BACKTRACE=full
@@ -43,6 +44,12 @@ else
     SCRIPT_SIZE="-z ${SCRIPT_SIZE}"
 fi
 
+if [[ $SCRIPT_RUNTIME == "" ]]; then 
+    SCRIPT_RUNTIME=""
+else
+    SCRIPT_RUNTIME="-u ${SCRIPT_RUNTIME}"
+fi
+
 if (($ID < $CLIENTS_REMAINDER)); then
     CLIENTS=$((NUM_CLIENTS + 1))
 else
@@ -54,4 +61,4 @@ fi
     --config bench_validators.json -x ${TXN_CRYPTO} -p ${P2P_CRYPTO} -h ${THRESHOLD_CRYPTO} \
     -o ${CONN_MULTIPLY} -l ${CLIENTS} -a ${ACCOUNTS} -f ${MAX_INFLIGHT} -q ${FREQUENCY} \
     -s ${TXN_SPAN} -r ${CONFLICT_RATE} ${DISABLE_TXN_DISSEM} --topology bench_topo.json \
-    ${SCRIPT_SIZE}
+    ${SCRIPT_SIZE} ${SCRIPT_RUNTIME}

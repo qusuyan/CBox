@@ -30,11 +30,9 @@ pub enum BlockHeader {
         // only include data to uniquely identify each rounds of vote
         proposer: NodeId,
         id: u64,
-        merkle_root: Hash,
         // for querying depending txns that current node has not seen yet
         // new batches have depth 0, and the txns parents would have depth 1, and their parents would have depth 2, etc
         depth: usize,
-        signature: Signature,
     },
     ChainReplication {
         blk_id: Hash,
@@ -61,7 +59,7 @@ impl SizedMsg for BlockHeader {
         match self {
             BlockHeader::Dummy => Ok(0),
             BlockHeader::Bitcoin { .. } => Ok(32 + 32 + 4 + 8),
-            BlockHeader::Avalanche { signature, .. } => Ok(8 + 8 + 32 + 8 + signature.len()),
+            BlockHeader::Avalanche { .. } => Ok(8 + 8 + 8),
             BlockHeader::ChainReplication { .. } => Ok(32),
             BlockHeader::Diem {
                 block,
