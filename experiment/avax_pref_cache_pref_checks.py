@@ -3,7 +3,7 @@
 import os, json
 import pandas as pd
 
-from parse_avax_pref_checks import parse_avax_pref_checks
+from avax_utils import parse_avax_pref_checks
 
 exp_dir = "results/Avax-Pref-Cache"
 exp_names = os.listdir(exp_dir)

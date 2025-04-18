@@ -4,7 +4,7 @@ import os, sys, re
 from subprocess import check_output
 
 file_regex = "META.log"
-tput_ts_regex = "(\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d).*Runtime: ([\d]+) s"
+tput_ts_regex = "(\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d).*Runtime: (\d+) s"
 
 def get_log_lines(log_dir, start_rt = None, end_rt = None): # TODO: different files may have different start and end?
     log_files = os.listdir(log_dir)
