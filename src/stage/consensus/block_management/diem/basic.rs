@@ -15,16 +15,22 @@ use crate::stage::pacemaker::diem::DiemPacemaker;
 use crate::stage::DelayPool;
 use crate::transaction::{DiemAccountAddress, DiemTxn, Txn};
 use crate::{CopycatError, NodeId, SignatureScheme};
-
 use mailbox_client::SizedMsg;
-use primitive_types::U256;
+
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Notify;
+use tokio::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use dashmap::DashMap;
+use lazy_static::lazy_static;
+use primitive_types::U256;
+
+lazy_static! {
+    static ref BLK_SEND_TIMES: DashMap<Hash, Instant> = DashMap::new();
+}
 
 pub struct DiemBlockManagement {
     id: NodeId,
@@ -43,7 +49,7 @@ pub struct DiemBlockManagement {
     high_qc: QuorumCert,
     high_commit_qc: QuorumCert,
     last_tc: Option<TimeCert>,
-    should_propose: bool,
+    qc_recv_time: Option<Instant>,
     // p2p communication
     all_nodes: Vec<NodeId>,
     peer_messenger: Arc<PeerMessenger>,
@@ -56,6 +62,10 @@ pub struct DiemBlockManagement {
     blk_pool: HashMap<Hash, (Arc<Block>, Arc<BlkCtx>)>, // only to respond to peer requests
     //
     _notify: Notify,
+    // statistics
+    blk_build_times: Vec<f64>,
+    blk_deliver_times: Vec<f64>,
+    blk_validation_times: Vec<f64>,
 }
 
 impl DiemBlockManagement {
@@ -75,6 +85,12 @@ impl DiemBlockManagement {
         let genesis_qc = GENESIS_QC.clone();
         let current_round = 2;
 
+        let qc_recv_time = if DiemPacemaker::get_leader(current_round, &all_nodes) == id {
+            Some(Instant::now())
+        } else {
+            None
+        };
+
         Self {
             id,
             blk_size: config.blk_size,
@@ -91,7 +107,7 @@ impl DiemBlockManagement {
             high_qc: genesis_qc.clone(),
             high_commit_qc: genesis_qc,
             last_tc: None,
-            should_propose: DiemPacemaker::get_leader(current_round, &all_nodes) == id,
+            qc_recv_time,
             all_nodes,
             signature_scheme,
             peer_pks,
@@ -99,6 +115,9 @@ impl DiemBlockManagement {
             threshold_signature,
             pending_blks: HashMap::new(),
             _notify: Notify::new(),
+            blk_build_times: vec![],
+            blk_deliver_times: vec![],
+            blk_validation_times: vec![],
         }
     }
 
@@ -244,7 +263,8 @@ impl BlockManagement for DiemBlockManagement {
     // when we receive a new QC from pmaker
     async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         loop {
-            if self.should_propose {
+            // TODO: add timeout for batching
+            if self.qc_recv_time.is_some() {
                 let chain_tail = self.high_qc.vote_info.blk_id;
                 if chain_tail == GENESIS_VOTE_INFO.blk_id
                     || self.state_merkle.contains_key(&chain_tail)
@@ -381,7 +401,11 @@ impl BlockManagement for DiemBlockManagement {
         self.blk_pool
             .insert(diem_blk_id, (blk.clone(), blk_ctx.clone()));
 
-        self.should_propose = false;
+        let blk_build_instant = Instant::now();
+        BLK_SEND_TIMES.insert(diem_blk_id, blk_build_instant);
+        let blk_build_time = blk_build_instant - self.qc_recv_time.unwrap();
+        self.blk_build_times.push(blk_build_time.as_secs_f64());
+        self.qc_recv_time = None;
 
         Ok((blk, blk_ctx))
     }
@@ -392,6 +416,12 @@ impl BlockManagement for DiemBlockManagement {
         block: Arc<Block>,
         ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
+        // record block delivery time
+        let blk_recv_time = Instant::now();
+        let blk_send_time = *BLK_SEND_TIMES.get(&ctx.id).unwrap();
+        self.blk_deliver_times
+            .push((blk_recv_time - blk_send_time).as_secs_f64());
+
         let (diem_blk, high_commit_qc, last_round_tc, signature) = match &block.header {
             BlockHeader::Diem {
                 block,
@@ -578,13 +608,16 @@ impl BlockManagement for DiemBlockManagement {
             }
         }
 
+        let blk_validation_time = Instant::now();
+        self.blk_validation_times
+            .push((blk_validation_time - blk_recv_time).as_secs_f64());
         Ok(new_tail)
     }
 
     async fn handle_pmaker_msg(&mut self, msg: Vec<u8>) -> Result<(), CopycatError> {
         let qc: QuorumCert = bincode::deserialize(&msg)?;
         self.process_certificate_qc(&qc).await?;
-        self.should_propose = true;
+        self.qc_recv_time = Some(Instant::now());
         Ok(())
     }
 
@@ -610,7 +643,17 @@ impl BlockManagement for DiemBlockManagement {
             .await
     }
 
-    fn report(&mut self) {}
+    fn report(&mut self) {
+        let blk_building_times = std::mem::replace(&mut self.blk_build_times, vec![]);
+        let blk_delivery_times = std::mem::replace(&mut self.blk_deliver_times, vec![]);
+        let blk_validating_times = std::mem::replace(&mut self.blk_validation_times, vec![]);
+        let avg_blk_building_time =
+            blk_building_times.iter().sum::<f64>() / blk_building_times.len() as f64;
+        let avg_blk_validation_time =
+            blk_validating_times.iter().sum::<f64>() / blk_validating_times.len() as f64;
+        pf_info!(self.id; "avg_blk_building_time: {}, avg_blk_validation_time: {}", avg_blk_building_time, avg_blk_validation_time);
+        pf_info!(self.id; "blk_delivery_times: {:?}", blk_delivery_times);
+    }
 }
 
 #[cfg(test)]

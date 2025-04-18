@@ -15,13 +15,19 @@ use crate::stage::DelayPool;
 use crate::transaction::Txn;
 use crate::{CopycatError, NodeId, SignatureScheme};
 
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Notify};
-use tokio::time::Duration;
+use tokio::time::Instant;
 
 use async_trait::async_trait;
+use dashmap::DashMap;
+use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
+
+lazy_static! {
+    static ref VOTE_SENT_TIMES: DashMap<(Hash, NodeId), Instant> = DashMap::new();
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VoteMsg {
@@ -56,6 +62,8 @@ pub struct DiemDecision {
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
     delay: Arc<DelayPool>,
     _notify: Notify,
+    // statistics
+    vote_delivery_times: Vec<f64>,
 }
 
 impl DiemDecision {
@@ -103,10 +111,11 @@ impl DiemDecision {
             pmaker_feedback_send,
             delay,
             _notify: Notify::new(),
+            vote_delivery_times: vec![],
         }
     }
 
-    async fn process_certificate_qc(&mut self, qc: &QuorumCert) -> Result<(), CopycatError> {
+    fn process_certificate_qc(&mut self, qc: &QuorumCert) -> Result<(), CopycatError> {
         if let Some(_id) = qc.commit_info.commit_state_id {
             let commit_blk_id = qc.vote_info.parent_id;
             let commit_height = match self.get_height(commit_blk_id) {
@@ -230,8 +239,8 @@ impl Decision for DiemDecision {
             let qc_round = diem_blk.qc.vote_info.round;
 
             // commit grandparent block (diem_blk.qc.vote_info.parent_id)
-            self.process_certificate_qc(&diem_blk.qc).await?;
-            self.process_certificate_qc(&high_commit_qc).await?;
+            self.process_certificate_qc(&diem_blk.qc)?;
+            self.process_certificate_qc(&high_commit_qc)?;
 
             // safe_to_vote(b.round, qc_round, last_tc)
             // one vote per round                         block must extend a smaller round
@@ -308,20 +317,17 @@ impl Decision for DiemDecision {
                 let qc = self.add_vote(vote_msg).await?;
                 if let Some(qc) = qc {
                     pf_debug!(self.id; "Combined signatues to quorum certificate: {:?}", qc);
-                    self.process_certificate_qc(&qc).await?;
+                    self.process_certificate_qc(&qc)?;
                     self.pmaker_feedback_send
                         .send(bincode::serialize(&qc)?)
                         .await?;
                 }
             } else {
                 // send vote message to next leader
+                VOTE_SENT_TIMES.insert((ctx.id, self.id), Instant::now());
                 let msg = bincode::serialize(&vote_msg)?;
                 self.peer_messenger
-                    .delayed_send(
-                        next_leader,
-                        MsgType::ConsensusMsg { msg },
-                        Duration::from_secs_f64(self.delay.get_current_delay()),
-                    )
+                    .send(next_leader, MsgType::ConsensusMsg { msg })
                     .await?;
             }
         }
@@ -362,10 +368,16 @@ impl Decision for DiemDecision {
         if src != vote_msg.sender {
             return Ok(());
         }
+        let vote_sent_time = *VOTE_SENT_TIMES
+            .get(&(vote_msg.vote_info.blk_id, vote_msg.sender))
+            .unwrap();
+        let vote_recv_time = Instant::now();
+        self.vote_delivery_times
+            .push((vote_recv_time - vote_sent_time).as_secs_f64());
         let qc = self.add_vote(vote_msg).await?;
         if let Some(qc) = qc {
             pf_debug!(self.id; "Combined signatues to quorum certificate: {:?}", qc);
-            self.process_certificate_qc(&qc).await?;
+            self.process_certificate_qc(&qc)?;
             self.pmaker_feedback_send
                 .send(bincode::serialize(&qc)?)
                 .await?;
@@ -373,5 +385,8 @@ impl Decision for DiemDecision {
         Ok(())
     }
 
-    fn report(&mut self) {}
+    fn report(&mut self) {
+        let vote_delivery_times = std::mem::replace(&mut self.vote_delivery_times, vec![]);
+        pf_info!(self.id; "vote delivery times: {:?}", vote_delivery_times);
+    }
 }
