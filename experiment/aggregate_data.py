@@ -46,7 +46,7 @@ configs = ["chain-type", "correct-config",  "num-nodes"]
 # configs = ["chain-type", "num-nodes"]
 
 
-metrics = ["avg_tput", "avg_cpu", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms"]
+metrics = ["avg_tput", "avg_cpu", "deliver_late_chance", "deliver_late_dur_ms", "sched_dur_ms", "ecore_util"]
 
 result_dirs = os.listdir(exp_dir)
 records = []
