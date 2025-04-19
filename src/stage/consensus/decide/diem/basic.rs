@@ -387,6 +387,6 @@ impl Decision for DiemDecision {
 
     fn report(&mut self) {
         let vote_delivery_times = std::mem::replace(&mut self.vote_delivery_times, vec![]);
-        pf_info!(self.id; "vote delivery times: {:?}", vote_delivery_times);
+        pf_info!(self.id; "vote_delivery_times: {:?}", vote_delivery_times);
     }
 }
