@@ -7,9 +7,6 @@ plt.rcParams["font.size"] = "12"
 cbox_df = pd.read_csv("agg_results.csv", header=[0,1,2])
 cbox_df.columns = [cbox_df.columns[0][2]] + [(a, b) for (a, b, _) in cbox_df.columns[1:]]
 
-ieee2019_df = pd.read_csv("2019ieee.csv", header=[0])
-ieee2019_df = ieee2019_df[1:]
-
 cbox_color = "cornflowerblue"
 ieee2019_color = "crimson"
 cbox_color_dark = "royalblue"
@@ -20,9 +17,7 @@ bar_width = 14
 # plot tput
 # tput_ax.axvline(x = 210, color=cbox_color_dark, linestyle="--", linewidth=0.7)
 cbox_normalized = cbox_df[("avg_tput", "mean")] / cbox_df.iloc[0][("avg_tput", "mean")]
-ieee2019_normalized = ieee2019_df["throughput"] / ieee2019_df.iloc[0]["throughput"]
 tput_ax.plot(cbox_df["num-nodes"], cbox_normalized, 'o-', color=cbox_color, label = "CBox")
-tput_ax.plot(ieee2019_df["num-nodes"], ieee2019_normalized, 's-', color=ieee2019_color, label = "2019 IEEE")
 tput_ax.set_ylabel('Tput (ktps.)', labelpad=-0.5)
 tput_ax.set_ylim((0, 1.1))
 tput_ax.legend()
@@ -49,7 +44,7 @@ cpu_ax.plot(cbox_df["num-nodes"], cbox_df[("avg_cpu", "mean")], 'o-', color=cbox
 cpu_ax.set_ylabel('CPU (%)', labelpad=-4)
 cpu_ax.set_ylim((0, 100))
 
-cpu_ax.set_xticks(cbox_df["num-nodes"].iloc[::2])
+cpu_ax.set_xticks(list(range(0, 257, 32)))
 cpu_ax.tick_params(axis='x', labelrotation=0, length=2, pad=2)
 cpu_ax.set_xlabel('# Validators', labelpad=-1)
 # cpu_ax.set_xlim((30, 310))
