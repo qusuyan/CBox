@@ -33,7 +33,12 @@ impl DummyMerkleTree {
     }
 
     pub fn update(&mut self, num_elem: usize) -> Result<f64, CopycatError> {
-        let timeout = Self::TIMEOUT_PER_NODE * (self.num_elem as f64).log2() * num_elem as f64; // TODO
+        let num_internal = if self.num_elem == 0 {
+            0f64
+        } else {
+            (self.num_elem as f64).log2()
+        };
+        let timeout = Self::TIMEOUT_PER_NODE * num_internal * num_elem as f64;
         let mut rng = rand::thread_rng();
         let raw: [u8; 32] = rng.gen();
         self.root = Hash(U256::from(raw));
