@@ -14,7 +14,7 @@ pub struct DummyMerkleTree {
 
 impl DummyMerkleTree {
     // const TIMEOUT_PER_LEAF: f64 = 0f64; // for experiments without Merkle Tree
-    const TIMEOUT_PER_LEAF: f64 = 1.23e-5; // from experiment with rs-merkle crate
+    const TIMEOUT_PER_NODE: f64 = 1.23e-5; // from experiment with rs-merkle crate
 
     pub fn new() -> Self {
         Self {
@@ -24,7 +24,7 @@ impl DummyMerkleTree {
     }
 
     pub fn append(&mut self, num_elem: usize) -> Result<f64, CopycatError> {
-        let timeout = Self::TIMEOUT_PER_LEAF * num_elem as f64;
+        let timeout = Self::TIMEOUT_PER_NODE * num_elem as f64;
         let mut rng = rand::thread_rng();
         let raw: [u8; 32] = rng.gen();
         self.root = Hash(U256::from(raw));
@@ -33,7 +33,7 @@ impl DummyMerkleTree {
     }
 
     pub fn update(&mut self, num_elem: usize) -> Result<f64, CopycatError> {
-        let timeout = Self::TIMEOUT_PER_LEAF * num_elem as f64; // TODO
+        let timeout = Self::TIMEOUT_PER_NODE * (self.num_elem as f64).log2() * num_elem as f64; // TODO
         let mut rng = rand::thread_rng();
         let raw: [u8; 32] = rng.gen();
         self.root = Hash(U256::from(raw));

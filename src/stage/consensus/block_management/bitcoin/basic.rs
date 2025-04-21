@@ -16,6 +16,7 @@ use mailbox_client::SizedMsg;
 use primitive_types::U256;
 use rand::Rng;
 
+use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 
 use std::collections::hash_map::Entry::{Occupied, Vacant};
@@ -43,6 +44,7 @@ pub struct BitcoinBlockManagement {
     // for requesting missing blocks
     peer_messenger: Arc<PeerMessenger>,
     orphan_blocks: HashMap<Hash, HashSet<Hash>>,
+    _notify: Notify,
 }
 
 impl BitcoinBlockManagement {
@@ -72,6 +74,7 @@ impl BitcoinBlockManagement {
             pow_time: None,
             peer_messenger,
             orphan_blocks: HashMap::new(),
+            _notify: Notify::new(),
         }
     }
 
@@ -328,8 +331,9 @@ impl BlockManagement for BitcoinBlockManagement {
                 let pow_remain = pow_start_time + pow_dur - now;
                 let recheck_time = std::cmp::min(pow_remain, Duration::from_secs(10));
                 tokio::time::sleep(recheck_time).await;
+            } else {
+                self._notify.notified().await;
             }
-            tokio::task::yield_now().await;
         }
     }
 

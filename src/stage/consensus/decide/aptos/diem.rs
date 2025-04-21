@@ -17,6 +17,8 @@ use crate::transaction::Txn;
 use crate::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
+use dashmap::DashMap;
+use lazy_static::lazy_static;
 use mailbox_client::SizedMsg;
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
+
+lazy_static! {
+    static ref PROPOSAL_SEND_TIME: DashMap<Hash, Instant> = DashMap::new();
+    static ref VOTE_SEND_TIME: DashMap<(Hash, NodeId), Instant> = DashMap::new();
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum DiemConsensusMsg {
@@ -106,6 +113,12 @@ pub struct AptosDiemDecision {
     queried_batchs: HashMap<(NodeId, u64), CoA>,
     delay: Arc<DelayPool>,
     _notify: Notify,
+    // statistics
+    qc_form_time: Option<Instant>,
+    blk_build_times: Vec<f64>,
+    blk_send_times: Vec<f64>,
+    blk_validate_times: Vec<f64>,
+    vote_send_times: Vec<f64>,
 }
 
 impl AptosDiemDecision {
@@ -177,6 +190,11 @@ impl AptosDiemDecision {
             queried_batchs: HashMap::new(),
             delay,
             _notify: Notify::new(),
+            qc_form_time: None,
+            blk_build_times: vec![],
+            blk_send_times: vec![],
+            blk_validate_times: vec![],
+            vote_send_times: vec![],
         }
     }
 
@@ -346,6 +364,7 @@ impl AptosDiemDecision {
             self.record_vote(vote_info, ledger_commit_info, self.id, signature)
                 .await?;
         } else {
+            VOTE_SEND_TIME.insert((blk_id, self.id), Instant::now());
             let vote_msg = DiemConsensusMsg::Vote {
                 vote_info,
                 ledger_commit_info,
@@ -411,6 +430,7 @@ impl AptosDiemDecision {
         };
 
         pf_debug!(self.id; "formed qc for block {}", qc.vote_info.blk_id);
+        self.qc_form_time = Some(Instant::now());
 
         self.process_certificate_qc(&qc).await?;
         self.cur_proposal_timeout = Some(Instant::now() + self.proposal_timeout);
@@ -704,6 +724,12 @@ impl Decision for AptosDiemDecision {
                     payload,
                 };
 
+                let proposal_time = Instant::now();
+                let block_building_time = self.qc_form_time.unwrap() - proposal_time;
+                self.blk_build_times.push(block_building_time.as_secs_f64());
+                self.qc_form_time = None;
+                PROPOSAL_SEND_TIME.insert(blk_id, proposal_time);
+
                 self.peer_messenger
                     .broadcast(MsgType::ConsensusMsg {
                         msg: bincode::serialize(&proposal)?,
@@ -763,6 +789,9 @@ impl Decision for AptosDiemDecision {
                 payload,
             } => {
                 let blk_id = block.compute_id(&payload)?;
+                let blk_recv_time = Instant::now();
+                let blk_send_time = blk_recv_time - *PROPOSAL_SEND_TIME.get(&blk_id).unwrap();
+                self.blk_send_times.push(blk_send_time.as_secs_f64());
 
                 // validate proposal
                 let qc_valid = if block.qc == *GENESIS_QC {
@@ -867,6 +896,9 @@ impl Decision for AptosDiemDecision {
                     None => false,
                 };
 
+                self.blk_validate_times
+                    .push((Instant::now() - blk_recv_time).as_secs_f64());
+
                 if qc_safe || tc_safe {
                     // make vote
                     if round > self.current_round {
@@ -892,6 +924,9 @@ impl Decision for AptosDiemDecision {
                 sender,
                 signature,
             } => {
+                let vote_send_time =
+                    Instant::now() - *VOTE_SEND_TIME.get(&(vote_info.blk_id, sender)).unwrap();
+                self.vote_send_times.push(vote_send_time.as_secs_f64());
                 // validate vote
                 let commit_qc_valid = if high_commit_qc == *GENESIS_QC {
                     true
@@ -1031,5 +1066,19 @@ impl Decision for AptosDiemDecision {
         Ok(())
     }
 
-    fn report(&mut self) {}
+    fn report(&mut self) {
+        let blk_build_times = std::mem::take(&mut self.blk_build_times);
+        let blk_send_times = std::mem::take(&mut self.blk_send_times);
+        let blk_validate_times = std::mem::take(&mut self.blk_validate_times);
+        let vote_recv_times = std::mem::take(&mut self.vote_send_times);
+
+        let avg_blk_build_times =
+            blk_build_times.iter().sum::<f64>() / blk_build_times.len() as f64;
+        let avg_validation_times =
+            blk_validate_times.iter().sum::<f64>() / blk_validate_times.len() as f64;
+
+        pf_info!(self.id; "avg_blk_build_times: {}, avg_blk_validation_times: {}", avg_blk_build_times, avg_validation_times);
+        pf_info!(self.id; "blk_send_times: {:?}", blk_send_times);
+        pf_info!(self.id; "vote_recv_times: {:?}", vote_recv_times);
+    }
 }

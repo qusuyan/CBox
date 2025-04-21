@@ -337,7 +337,7 @@ fn main() {
         let report_interval = get_timer_interval().as_secs_f64();
         start_report_timer().await;
         // wait when setup txns are propogated over the network
-        let warn_up_time = std::env::var("WARMUP_TIME").map(|str| str.parse::<u64>().expect("invalid warmup time")).unwrap_or(0);
+        let warn_up_time = std::env::var("WARMUP_TIME").map(|str| str.parse::<u64>().expect("invalid warmup time")).unwrap_or(10);
         tokio::time::sleep(Duration::from_secs(warn_up_time)).await;
         log::info!("flow generation starts");
         let mut txns_sent = 0;
