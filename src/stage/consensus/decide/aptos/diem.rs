@@ -144,11 +144,13 @@ impl AptosDiemDecision {
         let vote_timeout = Duration::from_secs_f64(config.diem_vote_timeout_secs);
 
         let current_round = 2;
-        let cur_proposal_timeout = if Self::get_leader(current_round, &all_nodes) == id {
-            Some(Instant::now() + proposal_timeout)
-        } else {
-            None
-        };
+        let (qc_form_time, cur_proposal_timeout) =
+            if Self::get_leader(current_round, &all_nodes) == id {
+                let current = Instant::now();
+                (Some(current), Some(current + proposal_timeout))
+            } else {
+                (None, None)
+            };
 
         Self {
             id,
@@ -190,7 +192,7 @@ impl AptosDiemDecision {
             queried_batchs: HashMap::new(),
             delay,
             _notify: Notify::new(),
-            qc_form_time: None,
+            qc_form_time,
             blk_build_times: vec![],
             blk_send_times: vec![],
             blk_validate_times: vec![],
