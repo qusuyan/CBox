@@ -290,7 +290,9 @@ impl BlockManagement for DiemBlockManagement {
         // speculative execute
         let parent_id = self.high_qc.vote_info.blk_id;
         let mut merkle_tree = if parent_id == GENESIS_VOTE_INFO.blk_id {
-            DummyMerkleTree::new()
+            let (merkle_tree, dur) = DummyMerkleTree::new(0);
+            self.delay.process_illusion(dur).await;
+            merkle_tree
         } else {
             self.state_merkle
                 .get(&parent_id)
@@ -502,7 +504,9 @@ impl BlockManagement for DiemBlockManagement {
         let parent_id = &diem_blk.qc.vote_info.blk_id;
         let parent_round = diem_blk.qc.vote_info.round;
         let mut merkle_tree = if *parent_id == GENESIS_VOTE_INFO.blk_id {
-            DummyMerkleTree::new()
+            let (merkle_tree, dur) = DummyMerkleTree::new(0);
+            self.delay.process_illusion(dur).await;
+            merkle_tree
         } else {
             match self.state_merkle.get(parent_id) {
                 Some(merkle_tree) => merkle_tree.clone(),

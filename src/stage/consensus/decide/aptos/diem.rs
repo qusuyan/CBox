@@ -1048,8 +1048,7 @@ impl Decision for AptosDiemDecision {
 
                 // validate block content - signature and etc have been verified by at least N-2f correct nodes
                 // this check ensures that batch content matches with merkle root and hence with CoA
-                let mut merkle_tree = DummyMerkleTree::new();
-                let dur = merkle_tree.append(batch.txns.len())?;
+                let (merkle_tree, dur) = DummyMerkleTree::new(batch.txns.len());
                 self.delay.process_illusion(dur).await;
                 if !merkle_tree.verify_root(merkle_root)? {
                     return Ok(());

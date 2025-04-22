@@ -38,7 +38,6 @@ pub struct AptosBlockManagement {
     num_faulty: usize,
     // building blocks
     block_under_construction: (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>),
-    block_merkle: DummyMerkleTree,
     cur_block_size: usize,
     cur_block_timeout: Option<Instant>,
     proposed_blks: HashMap<u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)>,
@@ -86,7 +85,6 @@ impl AptosBlockManagement {
             coa_lists,
             num_faulty,
             block_under_construction: (vec![], vec![]),
-            block_merkle: DummyMerkleTree::new(),
             cur_block_size: 0,
             cur_block_timeout: None,
             proposed_blks: HashMap::new(),
@@ -122,7 +120,6 @@ impl BlockManagement for AptosBlockManagement {
     }
 
     async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError> {
-        let mut txns_inserted = 0;
         let (block_under_construction, block_under_construction_ctx) =
             &mut self.block_under_construction;
 
@@ -156,12 +153,8 @@ impl BlockManagement for AptosBlockManagement {
             if self.cur_block_timeout.is_none() {
                 self.cur_block_timeout = Some(Instant::now() + self.batch_timeout);
             }
-            txns_inserted += 1;
             self.cur_block_size += txn_size;
         };
-
-        let dur = self.block_merkle.append(txns_inserted)?;
-        self.delay.process_illusion(dur).await;
         Ok(state)
     }
 
@@ -200,7 +193,9 @@ impl BlockManagement for AptosBlockManagement {
         self.proposed_blks
             .insert(self.round, (txns.clone(), txn_ctx.clone()));
 
-        let merkle_root = self.block_merkle.get_root();
+        let (merkle_tree, dur) = DummyMerkleTree::new(txns.len());
+        self.delay.process_illusion(dur).await;
+        let merkle_root = merkle_tree.get_root();
         let header_content = (&self.id, &self.round, &certificates, &merkle_root);
         let serialized = bincode::serialize(&header_content)?;
         let (signature, dur) = self.signature_scheme.sign(&self.sk, &serialized)?;
@@ -223,7 +218,6 @@ impl BlockManagement for AptosBlockManagement {
         self.cur_block_timeout = None;
         if should_cleanup {
             self.cur_block_size = 0;
-            self.block_merkle = DummyMerkleTree::new();
         }
 
         Ok((block, blk_ctx))

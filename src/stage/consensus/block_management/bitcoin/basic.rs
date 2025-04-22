@@ -302,8 +302,8 @@ impl BlockManagement for BitcoinBlockManagement {
         };
 
         if modified || self.pow_time.is_none() {
-            let mut merkle_tree = DummyMerkleTree::new();
-            let timeout = merkle_tree.append(self.block_under_construction.len() - orig_blk_len)?;
+            let (merkle_tree, timeout) =
+                DummyMerkleTree::new(self.block_under_construction.len() - orig_blk_len);
             execution_delay += timeout;
             self.merkle_root = Some(merkle_tree);
             self.delay.process_illusion(execution_delay).await;

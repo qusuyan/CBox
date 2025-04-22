@@ -22,11 +22,12 @@ pub struct ExecuteCommit {
 
 impl ExecuteCommit {
     pub fn new(id: NodeId, delay: Arc<DelayPool>) -> Self {
+        let (state_merkle, _) = DummyMerkleTree::new(0);
         Self {
             _id: id,
             executed_txns: HashSet::new(),
             balance: HashMap::new(),
-            state_merkle: DummyMerkleTree::new(),
+            state_merkle,
             delay,
         }
     }
