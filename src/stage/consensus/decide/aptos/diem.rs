@@ -80,7 +80,7 @@ pub struct AptosDiemDecision {
     _vote_timeout: Duration, // TODO
     //
     quorum_store: HashMap<(NodeId, u64), (Arc<Block>, Arc<BlkCtx>)>,
-    pending_queue: VecDeque<(NodeId, u64)>,
+    pending_queue: VecDeque<CoA>,
     committed_pool: HashSet<(NodeId, u64)>,
     block_under_construction: Vec<CoA>,
     cur_block_size: usize,
@@ -587,16 +587,19 @@ impl Decision for AptosDiemDecision {
                 _ => unreachable!(),
             };
 
-            if !self.committed_pool.contains(&(sender, round)) {
-                self.pending_queue.push_back((sender, round));
-            }
-
-            let batch_ready = match ctx.data {
-                Some(BlkData::Aptos { data_ready, .. }) => data_ready,
+            let (certificate, batch_ready) = match &ctx.data {
+                Some(BlkData::Aptos {
+                    certificate,
+                    data_ready,
+                }) => (certificate, data_ready),
                 _ => unimplemented!(),
             };
 
-            if batch_ready {
+            if !self.committed_pool.contains(&(sender, round)) {
+                self.pending_queue.push_back(certificate.clone());
+            }
+
+            if *batch_ready {
                 self.quorum_store.insert((sender, round), (blk, ctx));
             }
         }
@@ -667,24 +670,23 @@ impl Decision for AptosDiemDecision {
                 // propose new block
                 loop {
                     // TODO: order blocks according to dependency (certificates)
-                    let next_batch = match self.pending_queue.pop_front() {
+                    let next_batch_certificate = match self.pending_queue.pop_front() {
                         Some(batch) => batch,
                         None => break,
                     };
 
-                    if self.committed_pool.contains(&next_batch) {
+                    let next_batch_id =
+                        (next_batch_certificate.sender, next_batch_certificate.round);
+
+                    if self.committed_pool.contains(&next_batch_id) {
                         // batch has already committed
                         continue;
                     }
 
-                    self.committed_pool.insert(next_batch);
+                    self.committed_pool.insert(next_batch_id);
 
-                    let (_, ctx) = self.quorum_store.get(&next_batch).unwrap();
-                    let certificate = match ctx.data.as_ref().unwrap() {
-                        BlkData::Aptos { certificate, .. } => certificate,
-                    };
-                    self.cur_block_size += certificate.size()?;
-                    self.block_under_construction.push(certificate.clone()); // TODO: remove clone()
+                    self.cur_block_size += next_batch_certificate.size()?;
+                    self.block_under_construction.push(next_batch_certificate);
                     if self.is_cur_block_full() {
                         break;
                     }
