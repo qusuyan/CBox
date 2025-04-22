@@ -408,9 +408,11 @@ impl BlockManagement for DiemBlockManagement {
         BLK_SEND_TIMES.insert(diem_blk_id, blk_build_instant);
         let blk_build_time = blk_build_instant - self.qc_recv_time.unwrap();
         self.blk_build_times.push(blk_build_time.as_secs_f64());
-        let parent_build_instant = *BLK_SEND_TIMES.get(&parent_id).unwrap();
-        let round_latency = blk_build_instant - parent_build_instant;
-        self.round_latencies.push(round_latency.as_secs_f64());
+        if parent_id != GENESIS_VOTE_INFO.blk_id {
+            let parent_build_instant = *BLK_SEND_TIMES.get(&parent_id).unwrap();
+            let round_latency = blk_build_instant - parent_build_instant;
+            self.round_latencies.push(round_latency.as_secs_f64());
+        }
         self.qc_recv_time = None;
 
         Ok((blk, blk_ctx))

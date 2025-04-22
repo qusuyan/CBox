@@ -733,9 +733,11 @@ impl Decision for AptosDiemDecision {
                 let proposal_time = Instant::now();
                 let block_building_time = self.qc_form_time.unwrap() - proposal_time;
                 self.blk_build_times.push(block_building_time.as_secs_f64());
-                let parent_proposal_time = *PROPOSAL_SEND_TIME.get(&parent_id).unwrap();
-                let round_time = proposal_time - parent_proposal_time;
-                self.round_latency.push(round_time.as_secs_f64());
+                if parent_id != GENESIS_VOTE_INFO.blk_id {
+                    let parent_proposal_time = *PROPOSAL_SEND_TIME.get(&parent_id).unwrap();
+                    let round_time = proposal_time - parent_proposal_time;
+                    self.round_latency.push(round_time.as_secs_f64());
+                }
                 self.qc_form_time = None;
                 PROPOSAL_SEND_TIME.insert(blk_id, proposal_time);
 
