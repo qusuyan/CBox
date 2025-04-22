@@ -23,7 +23,6 @@ use mailbox_client::SizedMsg;
 use primitive_types::U256;
 use serde::{Deserialize, Serialize};
 
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -587,20 +586,18 @@ impl Decision for AptosDiemDecision {
                 BlockHeader::Aptos { sender, round, .. } => (sender, round),
                 _ => unreachable!(),
             };
-            match self.quorum_store.entry((sender, round)) {
-                Entry::Occupied(mut e) => {
-                    let (orig_blk, orig_ctx) = e.get_mut();
-                    if orig_blk.txns.len() == 0 {
-                        *orig_blk = blk;
-                        *orig_ctx = ctx;
-                    }
-                }
-                Entry::Vacant(e) => {
-                    e.insert((blk, ctx));
-                    if !self.committed_pool.contains(&(sender, round)) {
-                        self.pending_queue.push_back((sender, round));
-                    }
-                }
+
+            if !self.committed_pool.contains(&(sender, round)) {
+                self.pending_queue.push_back((sender, round));
+            }
+
+            let batch_ready = match ctx.data {
+                Some(BlkData::Aptos { data_ready, .. }) => data_ready,
+                _ => unimplemented!(),
+            };
+
+            if batch_ready {
+                self.quorum_store.insert((sender, round), (blk, ctx));
             }
         }
         Ok(())
@@ -684,7 +681,7 @@ impl Decision for AptosDiemDecision {
 
                     let (_, ctx) = self.quorum_store.get(&next_batch).unwrap();
                     let certificate = match ctx.data.as_ref().unwrap() {
-                        BlkData::Aptos { certificate } => certificate,
+                        BlkData::Aptos { certificate, .. } => certificate,
                     };
                     self.cur_block_size += certificate.size()?;
                     self.block_under_construction.push(certificate.clone()); // TODO: remove clone()

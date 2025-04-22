@@ -259,7 +259,10 @@ impl BlockDissemination for NarwhalBlockDissemination {
             .clone(); // TODO: remove clone()
 
         if let Some((src, (blk, ctx))) = self.blk_pool.get(&(sender, round, digest)) {
-            let new_ctx = Arc::new(ctx.with_data(BlkData::Aptos { certificate }));
+            let new_ctx = Arc::new(ctx.with_data(BlkData::Aptos {
+                certificate,
+                data_ready: true,
+            }));
             return Ok((*src, vec![(blk.clone(), new_ctx)]));
         }
 
@@ -270,10 +273,12 @@ impl BlockDissemination for NarwhalBlockDissemination {
             merkle_root: Hash(U256::zero()),
             signature: vec![],
         };
-        let ctx = Arc::new(
-            BlkCtx::from_header_and_txns(&header, vec![])?
-                .with_data(BlkData::Aptos { certificate }),
-        );
+        let ctx = Arc::new(BlkCtx::from_header_and_txns(&header, vec![])?.with_data(
+            BlkData::Aptos {
+                certificate,
+                data_ready: false,
+            },
+        ));
         let block = Arc::new(Block {
             header,
             txns: vec![],

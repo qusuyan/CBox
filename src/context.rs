@@ -23,7 +23,7 @@ pub struct BlkCtx {
 
 #[derive(Clone, Debug)]
 pub enum BlkData {
-    Aptos { certificate: CoA },
+    Aptos { certificate: CoA, data_ready: bool },
 }
 
 impl TxnCtx {
