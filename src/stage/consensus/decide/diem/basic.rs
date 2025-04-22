@@ -64,6 +64,7 @@ pub struct DiemDecision {
     _notify: Notify,
     // statistics
     vote_delivery_times: Vec<f64>,
+    vote_validation_times: Vec<f64>,
 }
 
 impl DiemDecision {
@@ -112,6 +113,7 @@ impl DiemDecision {
             delay,
             _notify: Notify::new(),
             vote_delivery_times: vec![],
+            vote_validation_times: vec![],
         }
     }
 
@@ -382,11 +384,19 @@ impl Decision for DiemDecision {
                 .send(bincode::serialize(&qc)?)
                 .await?;
         }
+        let vote_validation_time = Instant::now() - vote_recv_time;
+        self.vote_validation_times
+            .push(vote_validation_time.as_secs_f64());
         Ok(())
     }
 
     fn report(&mut self) {
-        let vote_delivery_times = std::mem::replace(&mut self.vote_delivery_times, vec![]);
+        let vote_delivery_times = std::mem::take(&mut self.vote_delivery_times);
+        let vote_validation_times = std::mem::take(&mut self.vote_validation_times);
+        let avg_vote_validation_time =
+            vote_validation_times.iter().sum::<f64>() / vote_validation_times.len() as f64;
+
         pf_info!(self.id; "vote_delivery_times: {:?}", vote_delivery_times);
+        pf_info!(self.id; "avg_vote_validation_time: {}", avg_vote_validation_time);
     }
 }

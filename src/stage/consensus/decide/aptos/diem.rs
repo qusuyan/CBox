@@ -119,6 +119,8 @@ pub struct AptosDiemDecision {
     blk_send_times: Vec<f64>,
     blk_validate_times: Vec<f64>,
     vote_send_times: Vec<f64>,
+    vote_validate_times: Vec<f64>,
+    round_latency: Vec<f64>,
 }
 
 impl AptosDiemDecision {
@@ -197,6 +199,8 @@ impl AptosDiemDecision {
             blk_send_times: vec![],
             blk_validate_times: vec![],
             vote_send_times: vec![],
+            vote_validate_times: vec![],
+            round_latency: vec![],
         }
     }
 
@@ -729,6 +733,9 @@ impl Decision for AptosDiemDecision {
                 let proposal_time = Instant::now();
                 let block_building_time = self.qc_form_time.unwrap() - proposal_time;
                 self.blk_build_times.push(block_building_time.as_secs_f64());
+                let parent_proposal_time = *PROPOSAL_SEND_TIME.get(&parent_id).unwrap();
+                let round_time = proposal_time - parent_proposal_time;
+                self.round_latency.push(round_time.as_secs_f64());
                 self.qc_form_time = None;
                 PROPOSAL_SEND_TIME.insert(blk_id, proposal_time);
 
@@ -926,8 +933,9 @@ impl Decision for AptosDiemDecision {
                 sender,
                 signature,
             } => {
+                let vote_recv_time = Instant::now();
                 let vote_send_time =
-                    Instant::now() - *VOTE_SEND_TIME.get(&(vote_info.blk_id, sender)).unwrap();
+                    vote_recv_time - *VOTE_SEND_TIME.get(&(vote_info.blk_id, sender)).unwrap();
                 self.vote_send_times.push(vote_send_time.as_secs_f64());
                 // validate vote
                 let commit_qc_valid = if high_commit_qc == *GENESIS_QC {
@@ -947,6 +955,9 @@ impl Decision for AptosDiemDecision {
 
                 self.record_vote(vote_info, ledger_commit_info, sender, signature)
                     .await?;
+                let vote_validate_time = Instant::now() - vote_recv_time;
+                self.vote_validate_times
+                    .push(vote_validate_time.as_secs_f64());
             }
             DiemConsensusMsg::FetchBlockReq { blk_id } => {
                 let (blk, payload) = match self.blk_pool.get(&blk_id) {
@@ -1073,13 +1084,19 @@ impl Decision for AptosDiemDecision {
         let blk_send_times = std::mem::take(&mut self.blk_send_times);
         let blk_validate_times = std::mem::take(&mut self.blk_validate_times);
         let vote_recv_times = std::mem::take(&mut self.vote_send_times);
+        let vote_validate_times = std::mem::take(&mut self.vote_validate_times);
+        let round_time = std::mem::take(&mut self.round_latency);
 
         let avg_blk_build_times =
             blk_build_times.iter().sum::<f64>() / blk_build_times.len() as f64;
-        let avg_validation_times =
+        let avg_blk_validation_times =
             blk_validate_times.iter().sum::<f64>() / blk_validate_times.len() as f64;
+        let avg_vote_validation_time =
+            vote_validate_times.iter().sum::<f64>() / vote_validate_times.len() as f64;
+        let avg_round_latency = round_time.iter().sum::<f64>() / round_time.len() as f64;
 
-        pf_info!(self.id; "avg_blk_build_times: {}, avg_blk_validation_times: {}", avg_blk_build_times, avg_validation_times);
+        pf_info!(self.id; "avg_blk_build_times: {}, avg_blk_validation_times: {}, avg_vote_validation_time: {}, avg_round_latency: {}", 
+                                avg_blk_build_times, avg_blk_validation_times, avg_vote_validation_time, avg_round_latency);
         pf_info!(self.id; "blk_send_times: {:?}", blk_send_times);
         pf_info!(self.id; "vote_recv_times: {:?}", vote_recv_times);
     }

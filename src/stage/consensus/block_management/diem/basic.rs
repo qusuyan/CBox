@@ -66,6 +66,7 @@ pub struct DiemBlockManagement {
     blk_build_times: Vec<f64>,
     blk_deliver_times: Vec<f64>,
     blk_validation_times: Vec<f64>,
+    round_latencies: Vec<f64>,
 }
 
 impl DiemBlockManagement {
@@ -118,6 +119,7 @@ impl DiemBlockManagement {
             blk_build_times: vec![],
             blk_deliver_times: vec![],
             blk_validation_times: vec![],
+            round_latencies: vec![],
         }
     }
 
@@ -286,11 +288,12 @@ impl BlockManagement for DiemBlockManagement {
         let mut speculative_exec_distinct_inserts = 0usize;
 
         // speculative execute
-        let mut merkle_tree = if self.high_qc.vote_info.blk_id == GENESIS_VOTE_INFO.blk_id {
+        let parent_id = self.high_qc.vote_info.blk_id;
+        let mut merkle_tree = if parent_id == GENESIS_VOTE_INFO.blk_id {
             DummyMerkleTree::new()
         } else {
             self.state_merkle
-                .get(&self.high_qc.vote_info.blk_id)
+                .get(&parent_id)
                 .expect("missing depending blocks")
                 .clone()
         };
@@ -405,6 +408,9 @@ impl BlockManagement for DiemBlockManagement {
         BLK_SEND_TIMES.insert(diem_blk_id, blk_build_instant);
         let blk_build_time = blk_build_instant - self.qc_recv_time.unwrap();
         self.blk_build_times.push(blk_build_time.as_secs_f64());
+        let parent_build_instant = *BLK_SEND_TIMES.get(&parent_id).unwrap();
+        let round_latency = blk_build_instant - parent_build_instant;
+        self.round_latencies.push(round_latency.as_secs_f64());
         self.qc_recv_time = None;
 
         Ok((blk, blk_ctx))
@@ -644,14 +650,17 @@ impl BlockManagement for DiemBlockManagement {
     }
 
     fn report(&mut self) {
-        let blk_building_times = std::mem::replace(&mut self.blk_build_times, vec![]);
-        let blk_delivery_times = std::mem::replace(&mut self.blk_deliver_times, vec![]);
-        let blk_validating_times = std::mem::replace(&mut self.blk_validation_times, vec![]);
+        let blk_building_times = std::mem::take(&mut self.blk_build_times);
+        let blk_delivery_times = std::mem::take(&mut self.blk_deliver_times);
+        let blk_validating_times = std::mem::take(&mut self.blk_validation_times);
+        let round_latencies = std::mem::take(&mut self.round_latencies);
         let avg_blk_building_time =
             blk_building_times.iter().sum::<f64>() / blk_building_times.len() as f64;
         let avg_blk_validation_time =
             blk_validating_times.iter().sum::<f64>() / blk_validating_times.len() as f64;
-        pf_info!(self.id; "avg_blk_building_time: {}, avg_blk_validation_time: {}", avg_blk_building_time, avg_blk_validation_time);
+        let avg_round_latency = round_latencies.iter().sum::<f64>() / round_latencies.len() as f64;
+        pf_info!(self.id; "avg_blk_building_time: {}, avg_blk_validation_time: {}, avg_round_latency: {}", 
+                                avg_blk_building_time, avg_blk_validation_time, avg_round_latency);
         pf_info!(self.id; "blk_delivery_times: {:?}", blk_delivery_times);
     }
 }
