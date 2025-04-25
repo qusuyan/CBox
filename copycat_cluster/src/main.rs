@@ -263,7 +263,7 @@ fn main() {
 
     runtime.block_on(async {
         // start mailbox
-        let _mailbox = match Mailbox::init::<MsgType>(id, machine_list, nic_egress_info, pipe_info, nic_ingress_info, args.num_mailbox_workers, args.num_conn_per_peer).await {
+        let _mailbox = match Mailbox::init::<Box<MsgType>>(id, machine_list, nic_egress_info, pipe_info, nic_ingress_info, args.num_mailbox_workers, args.num_conn_per_peer).await {
             Ok(mailbox) => mailbox,
             Err(e) => {
                 log::error!("Mailbox initialization failed with error {:?}", e);
