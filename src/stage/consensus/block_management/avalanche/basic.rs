@@ -6,6 +6,7 @@ use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::transaction::{AvalancheTxn, Txn};
+use crate::protocol::MsgType;
 use crate::stage::DelayPool;
 use crate::utils::{CopycatError, NodeId};
 use crate::SignatureScheme;
@@ -49,7 +50,7 @@ pub struct AvalancheBlockManagement {
     // for requesting missing txns
     peer_messenger: Arc<PeerMessenger>,
     pending_blks: HashMap<(NodeId, u64, usize), (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>, Vec<usize>)>,
-    delay: Arc<DelayPool>,
+    _delay: Arc<DelayPool>,
     _signature_scheme: SignatureScheme,
     _peer_pks: HashMap<NodeId, PubKey>,
     _sk: PrivKey,
@@ -94,7 +95,7 @@ impl AvalancheBlockManagement {
             blk_quota_recved: 0,
             blk_fetch_requests_sent: 0,
             txns_requested: 0,
-            delay,
+            _delay: delay,
         }
     }
 }
@@ -446,11 +447,7 @@ impl BlockManagement for AvalancheBlockManagement {
             };
             let msg = bincode::serialize(&peer_req)?;
             self.peer_messenger
-                .delayed_send(
-                    proposer,
-                    crate::protocol::MsgType::BlockReq { msg },
-                    Duration::from_secs_f64(self.delay.get_current_delay()),
-                )
+                .send(proposer, Box::new(MsgType::BlockReq { msg }))
                 .await?;
             // record the current results
             self.pending_blks.insert(
@@ -595,11 +592,7 @@ impl BlockManagement for AvalancheBlockManagement {
         });
 
         self.peer_messenger
-            .delayed_send(
-                peer,
-                crate::protocol::MsgType::NewBlock { blk },
-                Duration::from_secs_f64(self.delay.get_current_delay()),
-            )
+            .send(peer, Box::new(MsgType::NewBlock { blk }))
             .await?;
 
         Ok(())

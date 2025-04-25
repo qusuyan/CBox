@@ -380,9 +380,9 @@ impl AptosDiemDecision {
             self.peer_messenger
                 .send(
                     next_leader,
-                    MsgType::ConsensusMsg {
+                    Box::new(MsgType::ConsensusMsg {
                         msg: bincode::serialize(&vote_msg)?,
-                    },
+                    }),
                 )
                 .await?;
         }
@@ -503,9 +503,9 @@ impl AptosDiemDecision {
                             blk_id: *next_blk_id,
                         };
                         self.peer_messenger
-                            .broadcast(MsgType::ConsensusMsg {
+                            .broadcast(Box::new(MsgType::ConsensusMsg {
                                 msg: bincode::serialize(&msg)?,
-                            })
+                            }))
                             .await?;
                         self.queried_blks.insert(*next_blk_id);
                     }
@@ -529,9 +529,9 @@ impl AptosDiemDecision {
                         self.peer_messenger
                             .send(
                                 batch.sender,
-                                MsgType::ConsensusMsg {
+                                Box::new(MsgType::ConsensusMsg {
                                     msg: bincode::serialize(&msg)?,
-                                },
+                                }),
                             )
                             .await?;
                         self.queried_batchs.insert(batch_key, batch.clone());
@@ -741,9 +741,9 @@ impl Decision for AptosDiemDecision {
                 PROPOSAL_SEND_TIME.insert(blk_id, proposal_time);
 
                 self.peer_messenger
-                    .broadcast(MsgType::ConsensusMsg {
+                    .broadcast(Box::new(MsgType::ConsensusMsg {
                         msg: bincode::serialize(&proposal)?,
-                    })
+                    }))
                     .await?;
 
                 self.cur_block_size = 0;
@@ -979,9 +979,9 @@ impl Decision for AptosDiemDecision {
                 self.peer_messenger
                     .send(
                         src,
-                        MsgType::ConsensusMsg {
+                        Box::new(MsgType::ConsensusMsg {
                             msg: bincode::serialize(&msg)?,
-                        },
+                        }),
                     )
                     .await?;
             }
@@ -1024,9 +1024,9 @@ impl Decision for AptosDiemDecision {
                 self.peer_messenger
                     .send(
                         src,
-                        MsgType::ConsensusMsg {
+                        Box::new(MsgType::ConsensusMsg {
                             msg: bincode::serialize(&msg)?, // TODO: this will lead to an extra copy of block
-                        },
+                        }),
                     )
                     .await?;
             }

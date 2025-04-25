@@ -554,12 +554,11 @@ impl Decision for BlizzardDecision {
                 signature,
             };
             self.peer_messenger
-                .delayed_send(
+                .send(
                     proposer,
-                    MsgType::ConsensusMsg {
+                    Box::new(MsgType::ConsensusMsg {
                         msg: bincode::serialize(&vote_msg)?,
-                    },
-                    Duration::from_secs_f64(self.delay.get_current_delay()),
+                    }),
                 )
                 .await?;
         }

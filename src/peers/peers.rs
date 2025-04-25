@@ -5,7 +5,6 @@ use mailbox_client::{ClientStubRecvHalf, ClientStubSendHalf};
 
 use rand::seq::{IteratorRandom, SliceRandom};
 
-use tokio::time::Duration;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use std::collections::HashSet;
@@ -15,7 +14,7 @@ use std::sync::Arc;
 
 pub struct PeerMessenger {
     id: NodeId,
-    transport_hub: ClientStubSendHalf<MsgType>,
+    transport_hub: ClientStubSendHalf<Box<MsgType>>,
     neighbors: HashSet<NodeId>,
     msgs_sent: Arc<AtomicU64>,
     _peer_receiver_rt: Option<tokio::runtime::Runtime>,
@@ -108,7 +107,7 @@ impl PeerMessenger {
         ))
     }
 
-    pub async fn send(&self, dest: NodeId, msg: MsgType) -> Result<(), CopycatError> {
+    pub async fn send(&self, dest: NodeId, msg: Box<MsgType>) -> Result<(), CopycatError> {
         pf_trace!(self.id; "sending {:?} to {}", msg, dest);
         if let Err(e) = self.transport_hub.send(dest, msg).await {
             return Err(CopycatError(format!("send to {dest} failed: {e:?}")));
@@ -117,21 +116,7 @@ impl PeerMessenger {
         Ok(())
     }
 
-    pub async fn delayed_send(
-        &self,
-        dest: NodeId,
-        msg: MsgType,
-        delay: Duration,
-    ) -> Result<(), CopycatError> {
-        pf_trace!(self.id; "sending {:?} to {}", msg, dest);
-        if let Err(e) = self.transport_hub.delayed_send(dest, msg, delay).await {
-            return Err(CopycatError(format!("send to {dest} failed: {e:?}")));
-        }
-        self.msgs_sent.fetch_add(1, Ordering::Relaxed);
-        Ok(())
-    }
-
-    pub async fn broadcast(&self, msg: MsgType) -> Result<(), CopycatError> {
+    pub async fn broadcast(&self, msg: Box<MsgType>) -> Result<(), CopycatError> {
         pf_trace!(self.id; "broadcasting {:?}", msg);
         if let Err(e) = self.transport_hub.broadcast(msg).await {
             return Err(CopycatError(format!("broadcast failed: {e:?}")));
@@ -142,7 +127,7 @@ impl PeerMessenger {
 
     pub async fn gossip(
         &self,
-        msg: MsgType,
+        msg: Box<MsgType>,
         skipping: HashSet<NodeId>,
     ) -> Result<(), CopycatError> {
         pf_trace!(self.id; "gossiping {:?}", msg);
@@ -156,28 +141,7 @@ impl PeerMessenger {
         Ok(())
     }
 
-    pub async fn delayed_gossip(
-        &self,
-        msg: MsgType,
-        skipping: HashSet<NodeId>,
-        delay: Duration,
-    ) -> Result<(), CopycatError> {
-        pf_trace!(self.id; "gossiping {:?}", msg);
-        let dests: Vec<u64> = self.neighbors.difference(&skipping).cloned().collect();
-        if dests.len() > 0 {
-            if let Err(e) = self
-                .transport_hub
-                .delayed_multicast(dests, msg, delay)
-                .await
-            {
-                return Err(CopycatError(format!("gossip failed: {e:?}")));
-            }
-            self.msgs_sent.fetch_add(1, Ordering::Relaxed);
-        }
-        Ok(())
-    }
-
-    pub async fn sample(&self, msg: MsgType, neighbors: usize) -> Result<(), CopycatError> {
+    pub async fn sample(&self, msg: Box<MsgType>, neighbors: usize) -> Result<(), CopycatError> {
         let sample = {
             let mut rng = rand::thread_rng();
             let mut samples = self.neighbors.iter().choose_multiple(&mut rng, neighbors);
@@ -197,7 +161,7 @@ impl PeerMessenger {
 
     async fn peer_receiver_thread(
         id: NodeId,
-        mut transport_hub: ClientStubRecvHalf<MsgType>,
+        mut transport_hub: ClientStubRecvHalf<Box<MsgType>>,
         rx_txn_send: mpsc::Sender<(NodeId, Vec<Arc<Txn>>)>,
         rx_blk_send: mpsc::Sender<(NodeId, Arc<Block>)>,
         rx_blk_dissem_send: mpsc::Sender<(NodeId, Vec<u8>)>,
@@ -220,7 +184,7 @@ impl PeerMessenger {
                         Ok(msg) => {
                             msgs_recv += 1;
                             let (src, content) = msg;
-                            match content {
+                            match *content {
                                 MsgType::NewTxn { txn_batch } => {
                                     if let Err(e) = rx_txn_send.send((src, txn_batch)).await {
                                         pf_error!(id; "rx_txn_send failed: {:?}", e)

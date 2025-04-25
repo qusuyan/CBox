@@ -98,9 +98,9 @@ impl Decision for ChainReplicationDecision {
                 self.peer_messenger
                     .send(
                         self.head,
-                        MsgType::ConsensusMsg {
+                        Box::new(MsgType::ConsensusMsg {
                             msg: bincode::serialize(&committed_msg)?,
-                        },
+                        }),
                     )
                     .await?;
             }

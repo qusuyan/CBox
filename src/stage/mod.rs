@@ -42,6 +42,7 @@ impl DelayPool {
         // }
     }
 
+    #[allow(dead_code)]
     fn get_current_delay(&self) -> f64 {
         self.delay.load(Ordering::Relaxed)
     }

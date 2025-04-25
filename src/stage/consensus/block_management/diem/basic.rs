@@ -230,11 +230,7 @@ impl DiemBlockManagement {
         let mut msg = vec![0u8; 32];
         blk_id.0.to_little_endian(&mut msg);
         self.peer_messenger
-            .delayed_send(
-                leader,
-                MsgType::BlockReq { msg },
-                Duration::from_secs_f64(self.delay.get_current_delay()),
-            )
+            .send(leader, Box::new(MsgType::BlockReq { msg }))
             .await
     }
 }
@@ -647,11 +643,7 @@ impl BlockManagement for DiemBlockManagement {
         pf_debug!(self.id; "sending block {} to {}", blk_id, peer);
 
         self.peer_messenger
-            .delayed_send(
-                peer,
-                MsgType::NewBlock { blk },
-                Duration::from_secs_f64(self.delay.get_current_delay()),
-            )
+            .send(peer, Box::new(MsgType::NewBlock { blk }))
             .await
     }
 

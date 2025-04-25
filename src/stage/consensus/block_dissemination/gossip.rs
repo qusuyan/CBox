@@ -39,7 +39,7 @@ impl BlockDissemination for GossipBlockDissemination {
         let (blk, _) = blocks.last().unwrap();
         self.peer_messenger
             .gossip(
-                MsgType::NewBlock { blk: blk.clone() },
+                Box::new(MsgType::NewBlock { blk: blk.clone() }),
                 HashSet::from([src, self.me]),
             )
             .await?;

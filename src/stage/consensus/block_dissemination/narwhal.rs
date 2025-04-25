@@ -166,7 +166,7 @@ impl BlockDissemination for NarwhalBlockDissemination {
         if self.me == sender {
             // I am the block builder, disseminate to neighbors
             self.peer_messenger
-                .broadcast(MsgType::NewBlock { blk: blk.clone() })
+                .broadcast(Box::new(MsgType::NewBlock { blk: blk.clone() }))
                 .await?;
             if self.round < round {
                 self.round = round;
@@ -187,9 +187,9 @@ impl BlockDissemination for NarwhalBlockDissemination {
                             signature: pending_signature.clone(),
                         };
                         self.peer_messenger
-                            .broadcast(MsgType::BlkDissemMsg {
+                            .broadcast(Box::new(MsgType::BlkDissemMsg {
                                 msg: bincode::serialize(&pending_vote_msg)?,
-                            })
+                            }))
                             .await?;
                         self.record_vote(
                             pending_sender,
@@ -230,9 +230,9 @@ impl BlockDissemination for NarwhalBlockDissemination {
             signature: signature.clone(),
         };
         self.peer_messenger
-            .broadcast(MsgType::BlkDissemMsg {
+            .broadcast(Box::new(MsgType::BlkDissemMsg {
                 msg: bincode::serialize(&vote_msg)?,
-            })
+            }))
             .await?;
         self.record_vote(sender, round, digest, self.me, signature)
             .await?;

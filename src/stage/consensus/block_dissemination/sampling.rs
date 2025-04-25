@@ -41,7 +41,10 @@ impl BlockDissemination for SamplingBlockDissemination {
         if src == self.me {
             let (blk, _) = blocks.last().unwrap();
             self.peer_messenger
-                .sample(MsgType::NewBlock { blk: blk.clone() }, self.neighbors)
+                .sample(
+                    Box::new(MsgType::NewBlock { blk: blk.clone() }),
+                    self.neighbors,
+                )
                 .await?;
         }
         self.tails.push_back((src, blocks));

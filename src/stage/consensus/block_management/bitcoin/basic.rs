@@ -504,12 +504,11 @@ impl BlockManagement for BitcoinBlockManagement {
             let mut buf = [0u8; 32];
             parent.0.to_little_endian(&mut buf);
             self.peer_messenger
-                .delayed_gossip(
-                    MsgType::BlockReq {
+                .gossip(
+                    Box::new(MsgType::BlockReq {
                         msg: Vec::from(buf),
-                    },
+                    }),
                     HashSet::from([self.id]),
-                    Duration::from_secs_f64(self.delay.get_current_delay()),
                 )
                 .await?;
             return Ok(vec![]);
@@ -781,19 +780,14 @@ impl BlockManagement for BitcoinBlockManagement {
         if let Some((blk, _, _)) = self.block_pool.get(&blk_id) {
             // return the req if the block is known
             self.peer_messenger
-                .delayed_send(
-                    peer,
-                    MsgType::NewBlock { blk: blk.clone() },
-                    Duration::from_secs_f64(self.delay.get_current_delay()),
-                )
+                .send(peer, Box::new(MsgType::NewBlock { blk: blk.clone() }))
                 .await?
         } else {
             // otherwise gossip to other neighbors
             self.peer_messenger
-                .delayed_gossip(
-                    MsgType::BlockReq { msg },
+                .gossip(
+                    Box::new(MsgType::BlockReq { msg }),
                     HashSet::from([self.id, peer]),
-                    Duration::from_secs_f64(self.delay.get_current_delay()),
                 )
                 .await?;
         }

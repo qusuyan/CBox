@@ -62,7 +62,7 @@ impl BlockDissemination for LinearBlockDissemination {
             Some(next) => {
                 let (blk, _) = blocks.last().unwrap();
                 self.peer_messenger
-                    .send(next, MsgType::NewBlock { blk: blk.clone() })
+                    .send(next, Box::new(MsgType::NewBlock { blk: blk.clone() }))
                     .await?
             }
             None => {}

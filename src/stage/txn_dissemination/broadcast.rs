@@ -30,9 +30,9 @@ impl TxnDissemination for BroadcastTxnDissemination {
             .collect();
         if txn_to_dissem.len() > 0 {
             self.transport
-                .broadcast(MsgType::NewTxn {
+                .broadcast(Box::new(MsgType::NewTxn {
                     txn_batch: txn_to_dissem,
-                })
+                }))
                 .await?;
         }
         Ok(())

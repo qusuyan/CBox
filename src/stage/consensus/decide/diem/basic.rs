@@ -329,7 +329,7 @@ impl Decision for DiemDecision {
                 VOTE_SENT_TIMES.insert((ctx.id, self.id), Instant::now());
                 let msg = bincode::serialize(&vote_msg)?;
                 self.peer_messenger
-                    .send(next_leader, MsgType::ConsensusMsg { msg })
+                    .send(next_leader, Box::new(MsgType::ConsensusMsg { msg }))
                     .await?;
             }
         }

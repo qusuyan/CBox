@@ -14,7 +14,6 @@ use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::Notify;
-use tokio::time::Duration;
 
 pub struct AvalancheVoteNoDecision {
     id: NodeId,
@@ -70,7 +69,6 @@ impl Decision for AvalancheVoteNoDecision {
         let serialized_msg = &bincode::serialize(&msg_content)?;
         let (signature, stime) = self.signature_scheme.sign(&self.sk, serialized_msg)?;
         self.delay.process_illusion(stime).await;
-        let delay = self.delay.get_current_delay();
         let vote_msg = VoteMsg {
             round: msg_content.0,
             votes: msg_content.1,
@@ -80,12 +78,11 @@ impl Decision for AvalancheVoteNoDecision {
         pf_debug!(self.id; "sending no votes for block {:?}", new_blk);
 
         self.peer_messenger
-            .delayed_send(
+            .send(
                 proposer,
-                MsgType::ConsensusMsg {
+                Box::new(MsgType::ConsensusMsg {
                     msg: bincode::serialize(&vote_msg)?,
-                },
-                Duration::from_secs_f64(delay),
+                }),
             )
             .await?;
 

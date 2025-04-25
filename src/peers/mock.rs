@@ -6,7 +6,6 @@ use crate::{CopycatError, NodeId};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::time::Duration;
 
 pub struct PeerMessenger {}
 
@@ -35,49 +34,26 @@ impl PeerMessenger {
         Self {}
     }
 
-    pub async fn send(&self, dest: NodeId, msg: MsgType) -> Result<(), CopycatError> {
+    pub async fn send(&self, dest: NodeId, msg: Box<MsgType>) -> Result<(), CopycatError> {
         println!("Sending msg to node {dest}: {msg:?}");
         Ok(())
     }
 
-    pub async fn delayed_send(
-        &self,
-        dest: NodeId,
-        msg: MsgType,
-        delay: Duration,
-    ) -> Result<(), CopycatError> {
-        println!(
-            "Sending msg to node {dest} with delay {}: {msg:?}",
-            delay.as_secs_f64()
-        );
-        Ok(())
-    }
-
-    pub async fn broadcast(&self, msg: MsgType) -> Result<(), CopycatError> {
+    pub async fn broadcast(&self, msg: Box<MsgType>) -> Result<(), CopycatError> {
         println!("Broadcasting msg: {msg:?}");
         Ok(())
     }
 
     pub async fn gossip(
         &self,
-        msg: MsgType,
+        msg: Box<MsgType>,
         _skipping: HashSet<NodeId>,
     ) -> Result<(), CopycatError> {
         println!("Gossiping msg: {msg:?}");
         Ok(())
     }
 
-    pub async fn delayed_gossip(
-        &self,
-        msg: MsgType,
-        _skipping: HashSet<NodeId>,
-        delay: Duration,
-    ) -> Result<(), CopycatError> {
-        println!("Gossping msg with delay {}: {msg:?}", delay.as_secs_f64());
-        Ok(())
-    }
-
-    pub async fn sample(&self, msg: MsgType, neighbors: usize) -> Result<(), CopycatError> {
+    pub async fn sample(&self, msg: Box<MsgType>, neighbors: usize) -> Result<(), CopycatError> {
         println!("Sending msg to {neighbors} neighbors: {msg:?}");
         Ok(())
     }

@@ -39,7 +39,7 @@ impl BlockDissemination for BroadcastBlockDissemination {
         if self.me == src {
             let (blk, _) = blocks.last().unwrap();
             self.peer_messenger
-                .broadcast(MsgType::NewBlock { blk: blk.clone() })
+                .broadcast(Box::new(MsgType::NewBlock { blk: blk.clone() }))
                 .await?;
         }
         self.tails.push_back((src, blocks));
