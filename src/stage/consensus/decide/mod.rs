@@ -14,7 +14,7 @@ use crate::get_report_timer;
 use crate::protocol::block::Block;
 use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::threshold_signature::ThresholdSignature;
-use crate::stage::{pass, DelayPool};
+use crate::stage::DelayPool;
 use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
@@ -229,11 +229,6 @@ pub async fn decision_thread(
                 }
             },
 
-            _ = pass(), if Instant::now() > insert_delay_time => {
-                tokio::task::yield_now().await;
-                insert_delay_time = Instant::now() + DECIDE_DELAY_INTERVAL;
-            }
-
             report_val = report_timer.changed() => {
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
@@ -253,6 +248,11 @@ pub async fn decision_thread(
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
+        }
+
+        if Instant::now() > insert_delay_time {
+            tokio::task::yield_now().await;
+            insert_delay_time = Instant::now() + DECIDE_DELAY_INTERVAL;
         }
     }
 }
