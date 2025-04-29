@@ -419,11 +419,6 @@ pub async fn block_management_thread(
                 }
             }
 
-            _ = pass(), if Instant::now() > yield_time => {
-                tokio::task::yield_now().await;
-                yield_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
-            }
-
             report_val = report_timer.changed() => {
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
@@ -447,6 +442,11 @@ pub async fn block_management_thread(
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
+        }
+
+        if Instant::now() > yield_time {
+            tokio::task::yield_now().await;
+            yield_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
         }
     }
 }

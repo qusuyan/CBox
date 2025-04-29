@@ -11,7 +11,7 @@ use crate::get_report_timer;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
 use crate::protocol::SignatureScheme;
-use crate::stage::{pass, DelayPool};
+use crate::stage::DelayPool;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 
@@ -249,11 +249,6 @@ pub async fn txn_validation_thread(
                 }
             }
 
-            _ = pass(), if Instant::now() > yield_time => {
-                tokio::task::yield_now().await;
-                yield_time = Instant::now() + TXN_BATCH_DELAY_INTERVAL;
-            }
-
             report_val = report_timer.changed() => {
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
@@ -275,6 +270,11 @@ pub async fn txn_validation_thread(
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
+        }
+
+        if Instant::now() > yield_time {
+            tokio::task::yield_now().await;
+            yield_time = Instant::now() + TXN_BATCH_DELAY_INTERVAL;
         }
     }
 }
