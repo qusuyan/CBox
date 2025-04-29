@@ -2,7 +2,7 @@ use super::{FlowGen, Stats};
 use crate::{mock_sign, ClientId, FlowGenId, LAT_SAMPLE_RATE};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{AvalancheTxn, Txn};
-use copycat::{CopycatError, NodeId, SignatureScheme};
+use copycat::{sleep_until, CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -156,9 +156,7 @@ impl FlowGen for AvalancheFlowGen {
 
         loop {
             if self.max_inflight == UNSET || self.get_inflight_count() < self.max_inflight {
-                if Instant::now() < self.next_batch_time {
-                    tokio::time::sleep_until(self.next_batch_time).await;
-                }
+                sleep_until(self.next_batch_time).await;
                 return Ok(());
             }
             self._notify.notified().await;
