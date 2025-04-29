@@ -82,7 +82,7 @@ pub async fn txn_validation_thread(
         } else if batch_len >= max_batch_size {
             return;
         }
-        tokio::time::sleep_until(timeout.unwrap()).await;
+        crate::sleep_until(timeout.unwrap()).await;
     }
 
     let mut report_timer = get_report_timer();

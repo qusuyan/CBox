@@ -13,6 +13,17 @@ lazy_static! {
             .map_err(|e| CopycatError(format!("{e:?}"))))
         .unwrap_or(60f64);
     pub static ref REPORT_TIME_INTERVAL: Duration = Duration::from_secs_f64(*REPORT_TIME);
+    pub static ref SPIN_WAIT_CUTOFF_MILLIS: u64 = std::env::var("SPIN_WAIT_CUTOFF_MILLIS")
+        .map(|s| match s.parse::<u64>() {
+            Ok(v) => Some(v),
+            Err(e) => {
+                log::warn!("Failed to parse SPIN_WAIT_CUTOFF_MILLIS: {e}, use default");
+                None
+            }
+        })
+        .unwrap_or(None)
+        .unwrap_or(5);
+    pub static ref SPIN_WAIT_CUTOFF: Duration = Duration::from_millis(*SPIN_WAIT_CUTOFF_MILLIS);
 }
 
 pub const COMMIT_DELAY_INTERVAL: Duration = Duration::from_millis(5);

@@ -281,7 +281,7 @@ impl BlockManagement for AvalancheBlockManagement {
             return Ok(());
         } else {
             // we got some txns in block, wait for timeout
-            tokio::time::sleep_until(self.next_propose_time).await;
+            crate::sleep_until(self.next_propose_time).await;
             return Ok(());
         }
     }

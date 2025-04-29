@@ -16,5 +16,5 @@ pub use protocol::transaction;
 pub use protocol::{ChainType, DissemPattern, SignatureScheme, ThresholdSignatureScheme};
 pub use utils::{
     fully_connected_topology, get_neighbors, get_report_timer, get_timer_interval, get_topology,
-    log, start_report_timer, CopycatError, NodeId,
+    log, sleep_until, start_report_timer, CopycatError, NodeId,
 };
