@@ -671,7 +671,7 @@ impl BlockManagement for BitcoinBlockManagement {
                             utxos_spent.insert(utxo);
                         } else {
                             // pf_debug!(self.id; "double spending - in utxo ({}): {}, in utxo_spent ({}): {}, in new_utxos ({}): {}", self.utxo.len(), self.utxo.contains(&utxo), utxos_spent.len(), utxos_spent.contains(&utxo), new_utxos.len(), new_utxos.contains(&utxo));
-                            tokio::time::sleep(Duration::from_secs_f64(total_exec_time)).await;
+                            self.delay.process_illusion(total_exec_time).await;
                             pf_debug!(self.id; "double spending detected with block {}", new_tail_ctx.id);
                             return Ok(vec![]);
                         }
@@ -687,7 +687,7 @@ impl BlockManagement for BitcoinBlockManagement {
                 {
                     total_exec_time += *script_runtime_sec;
                     if !script_succeed {
-                        tokio::time::sleep(Duration::from_secs_f64(total_exec_time)).await;
+                        self.delay.process_illusion(total_exec_time).await;
                         pf_debug!(self.id; "script exec failed with block {}", new_tail_ctx.id);
                         return Ok(vec![]);
                     }
@@ -756,7 +756,7 @@ impl BlockManagement for BitcoinBlockManagement {
         self.pending_txns
             .retain(|txn_hash| !txns_applied.contains(txn_hash));
 
-        tokio::time::sleep(Duration::from_secs_f64(total_exec_time)).await;
+        self.delay.process_illusion(total_exec_time).await;
         pf_debug!(self.id; "validation complete, execution takes {} secs", total_exec_time);
         Ok(new_chain)
     }
