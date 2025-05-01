@@ -410,7 +410,7 @@ fn main() {
                     let mem_available = sys.available_memory();
 
                     let rt_metrics = rt_handle.metrics();
-                    let active_tasks = rt_metrics.active_tasks_count();
+                    let active_tasks = rt_metrics.num_alive_tasks();
                     let avg_queue_depth = (0..rt_metrics.num_workers()).map(|id| rt_metrics.worker_local_queue_depth(id)).sum::<usize>() / rt_metrics.num_workers();
                     let avg_poll_count = (0..rt_metrics.num_workers()).map(|id| rt_metrics.worker_poll_count(id)).sum::<u64>() / rt_metrics.num_workers() as u64;
                     let avg_overflow_count = (0..rt_metrics.num_workers()).map(|id| rt_metrics.worker_overflow_count(id)).sum::<u64>() / rt_metrics.num_workers() as u64;
