@@ -10,9 +10,9 @@ pub struct FixedInflightBlkPacemaker {
 }
 
 impl FixedInflightBlkPacemaker {
-    pub fn new(max_inflight_blk: usize) -> Self {
+    pub fn new() -> Self {
         Self {
-            quota: max_inflight_blk,
+            quota: 0,
             _notify: Notify::new(),
         }
     }

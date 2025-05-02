@@ -43,11 +43,9 @@ fn get_pacemaker(
         ChainConfig::Dummy { .. } => Box::new(DummyPacemaker::new()),
         ChainConfig::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO: difficulty adjustment
         ChainConfig::Avalanche { config } => match config {
-            AvalancheConfig::Basic { config }
-            | AvalancheConfig::Blizzard { config }
-            | AvalancheConfig::NoCache { config } => {
-                Box::new(FixedInflightBlkPacemaker::new(config.max_inflight_blk))
-            }
+            AvalancheConfig::Basic { .. }
+            | AvalancheConfig::Blizzard { .. }
+            | AvalancheConfig::NoCache { .. } => Box::new(FixedInflightBlkPacemaker::new()),
             AvalancheConfig::VoteNo { .. } => Box::new(DummyPacemaker::new()),
         },
         ChainConfig::ChainReplication { .. } => Box::new(DummyPacemaker::new()),
