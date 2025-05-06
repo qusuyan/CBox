@@ -3,23 +3,14 @@
 import os, json, math
 import pandas as pd
 
-# exp_dir = "results/ChainReplication-DummyECDSA/"
-# configs = ["per-node-concurrency", "num-nodes"]
+exp_dir = "results/Aptos-Scale"
+configs = ["correct-config", "num-nodes"]
 
-# exp_dir = "results/ChainReplication-NoEncrypt/"
-# configs = ["per-node-concurrency", "num-nodes"]
-
-# exp_dir = "results/Btc-Scale"
-# configs = ["num-nodes"]
-
-# exp_dir = "results/Btc-Few-Ecore"
-# configs = ["num-nodes"]
-
-# exp_dir = "results/Bitcoin-AsymmCompute/"
-# configs = ["validator-config"]
+# exp_dir = "results/Aptos-vs-Diem"
+# configs = ["chain-type", "correct-config",  "num-nodes"]
 
 # exp_dir = "results/Avax-Scale/"
-# configs = ["crypto", "num-nodes"]
+# configs = ["correct-config", "crypto", "num-nodes"]
 
 # exp_dir = "results/Avax-BlkLen/"
 # configs = ["correct-config", "num-nodes"]
@@ -33,14 +24,23 @@ import pandas as pd
 # exp_dir = "results/Avax-Pref-Cache"
 # configs = ["correct-type", "num-faulty"]
 
-# exp_dir = "results/Diem-Scale/"
+# exp_dir = "results/Btc-Scale"
 # configs = ["num-nodes"]
 
-# exp_dir = "results/Aptos-Scale"
-# configs = ["num-nodes", "correct-config"]
+# exp_dir = "results/Btc-Few-Ecore"
+# configs = ["num-nodes"]
 
-exp_dir = "results/Aptos-vs-Diem"
-configs = ["chain-type", "correct-config",  "num-nodes"]
+# exp_dir = "results/Bitcoin-AsymmCompute/"
+# configs = ["validator-config"]
+
+# exp_dir = "results/ChainReplication-DummyECDSA/"
+# configs = ["per-node-concurrency", "num-nodes"]
+
+# exp_dir = "results/ChainReplication-NoEncrypt/"
+# configs = ["per-node-concurrency", "num-nodes"]
+
+# exp_dir = "results/Diem-Scale/"
+# configs = ["script-runtime", "num-nodes"]
 
 # exp_dir = "results/Crosschain-Scale"
 # configs = ["chain-type", "num-nodes"]

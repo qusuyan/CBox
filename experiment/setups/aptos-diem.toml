@@ -5,11 +5,7 @@ num_iterations = 3
 chain-type = "aptos"
 cluster-threads = 32
 conn-multiply = 1
-correct-config = [
-  "narwhal_blk_size=65536+diem_blk_len=16",
-  "narwhal_blk_size=262144+diem_blk_len=4",
-  "narwhal_blk_size=1048576+diem_blk_len=1",
-]
+correct-config = "narwhal_blk_size=1048576+diem_blk_len=1"
 correct-type = "Basic"
 disable-txn-dissem = true
 exp-prefix = "Aptos-vs-Diem/"

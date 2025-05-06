@@ -97,18 +97,18 @@ def parse_msg_delay(log_dir, line_ranges = {}):
     arrive_late = arrive_late_df[["late_count", "late_secs"]].sum()
     arrive_late_count = arrive_late["late_count"]
     arrive_late_secs = arrive_late["late_secs"]
-    arrive_late_avg = arrive_late_secs / arrive_late_count * 1000
+    arrive_late_avg = arrive_late_secs / arrive_late_count * 1000 if arrive_late_count > 0 else 0.0
 
     deliver_late = deliver_late_df[["late_count", "late_secs"]].sum()
     deliver_late_count = deliver_late["late_count"]
     deliver_late_secs = deliver_late["late_secs"]
-    deliver_late_avg = deliver_late_secs / deliver_late_count * 1000
+    deliver_late_avg = deliver_late_secs / deliver_late_count * 1000 if deliver_late_count > 0 else 0.0
 
     msgs_sent_total = sum(msgs_sent.values())
     msgs_recv_total = sum(msgs_recv.values())
 
-    arrive_late_chance = arrive_late_count / msgs_recv_total if msgs_recv_total > 0 else 0
-    deliver_late_chance = deliver_late_count / msgs_recv_total if msgs_recv_total > 0 else 0
+    arrive_late_chance = arrive_late_count / msgs_recv_total if msgs_recv_total > 0 else 0.0
+    deliver_late_chance = deliver_late_count / msgs_recv_total if msgs_recv_total > 0 else 0.0
 
     return {"msgs_sent": msgs_sent_total, "msgs_recv": msgs_recv_total, 
             "arrive_late_count": arrive_late_count, "arrive_late_chance": arrive_late_chance, "arrive_late_ms": arrive_late_avg,

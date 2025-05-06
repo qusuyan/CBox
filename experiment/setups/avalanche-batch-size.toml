@@ -2,26 +2,28 @@
 num_iterations = 3
 
 [parameters]
-chain-type = "avalanche"
-cluster-threads = 32
-conn-multiply = 1
-correct-config = ["blk_len=40+max_inflight_blk=2147483647+vote_timeout_secs=3600", "blk_len=20+max_inflight_blk=2147483647+vote_timeout_secs=3600"]
-correct-type = "Basic"
-crypto = "dummy-ecdsa"
-disable-txn-dissem = true
-exp-prefix = "Avax-BlkLen/"
-exp-time = 310
-frequency = 0
-mailbox-workers = 16
-max-inflight-txns = 4000
-network-bw = 12500000
-network-delay = 30
-nic-bw = 125000000
-num-accounts = 160
-num-clients = 10
-num-faulty = 0
-num-machines = 1
-num-nodes = [10, 15, 20, 25, 30]
-per-node-concurrency = 2
-topo-degree = 0
+chain-type = "avalanche" 
+cluster-threads = 64 # 96
+conn-multiply = 1 
+correct-config = ["blk_len=40+max_inflight_blk=2147483647", "blk_len=20+max_inflight_blk=2147483647"] 
+correct-type = "Basic" 
+crypto = "dummy-ecdsa" 
+disable-txn-dissem = true 
+exp-prefix = "Avax-BlkLen/" 
+exp-time = 191 
+frequency = 0 
+lat-sample-rate = 0.01 
+mailbox-workers = 20 
+max-inflight-txns = 4000 
+network-bw = 12500000 
+network-delay = 30 
+network-jitter = 10 
+nic-bw = 125000000 
+num-accounts = 160 
+num-clients = 10 
+num-faulty = 0 
+num-machines = 1 
+num-nodes = [20, 30, 40, 50, 60, 70, 80, 90, 100] 
+per-node-concurrency = 2 
+topo-degree = 0 
 txn-span = 0

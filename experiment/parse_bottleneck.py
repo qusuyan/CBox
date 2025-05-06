@@ -2,7 +2,6 @@
 
 import os, re, json
 from datetime import datetime
-from subprocess import check_output
 
 import pandas as pd
 
@@ -15,7 +14,8 @@ block_dissem_out_regex = "Cluster\d+ (.*) INFO *copycat::stage::consensus::block
 decide_out_regex = "Cluster\d+ (.*) INFO *copycat::stage::consensus::decide: \((\d+)\) In the last minute: blks_recv: \d+, txns_recv: \d+, blks_sent: \d+, txns_sent: (\d+)"
 commit_out_regex = "Cluster\d+ (.*) INFO *copycat::stage::commit: \((\d+)\) In the last minute: txns_recved: \d+, txns_committed: (\d+)"
 
-exp_dir = "results/Aptos-vs-Diem-old"
+exp_dir = "results/Aptos-Scale"
+metrics = ["correct-config", "num-nodes"]
 record_time = 70
 
 exp_names = os.listdir(exp_dir)
@@ -137,22 +137,37 @@ for exp_name in exp_names:
                         break   # reach ts limit
                     continue
 
-    # since commit stage is never the bottleneck
     txns = total_txns_sent
-    txn_validation = max(total_txn_valiation.values())
-    block_management = sum(total_block_management.values())
-    block_dissemination = max(total_block_dissemination.values())
-    decide = max(total_decide.values())
-    commit = max(total_commit.values())
     if config["chain-type"] == "aptos":
+        txn_validation = max(total_txn_valiation.values())
+        block_management = sum(total_block_management.values())
+        block_dissemination = max(total_block_dissemination.values())
+        decide = max(total_decide.values())
+        commit = max(total_commit.values())
         # since validators can propose repetitive txns
         scale_factor = commit / decide
         block_management *= scale_factor
         block_dissemination *= scale_factor
         decide *= scale_factor
-    txn_counts.append((config["chain-type"], config["correct-config"], config["num-nodes"], txns, txn_validation, block_management, block_dissemination, decide, commit))
+    elif config["chain-type"] == "avalanche":
+        txn_validation = max(total_txn_valiation.values())
+        block_management = max(total_block_management.values())
+        block_dissemination = max(total_block_dissemination.values())
+        decide = max(total_decide.values())
+        commit = max(total_commit.values())
+    elif config["chain-type"] == "bitcoin" or config["chain-type"] == "diem":
+        txn_validation = max(total_txn_valiation.values())
+        block_management = sum(total_block_management.values())
+        block_dissemination = max(total_block_dissemination.values())
+        decide = max(total_decide.values())
+        commit = max(total_commit.values())
+    else:
+        raise Exception("Unimplemented")
 
-df = pd.DataFrame(txn_counts, columns=["chain-type", "correct-config", "num-nodes", "txns-sent", "txn-validation", "block-management", "block-dissemination", "decide", "commit"])
-df = df.groupby(["chain-type", "correct-config", "num-nodes"]).mean().sort_values(["chain-type", "correct-config", "num-nodes"])
-df.to_csv("aptos_diem_bottleneck.csv")
+    record = [config[metric] for metric in metrics] + [txns, txn_validation, block_management, block_dissemination, decide, commit]
+    txn_counts.append(record)
+
+df = pd.DataFrame(txn_counts, columns=metrics + ["txns-sent", "txn-validation", "block-management", "block-dissemination", "decide", "commit"])
+df = df.groupby(metrics).mean().sort_values(metrics)
+df.to_csv(os.path.join(exp_dir, "bottleneck.csv"))
 print(df)

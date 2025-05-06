@@ -80,11 +80,11 @@ for exp_name in exp_names:
     with open(config_path, "r") as f:
         config = json.load(f)
     latency_breakdown = parse_diem_latency_breakdown(log_dir)
-    records.append((config["num-nodes"], latency_breakdown["build_time"], 
+    records.append((config["num-nodes"], config["script-runtime"], latency_breakdown["build_time"], 
                     latency_breakdown["propose_time"], latency_breakdown["validate_time"], 
                     latency_breakdown["vote_time"]))
 
-latencies = pd.DataFrame(records, columns=["num-nodes", "build_time", "propose_time", "validate_time", "vote_time"])
-latencies = latencies.groupby("num-nodes").mean()
+latencies = pd.DataFrame(records, columns=["num-nodes", "script-runtime", "build_time", "propose_time", "validate_time", "vote_time"])
+latencies = latencies.groupby(["script-runtime", "num-nodes"]).mean()
 latencies.to_csv(os.path.join(exp_dir, "diem_latency_breakdown.csv"))
 print(latencies)

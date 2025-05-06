@@ -10,6 +10,7 @@ home-runner = []
 install-perf = []
 install-rust = []
 setup-copycat = [["branch", "main"], ["buildtype", "release"]]
+setup-env = []
 setup-mailbox = [["branch", "main"]]
 
 [run-targets]
