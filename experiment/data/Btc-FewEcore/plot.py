@@ -69,3 +69,15 @@ cpu_ax.set_xticks(range(40, 170, 20))
 plt.subplots_adjust(left=0.08, right=0.92, top=0.93, bottom=0.115, wspace=0.24, hspace=0.13)
 # fig.tight_layout()
 fig.savefig("plot.pdf", format="pdf")
+
+# plot eCore utilization
+util_fig, (util_ax) = plt.subplots(1, 1, figsize=(3.33, 1.0))
+
+util_ax.plot(cbox_df["num-nodes"], cbox_df[("ecore_util", "mean")], 'o-', color=cbox_color)
+util_ax.set_xlabel('# Validators', labelpad=0)
+util_ax.set_ylabel('eCore', labelpad=2)
+util_ax.set_ylim(0, 0.32)
+util_ax.set_yticks([0.0, 0.1, 0.2, 0.3])
+
+plt.subplots_adjust(left=0.1, right=0.995, top=0.99, bottom=0.25, wspace=0, hspace=0)
+util_fig.savefig("ecore.pdf", format="pdf")
