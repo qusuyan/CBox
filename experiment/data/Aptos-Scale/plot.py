@@ -68,7 +68,7 @@ msg_delay_ax.set_zorder(5)
 msg_ax.set_zorder(10)
 msg_ax.patch.set_visible(False)
 msg_ax.set_ylabel('Msg Late (%)', labelpad=0)
-msg_ax.set_ylim((0, 12))
+msg_ax.set_ylim((0, 22))
 
 # plot cpu util
 cpu_ax.plot(aptos_1_tput_df["num-nodes"], aptos_1_tput_df[("avg_cpu", "mean")], 'o-', color=aptos_1_color, zorder=2)

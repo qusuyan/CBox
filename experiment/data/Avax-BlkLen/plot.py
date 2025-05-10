@@ -67,7 +67,7 @@ cpu_ax.set_ylabel('CPU (%)', labelpad=-4)
 cpu_ax.set_ylim((0, 100))
 
 cpu_ax.set_xlabel('# Validators', labelpad=0)
-cpu_ax.set_xticks(b40_df["num-nodes"])
+cpu_ax.set_xticks(range(20, 121, 20))
 
 
 plt.subplots_adjust(left=0.065, right=0.92, top=0.93, bottom=0.115, wspace=0.24, hspace=0.13)

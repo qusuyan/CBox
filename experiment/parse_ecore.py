@@ -8,7 +8,7 @@ import json
 meta_log = "META.log"
 vcore_regex = "copycat::node: \(([0-9]+)\) vCore utilization: ([0-9.]+)"
 
-def parse_vcore_util(log_dir, line_ranges = {}):
+def parse_ecore_util(log_dir, line_ranges = {}):
     log_files = os.listdir(log_dir)
 
     vcore_utils = []
@@ -59,5 +59,5 @@ def parse_vcore_util(log_dir, line_ranges = {}):
 
 if __name__ == "__main__":
     log_dir = sys.argv[1]
-    vcore_utils = parse_vcore_util(log_dir)
+    vcore_utils = parse_ecore_util(log_dir)
     print(json.dumps(vcore_utils, indent = 2))

@@ -41,7 +41,7 @@ tput_ax.bar(ecdsa_df["num-nodes"]-bar_width/2, ecdsa_df[("avg_tput", "mean")] / 
 tput_ax.bar(dummy_df["num-nodes"]+bar_width/2, dummy_df[("avg_tput", "mean")] / 1000, bar_width, color=dummy_color)
 # tput_ax.bar(dummy_pmaker_df["num-nodes"]+bar_width, dummy_pmaker_df[("avg_tput", "mean")] / 1000, bar_width, color=dummy_pmaker_color)
 tput_ax.set_ylabel('Tput (ktps.)', labelpad=-0.5)
-tput_ax.set_ylim((0, 15))
+tput_ax.set_ylim((0, 18))
 tput_ax.set_yticks(range(0, 20, 5))
 
 # plot sched delay
@@ -67,7 +67,7 @@ msg_delay_ax.set_zorder(5)
 msg_ax.set_zorder(10)
 msg_ax.patch.set_visible(False)
 msg_ax.set_ylabel('Msg Late (%)', labelpad=-0.2)
-msg_ax.set_ylim((0, 10))
+msg_ax.set_ylim((0, 1.2))
 
 msg_ax.legend(ncol=3, loc=(-0.75, 1))
 
@@ -79,7 +79,7 @@ cpu_ax.set_ylabel('CPU (%)', labelpad=-4)
 cpu_ax.set_ylim((0, 100))
 
 cpu_ax.set_xlabel('# Validators', labelpad=0)
-cpu_ax.set_xticks(ecdsa_df["num-nodes"])
+cpu_ax.set_xticks(range(20, 121, 20))
 
 plt.subplots_adjust(left=0.075, right=0.92, top=0.93, bottom=0.115, wspace=0.24, hspace=0.13)
 # fig.tight_layout()

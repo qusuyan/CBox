@@ -1,16 +1,16 @@
 [experiment]
-num_iterations = 1
+num_iterations = 3
 
 [parameters]
 chain-type = "avalanche"
-cluster-threads = 96
+cluster-threads = 64
 conn-multiply = 1
 correct-config = "blk_len=40+max_inflight_blk=2147483647"
 correct-type = "Basic"
 crypto = ["dummy-ecdsa", "dummy"]
 disable-txn-dissem = true
 exp-prefix = "Avax-Scale/"
-exp-time = 310
+exp-time = 101
 frequency = 0
 lat-sample-rate = 0.001
 mailbox-workers = 20
@@ -23,7 +23,7 @@ num-accounts = 160
 num-clients = 10
 num-faulty = 0
 num-machines = 1
-num-nodes = [20, 30, 40, 50, 60, 70, 80, 90, 100]
+num-nodes = [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150]
 per-node-concurrency = 2
 topo-degree = 0
 txn-span = 0

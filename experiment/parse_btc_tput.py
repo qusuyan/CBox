@@ -5,7 +5,7 @@ import json
 
 import pandas as pd
 from parse_blocks_gen import parse_total_blks_gen
-from parse_vcore import parse_vcore_util
+from parse_ecore import parse_ecore_util
 from get_log_lines import get_log_lines
 
 commit_depth = 6
@@ -43,7 +43,7 @@ for result_dir in result_dirs:
     log_dir = os.path.join("logs/", result_dir)
     log_lines = get_log_lines(log_dir, 0, actual_ts)
     blocks_generated = parse_total_blks_gen(log_dir)
-    ecore_util = parse_vcore_util(log_dir, log_lines)
+    ecore_util = parse_ecore_util(log_dir, log_lines)
 
     config_file = os.path.join(dir_path, "config.json")
     with open(config_file, "r") as f:

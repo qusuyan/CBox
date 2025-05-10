@@ -2,13 +2,14 @@
 
 import os, re, json
 from subprocess import check_output
+from parse_ecore import parse_ecore_util
 
 import pandas as pd
 
 meta_log = "META.log"
-reward_regex = "bitcoin::basic: \(([\d+])\) miner blk count: (.*)"
+reward_regex = r"bitcoin::basic: \(([\d+])\) miner blk count: (.*)"
 
-def parse_reward(log_dir, line_ranges = {}):
+def parse_reward(log_dir):
     log_files = os.listdir(log_dir)
 
     rewards = {}
@@ -43,7 +44,7 @@ def parse_reward(log_dir, line_ranges = {}):
     return means
 
 if __name__ == "__main__":
-    exp_dir = "results/Bitcoin-AsymmCompute/"
+    exp_dir = "results/Bitcoin-AsymmCompute-Tmp/"
     result_dirs = os.listdir(exp_dir)
 
     records = []
@@ -56,13 +57,17 @@ if __name__ == "__main__":
 
         log_dir = os.path.join("logs/", result_dir)
         rewards = parse_reward(log_dir)
-        validator_config = re.search("setups/bitcoin_asym_compute/validators(\d+).json", config["validator-config"])
+        validator_config = re.search(r"setups/bitcoin_asym_compute/validators(\d+).json", config["validator-config"])
         validator_0_ecores = int(validator_config.groups()[0])
-        records.append((validator_0_ecores, rewards.get(0, 0)))
+        ecores = parse_ecore_util(log_dir)
+        validator_0_ecore_util = ecores["per_node"]["0"]
+        validator_other_ecore_util = (sum(ecores["per_node"].values()) - validator_0_ecore_util) / (len(ecores["per_node"]) - 1)
+        records.append((validator_0_ecores, rewards.get(0, 0), validator_0_ecore_util, validator_other_ecore_util))
 
-    df = pd.DataFrame(records, columns=["validator_0_ecores", "rewards"])
+    df = pd.DataFrame(records, columns=["validator_0_ecores", "rewards", "validator_0_ecore_util", "validator_ecore_util"])
     df = df.groupby("validator_0_ecores").mean().reset_index(names="validator_0_ecores")
-    df["hash_power"] = df["validator_0_ecores"] / (df["validator_0_ecores"] + 39)
+    df["comp_power"] = df["validator_0_ecores"] / (df["validator_0_ecores"] + 39)
+    df["hash_power"] = (df["validator_0_ecores"] - df["validator_0_ecore_util"]) / (df["validator_0_ecores"]- df["validator_0_ecore_util"] + 39*(1-df["validator_ecore_util"]))
     df.to_csv(os.path.join(exp_dir, "rewards.csv"))
     print(df)
 

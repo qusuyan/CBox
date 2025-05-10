@@ -14,7 +14,7 @@ from msg_delay import parse_msg_delay
 from sched_stats import parse_sched_stats
 from get_log_lines import get_log_lines
 from gen_validator_config import gen_validator_configs
-from parse_vcore import parse_vcore_util
+from parse_ecore import parse_ecore_util
 
 ENGINE = "home-runner"
 SETUP_TIME = 10
@@ -237,7 +237,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     stats["sched_dur_ms"] = sched_stats["sched_dur_ms"]
     stats["poll_dur_ms"] = sched_stats["poll_dur_ms"]
 
-    ecore_utils = parse_vcore_util(log_dir, line_ranges=log_line_ranges)
+    ecore_utils = parse_ecore_util(log_dir, line_ranges=log_line_ranges)
     stats["ecore_util"] = ecore_utils["avg"]
 
     logger.print(
