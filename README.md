@@ -1,6 +1,6 @@
-# CBox
+# Chain-in-the-Box
 
-CBox is a blockchain performance emulation framework. 
+Chain-in-the-Box (CBox) is a blockchain performance emulation framework. 
 It aims to provide an easy way to understand the performance of a blockchain network at scale. 
 
 CBox makes two major contributions. 
