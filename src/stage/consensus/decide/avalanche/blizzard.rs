@@ -3,24 +3,23 @@ use crate::config::AvalancheBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
+use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::MsgType;
+use crate::stage::DelayPool;
 use crate::transaction::{AvalancheTxn, Txn};
 use crate::utils::time_queue::TimeQueue;
-use crate::{CopycatError, CryptoScheme, NodeId};
+use crate::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
-
-use atomic_float::AtomicF64;
 
 struct ConflictSet {
     pub has_conflicts: bool,
@@ -36,7 +35,6 @@ struct DagNode {
 
 pub struct BlizzardDecision {
     id: NodeId,
-    crypto_scheme: CryptoScheme,
     k: usize,
     vote_thresh: usize,
     beta1: u64,
@@ -56,8 +54,9 @@ pub struct BlizzardDecision {
     commit_queue: VecDeque<(u64, Vec<Hash>)>,
     _notify: Notify,
     // for p2p comm
+    signature_scheme: SignatureScheme,
     peer_messenger: Arc<PeerMessenger>,
-    neighbor_pks: HashMap<NodeId, PubKey>,
+    peer_pks: HashMap<NodeId, PubKey>,
     sk: PrivKey,
     // control loop
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
@@ -67,28 +66,29 @@ pub struct BlizzardDecision {
     commit_total: usize,
     commit_count: usize,
     txn_query_count: usize,
+    blk_query_answered: usize,
+    queries_succeeded: usize,
+    queries_failed: usize,
     // batch sleep time to reduce overhead
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
 }
 
 impl BlizzardDecision {
     pub fn new(
         id: NodeId,
-        crypto_scheme: CryptoScheme,
+        p2p_signature: P2PSignature,
         config: AvalancheBasicConfig,
         peer_messenger: Arc<PeerMessenger>,
         pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
-        delay: Arc<AtomicF64>,
+        delay: Arc<DelayPool>,
     ) -> Self {
-        // pk can be generated deterministically on demand
-        let (_, sk) = crypto_scheme.gen_key_pair(id.into());
+        let (signature_scheme, peer_pks, sk) = p2p_signature;
         let vote_thresh = (config.k as f64 * config.alpha).ceil() as usize;
         pf_info!(id; "vote threshold is {}", vote_thresh);
-        let vote_timeout = Duration::from_secs_f64(config.vote_timeout);
+        let vote_timeout = Duration::from_secs_f64(config.vote_timeout_secs);
 
         Self {
             id,
-            crypto_scheme,
             k: config.k,
             vote_thresh,
             beta1: config.beta1,
@@ -106,7 +106,8 @@ impl BlizzardDecision {
             commit_queue: VecDeque::new(),
             _notify: Notify::new(),
             peer_messenger,
-            neighbor_pks: HashMap::new(),
+            signature_scheme,
+            peer_pks,
             sk,
             pmaker_feedback_send,
             is_strongly_preferred_calls: 0,
@@ -114,6 +115,9 @@ impl BlizzardDecision {
             commit_total: 0,
             commit_count: 0,
             txn_query_count: 0,
+            blk_query_answered: 0,
+            queries_succeeded: 0,
+            queries_failed: 0,
             delay,
         }
     }
@@ -343,6 +347,7 @@ impl BlizzardDecision {
             if accept_votes[idx] >= self.vote_thresh {
                 // we gathered enough votes
                 pf_trace!(self.id; "looking at txn {} at block idx {}", txn_hash, idx);
+                self.queries_succeeded += 1;
                 // update the confidence and conflict set for all parents
                 let mut dedup = HashSet::new();
                 let mut commit_list = self.handle_votes_helper(&txn_hash, &mut dedup)?;
@@ -350,6 +355,9 @@ impl BlizzardDecision {
                     self.commit_count += 1;
                 }
                 txns_to_be_committed.append(&mut commit_list);
+            } else {
+                pf_trace!(self.id; "vote failed for txn {}", txn_hash);
+                self.queries_failed += 1;
             }
         }
 
@@ -384,6 +392,7 @@ impl Decision for BlizzardDecision {
                 proposer,
                 id,
                 depth,
+                ..
             } => {
                 assert!(depth == 0);
                 (proposer, id)
@@ -534,22 +543,22 @@ impl Decision for BlizzardDecision {
             self.record_votes(blk_id, self.id, votes).await?;
         } else {
             // otherwise, send votes to peer that queries the block
+            self.blk_query_answered += 1;
             let msg_content = (blk_id, votes);
             let serialized_msg = &bincode::serialize(&msg_content)?;
-            let (signature, stime) = self.crypto_scheme.sign(&self.sk, serialized_msg)?;
-            let delay = self.delay.fetch_add(stime, Ordering::Relaxed);
+            let (signature, stime) = self.signature_scheme.sign(&self.sk, serialized_msg)?;
+            self.delay.process_illusion(stime).await;
             let vote_msg = VoteMsg {
                 round: msg_content.0,
                 votes: msg_content.1,
                 signature,
             };
             self.peer_messenger
-                .delayed_send(
+                .send(
                     proposer,
-                    MsgType::ConsensusMsg {
+                    Box::new(MsgType::ConsensusMsg {
                         msg: bincode::serialize(&vote_msg)?,
-                    },
-                    Duration::from_secs_f64(delay + stime),
+                    }),
                 )
                 .await?;
         }
@@ -565,14 +574,16 @@ impl Decision for BlizzardDecision {
         Ok(())
     }
 
-    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
+    async fn next_to_commit(
+        &mut self,
+    ) -> Result<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)), CopycatError> {
         let (blk_id, txn_hashes) = self.commit_queue.pop_front().unwrap();
-        let txns: Vec<Arc<Txn>> = txn_hashes
+        let (txns, txn_ctxs): (Vec<_>, Vec<_>) = txn_hashes
             .into_iter()
-            .map(|hash| self.txn_pool.get(&hash).unwrap().0.clone())
-            .collect();
+            .map(|hash| self.txn_pool.get(&hash).unwrap().clone())
+            .unzip();
         pf_debug!(self.id; "committing {} txns", txns.len());
-        Ok((blk_id, txns))
+        Ok((blk_id, (txns, txn_ctxs)))
     }
 
     async fn timeout(&self) -> Result<(), CopycatError> {
@@ -598,18 +609,18 @@ impl Decision for BlizzardDecision {
             return Ok(());
         }
 
-        let peer_pk = self.neighbor_pks.entry(src).or_insert_with(|| {
-            let (pk, _) = self.crypto_scheme.gen_key_pair(src.into());
-            pk
-        });
+        let peer_pk = match self.peer_pks.get(&src) {
+            Some(pk) => pk,
+            None => return Ok(()), // ignore unknown peers
+        };
 
         let content = (msg.round, msg.votes);
         let serialized_content = bincode::serialize(&content)?;
         let (blk_id, votes) = content;
         let (valid, vtime) =
-            self.crypto_scheme
+            self.signature_scheme
                 .verify(&peer_pk, &serialized_content, &msg.signature)?;
-        self.delay.fetch_add(vtime, Ordering::Relaxed);
+        self.delay.process_illusion(vtime).await;
         if valid {
             self.record_votes(blk_id, src, votes).await?;
         }
@@ -618,6 +629,13 @@ impl Decision for BlizzardDecision {
     }
 
     fn report(&mut self) {
+        pf_info!(self.id; "In the last minute: blk_queries_answered: {}", self.blk_query_answered);
+        self.blk_query_answered = 0;
+
+        pf_info!(self.id; "In the last minute: queries_succeeded: {}, queries_failed: {}", self.queries_succeeded, self.queries_failed);
+        self.queries_succeeded = 0;
+        self.queries_failed = 0;
+
         pf_info!(self.id; "In the last minute: is_strongly_preferred_calls: {}, is_preferred_checks: {}", self.is_strongly_preferred_calls, self.is_preferred_checks);
         pf_info!(self.id; "working set size: txn_dag: {}, perference_cache: {}", self.txn_dag.len(), self.preference_cache.len());
         let avg_commit_len = if self.commit_count == 0 {
@@ -625,6 +643,7 @@ impl Decision for BlizzardDecision {
         } else {
             self.commit_total / self.commit_count
         };
+
         pf_info!(self.id; "In the last minute: txns_queried: {}, commit_count: {}, avg_commit_len: {}", self.txn_query_count, self.commit_count, avg_commit_len);
         self.is_strongly_preferred_calls = 0;
         self.is_preferred_checks = 0;

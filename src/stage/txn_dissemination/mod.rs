@@ -13,7 +13,7 @@ use crate::context::TxnCtx;
 use crate::peers::PeerMessenger;
 use crate::protocol::transaction::Txn;
 use crate::protocol::DissemPattern;
-use crate::stage::pass;
+use crate::stage::DelayPool;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 use crate::{get_report_timer, ChainConfig};
@@ -22,10 +22,7 @@ use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
-
-use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
+use tokio::time::Instant;
 
 #[async_trait]
 trait TxnDissemination: Send + Sync {
@@ -45,9 +42,10 @@ fn get_txn_dissemination(
     match config.get_txn_dissem() {
         DissemPattern::Broadcast => Box::new(BroadcastTxnDissemination::new(id, peer_messenger)),
         DissemPattern::Gossip => Box::new(GossipTxnDissemination::new(id, peer_messenger)),
-        DissemPattern::Sample { .. } => todo!(), // TODO: use gossip for now
+        DissemPattern::Sample { .. } => todo!(),
         DissemPattern::Passthrough => Box::new(PassthroughTxnDissemination::new()),
-        DissemPattern::Linear { .. } => todo!(), // TODO: use passthrough for now
+        DissemPattern::Linear { .. } => todo!(),
+        DissemPattern::Narwhal { .. } => unreachable!(),
     }
 }
 
@@ -65,7 +63,7 @@ pub async fn txn_dissemination_thread(
 
     const DISSEM_BATCH_SIZE: usize = 2000usize;
 
-    let delay = Arc::new(AtomicF64::new(0f64));
+    let _delay_pool = Arc::new(DelayPool::new());
     let mut insert_delay_time = Instant::now() + TXM_DISSEM_DELAY_INTERVAL;
 
     let txn_dissemination_stage = get_txn_dissemination(id, enabled, config, peer_messenger);
@@ -135,26 +133,6 @@ pub async fn txn_dissemination_thread(
 
             }
 
-            _ = pass(), if Instant::now() > insert_delay_time => {
-                // insert delay as appropriate
-                let sleep_time = delay.load(Ordering::Relaxed);
-                if sleep_time > 0.05 {
-                    // doing skipped compute cost
-                    let _permit = match core_group.acquire().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            continue;
-                        }
-                    };
-                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-                    delay.store(0f64, Ordering::Relaxed);
-                } else {
-                    tokio::task::yield_now().await;
-                }
-                insert_delay_time = Instant::now() + TXM_DISSEM_DELAY_INTERVAL;
-            }
-
             report_val = report_timer.changed() => {
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
@@ -167,6 +145,11 @@ pub async fn txn_dissemination_thread(
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
+        }
+
+        if Instant::now() > insert_delay_time {
+            tokio::task::yield_now().await;
+            insert_delay_time = Instant::now() + TXM_DISSEM_DELAY_INTERVAL;
         }
     }
 }

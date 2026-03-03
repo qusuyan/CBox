@@ -1,8 +1,8 @@
-mod dummy;
-use dummy::DummyBlockManagement;
-
+mod aptos;
 mod avalanche;
 mod bitcoin;
+mod diem;
+mod dummy;
 
 mod chain_replication;
 use chain_replication::ChainReplicationBlockManagement;
@@ -14,25 +14,26 @@ use crate::context::{BlkCtx, TxnCtx};
 use crate::get_report_timer;
 use crate::peers::PeerMessenger;
 use crate::protocol::block::Block;
+use crate::protocol::crypto::signature::P2PSignature;
+use crate::protocol::crypto::threshold_signature::ThresholdSignature;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
-use crate::protocol::CryptoScheme;
-use crate::stage::{pass, process_illusion};
+use crate::protocol::SignatureScheme;
+use crate::stage::{pass, DelayPool};
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 
 use async_trait::async_trait;
 
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 
 use dashmap::DashMap;
 
-use atomic_float::AtomicF64;
 use std::collections::HashSet;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+#[derive(Debug)]
 enum CurBlockState {
     Working,
     Full,
@@ -51,6 +52,7 @@ trait BlockManagement: Sync + Send {
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError>;
     async fn validate_block(
         &mut self,
+        src: NodeId,
         block: Arc<Block>,
         ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError>;
@@ -68,19 +70,34 @@ trait BlockManagement: Sync + Send {
 
 fn get_blk_creation(
     id: NodeId,
+    p2p_signature: P2PSignature,
+    threshold_signature: Arc<dyn ThresholdSignature>,
     config: ChainConfig,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
     core_group: Arc<VCoreGroup>,
     peer_messenger: Arc<PeerMessenger>,
 ) -> Box<dyn BlockManagement> {
     match config {
-        ChainConfig::Dummy { .. } => Box::new(DummyBlockManagement::new()),
+        ChainConfig::Dummy { .. } => Box::new(dummy::DummyBlockManagement::new()),
         ChainConfig::Bitcoin { config } => {
             bitcoin::new(id, config, delay, core_group, peer_messenger)
         }
-        ChainConfig::Avalanche { config } => avalanche::new(id, config, peer_messenger),
+        ChainConfig::Avalanche { config } => {
+            avalanche::new(id, p2p_signature, config, peer_messenger, delay)
+        }
         ChainConfig::ChainReplication { config } => {
             Box::new(ChainReplicationBlockManagement::new(id, config))
+        }
+        ChainConfig::Diem { config } => diem::new(
+            id,
+            p2p_signature,
+            threshold_signature,
+            config,
+            delay,
+            peer_messenger,
+        ),
+        ChainConfig::Aptos { config } => {
+            aptos::new(id, p2p_signature, threshold_signature, config, delay)
         }
     }
 }
@@ -88,7 +105,9 @@ fn get_blk_creation(
 pub async fn block_management_thread(
     id: NodeId,
     config: ChainConfig,
-    crypto_scheme: CryptoScheme,
+    txn_scheme: SignatureScheme,
+    p2p_signature: P2PSignature,
+    threshold_signature: Arc<dyn ThresholdSignature>,
     mut peer_blk_recv: mpsc::Receiver<(NodeId, Arc<Block>)>,
     mut peer_blk_req_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     // mut peer_blk_resp_recv: mpsc::Receiver<(NodeId, (Hash, Arc<Block>))>,
@@ -102,11 +121,13 @@ pub async fn block_management_thread(
 ) {
     pf_info!(id; "block management stage starting...");
 
-    let delay = Arc::new(AtomicF64::new(0f64));
-    let mut insert_delay_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
+    let delay = Arc::new(DelayPool::new());
+    let mut yield_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
 
     let mut block_management_stage = get_blk_creation(
         id,
+        p2p_signature,
+        threshold_signature,
         config,
         delay.clone(),
         core_group.clone(),
@@ -202,7 +223,7 @@ pub async fn block_management_thread(
 
                 drop(_permit);
 
-                pf_debug!(id; "proposing new block {:?}", new_blk);
+                pf_debug!(id; "proposing new block ({}): {:?}", new_blk_ctx.id, new_blk);
                 blk_state = CurBlockState::Working;
                 self_blks_sent += 1;
                 self_txns_sent += new_blk.txns.len();
@@ -230,18 +251,17 @@ pub async fn block_management_thread(
                 };
 
                 pf_debug!(id; "got from {} new block {:?}, computing its context...", src, new_block);
-                match new_block.header.compute_id() {
-                    Ok(blk_id) => {
-                        if blks_seen.contains(&blk_id) {
-                            continue;
-                        } else {
-                            blks_seen.insert(blk_id);
-                        }
-                    }
+                let blk_ctx = match BlkCtx::from_blk(&new_block) {
+                    Ok(ctx) => ctx,
                     Err(e) => {
-                        pf_error!(id; "failed to compute blk_)id: {:?}", e);
+                        pf_error!(id; "failed to compute blk_context: {:?}", e);
                         continue;
                     }
+                };
+                if blks_seen.contains(&blk_ctx.id) {
+                    continue;
+                } else {
+                    blks_seen.insert(blk_ctx.id);
                 }
 
                 let blk_sender = pending_blk_sender.clone();
@@ -259,14 +279,6 @@ pub async fn block_management_thread(
                         }
                     };
 
-                    let blk_ctx = match BlkCtx::from_blk(&new_block) {
-                        Ok(ctx) => ctx,
-                        Err(e) => {
-                            pf_error!(id; "failed to compute blk_context: {:?}", e);
-                            return;
-                        }
-                    };
-
                     let mut verification_time = 0f64;
                     let mut blk_valid = true;
                     for idx in 0..new_block.txns.len() {
@@ -276,7 +288,7 @@ pub async fn block_management_thread(
                         let valid = if let Some(r) = txns_validated.get(&txn_ctx.id) {
                             *r.value()
                         } else {
-                            let (valid, vtime) = match txn.validate(crypto_scheme) {
+                            let (valid, vtime) = match txn.validate(txn_scheme) {
                                 Ok(validity) => validity,
                                 Err(e) => {
                                     pf_error!(id; "txn validation failed: {:?}", e);
@@ -295,7 +307,7 @@ pub async fn block_management_thread(
                         }
                     }
 
-                    process_illusion(Duration::from_secs_f64(verification_time), &delay_pool).await;
+                    delay_pool.process_illusion(verification_time).await;
                     drop(_permit);
 
                     if !blk_valid {
@@ -329,7 +341,7 @@ pub async fn block_management_thread(
                 peer_blks_recv += 1;
                 peer_txns_recv += peer_blk.txns.len();
                 pf_debug!(id; "Validating block ({:?}, {:?})", peer_blk, peer_blk_ctx);
-                let new_tail = match block_management_stage.validate_block(peer_blk, peer_blk_ctx).await {
+                let new_tail = match block_management_stage.validate_block(src, peer_blk.clone(), peer_blk_ctx.clone()).await {
                     Ok(new_tail) => new_tail,
                     Err(e) => {
                         pf_error!(id; "failed to validate block: {:?}", e);
@@ -339,6 +351,7 @@ pub async fn block_management_thread(
 
                 if new_tail.is_empty() {
                     // don't need to change anything
+                    pf_debug!(id; "block {} is invalid {:?}", peer_blk_ctx.id, peer_blk);
                     continue;
                 }
 
@@ -406,26 +419,6 @@ pub async fn block_management_thread(
                 }
             }
 
-            _ = pass(), if Instant::now() > insert_delay_time => {
-                // insert delay as appropriate
-                let sleep_time = delay.load(Ordering::Relaxed);
-                if sleep_time > 0.05 {
-                    // doing skipped compute cost
-                    let _permit = match core_group.acquire().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            continue;
-                        }
-                    };
-                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-                    delay.store(0f64, Ordering::Relaxed);
-                } else {
-                    tokio::task::yield_now().await;
-                }
-                insert_delay_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
-            }
-
             report_val = report_timer.changed() => {
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
@@ -449,6 +442,11 @@ pub async fn block_management_thread(
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
+        }
+
+        if Instant::now() > yield_time {
+            tokio::task::yield_now().await;
+            yield_time = Instant::now() + BLK_MNG_DELAY_INTERVAL;
         }
     }
 }

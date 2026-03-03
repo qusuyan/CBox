@@ -1,30 +1,30 @@
 use super::Pacemaker;
-use crate::utils::CopycatError;
-use crate::NodeId;
+use crate::{CopycatError, NodeId};
 
 use async_trait::async_trait;
 use tokio::sync::Notify;
 
-pub struct FixedInflightBlkPaceMaker {
+pub struct FixedInflightBlkPacemaker {
     quota: usize,
     _notify: Notify,
 }
 
-impl FixedInflightBlkPaceMaker {
-    pub fn new(max_inflight_blk: usize) -> Self {
+impl FixedInflightBlkPacemaker {
+    pub fn new() -> Self {
         Self {
-            quota: max_inflight_blk,
+            quota: 0,
             _notify: Notify::new(),
         }
     }
 }
 
 #[async_trait]
-impl Pacemaker for FixedInflightBlkPaceMaker {
-    async fn wait_to_propose(&self) {
+impl Pacemaker for FixedInflightBlkPacemaker {
+    async fn wait_to_propose(&self) -> Result<(), CopycatError> {
         if self.quota == 0 {
             self._notify.notified().await;
         }
+        Ok(())
     }
 
     async fn get_propose_msg(&mut self) -> Result<Vec<u8>, CopycatError> {

@@ -14,6 +14,7 @@ from msg_delay import parse_msg_delay
 from sched_stats import parse_sched_stats
 from get_log_lines import get_log_lines
 from gen_validator_config import gen_validator_configs
+from parse_ecore import parse_ecore_util
 
 ENGINE = "home-runner"
 SETUP_TIME = 10
@@ -64,10 +65,13 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     
     nodes = []
 
-    addrs = exp_machines.get_addrs()
+    internal_addrs = exp_machines.get_internal_addrs()
+    public_addrs = exp_machines.get_addrs()
+    addrs = list(enumerate(zip(public_addrs, internal_addrs)))
+    print(addrs)
     if params["machine-config"] == "":
         machine_config = {}
-        for (idx, addr) in enumerate(addrs):
+        for (idx, (_, addr)) in addrs:
             base = idx << 12
             curr_machine_num_nodes = num_nodes_per_machine + (1 if num_nodes_remainder > idx else 0)
             node_list = [base + id for id in range(curr_machine_num_nodes)]
@@ -89,8 +93,11 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     if params["network-config"] == "":
         network_config = {
             "default_delay_millis": params["network-delay"],
+            "default_jitter_millis": params["network-jitter"],
             "default_bandwidth": params["network-bw"],
-            "pipes": []
+            "default_nic_bandwidth": params["nic-bw"],
+            "pipes": [],
+            "nics": []
         }
         network_config_file = "bench_network.json"
         with open(network_config_file, "w") as f:
@@ -120,7 +127,7 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     else:
         validator_config_file = params["validator-config"]
 
-    for addr in addrs: 
+    for (_, (addr, _)) in addrs: 
         cluster.copy_to(addr, machine_config_file, f'{cluster.workdir}/bench_machines.json')
         cluster.copy_to(addr, network_config_file, f'{cluster.workdir}/bench_network.json')
         cluster.copy_to(addr, topo_config_file, f'{cluster.workdir}/bench_topo.json')
@@ -136,9 +143,14 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     clients_remainder = params["num-clients"] % params["num-machines"]
 
     if params["single-process-cluster"]:
+        txn_crypto = params["txn-crypto"] if params["txn-crypto"] is not None else params["crypto"]
+        p2p_crypto = params["p2p-crypto"] if params["p2p-crypto"] is not None else params["crypto"]
+
         run_args = [params["build-type"], "@POS", params["cluster-threads"], params["mailbox-workers"], params["chain-type"], 
-                    params["crypto"], params["conn-multiply"], SETUP_TIME, clients_per_machine, clients_remainder, num_accounts, 
-                    max_inflight, frequency, params["conflict_rate"], params["txn-span"], params["disable-txn-dissem"]]
+                    txn_crypto, p2p_crypto, params["threshold-crypto"], params["conn-multiply"], SETUP_TIME, 
+                    clients_per_machine, clients_remainder, num_accounts, max_inflight, frequency, params["conflict_rate"], 
+                    params["txn-span"], params["disable-txn-dissem"], params["mailbox-threshold"], params["lat-sample-rate"], 
+                    params["script-size"], params["script-runtime"]]
         cluster_task = exp_machines.run_background(config, "cluster", args=run_args, engine=ENGINE, verbose=verbose, log_dir=exp.log_dir)
         tasks.append(cluster_task)
     else: 
@@ -170,8 +182,9 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
 
     # collect stats
     files = []
-    for (machine_id, machine) in machine_config.items():
-        addr = machine["addr"].split(":")[0]
+    # for (machine_id, machine) in machine_config.items():
+    for (machine_id, (addr, _)) in addrs:
+        # addr = machine["addr"].split(":")[0]
         if params["single-process-cluster"]:
             stats_file = f"copycat_cluster_{machine_id}.csv"
             lat_file = f"copycat_cluster_{machine_id}_lat.csv"
@@ -183,14 +196,14 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
                 files.append((addr, (stats_file, lat_file)))
     print(files)
 
-    stats = { "peak_tput": 0 }
-    cumulative = {"tput": 0, "cpu_util": 0}
+    stats = { "peak_tput": 0.0 }
+    cumulative = {"tput": 0.0, "cpu_util": 0.0}
     start_rt = None
     end_rt = None
     for (addr, (stats_file, lat_file)) in files:
         cluster.copy_from(addr, f"/tmp/{stats_file}", f"./results/{exp_name}/{stats_file}")
         cluster.copy_from(addr, f"/tmp/{lat_file}", f"./results/{exp_name}/{lat_file}")
-        df = pd.read_csv(f"./results/{exp_name}/{stats_file}")
+        df = pd.read_csv(f"./results/{exp_name}/{stats_file}", dtype=float)
         lat = pd.read_csv(f"./results/{exp_name}/{lat_file}")
         first_commit = df["Throughput (txn/s)"].ne(0).idxmax()
         last_record = (df["Available Memory"] > 3e8).idxmin()  # 300 MB
@@ -224,6 +237,9 @@ def benchmark(params: dict[str, any], collect_statistics: bool,
     stats["sched_dur_ms"] = sched_stats["sched_dur_ms"]
     stats["poll_dur_ms"] = sched_stats["poll_dur_ms"]
 
+    ecore_utils = parse_ecore_util(log_dir, line_ranges=log_line_ranges)
+    stats["ecore_util"] = ecore_utils["avg"]
+
     logger.print(
 f'''
 msg delay stats:
@@ -248,7 +264,9 @@ if __name__ == "__main__":
         "mailbox-threads": 8,
         "cluster-threads": 40,
         "network-delay": 30, # in millis
-        "network-bw": 100000000, # in B/s
+        "network-jitter": 10, # in millis
+        "network-bw": 12500000, # 100 Mbps = 12.5 MB/s
+        "nic-bw": 125000000, # 1 Gbps
         "chain-type": "bitcoin",
         "exp-time": 300, # in s
         "num-accounts": 10000,
@@ -265,6 +283,9 @@ if __name__ == "__main__":
         "topo-skewness": 0.0, # uniform
         "disable-txn-dissem": False,
         "crypto": "dummy",
+        "txn-crypto": None,
+        "p2p-crypto": None,
+        "threshold-crypto": "dummy",
         "single-process-cluster": True,
         "conn-multiply": 1,
         "per-node-concurrency": 2,
@@ -274,6 +295,10 @@ if __name__ == "__main__":
         "topo-config": "",
         "validator-config": "",
         "exp-prefix": "",
+        "script-size": "",
+        "script-runtime": "",
+        "mailbox-threshold": 10,
+        "lat-sample-rate": 1    # collect latency for all txns
     }
 
     benchmark_main(DEFAULT_PARAMS, benchmark, cooldown_time=10)

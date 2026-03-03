@@ -1,8 +1,8 @@
 use super::{FlowGen, Stats};
-use crate::{ClientId, FlowGenId};
+use crate::{mock_sign, ClientId, FlowGenId, LAT_SAMPLE_RATE};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{AvalancheTxn, Txn};
-use copycat::{CopycatError, CryptoScheme, NodeId};
+use copycat::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -26,8 +26,10 @@ pub struct AvalancheFlowGen {
     batch_frequency: usize,
     batch_size: usize,
     conflict_rate: f64,
+    script_size: usize,
+    _script_runtime_sec: f64, // TODO
     next_batch_time: Instant,
-    crypto: CryptoScheme,
+    crypto: SignatureScheme,
     client_list: Vec<ClientId>,
     utxos: HashMap<ClientId, Vec<(usize, Hash, u64)>>, // (utxo_owner_idx, txn_hash, utxo_value)
     accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
@@ -50,10 +52,12 @@ impl AvalancheFlowGen {
         id: FlowGenId,
         client_list: Vec<ClientId>,
         num_accounts: usize,
+        script_size: Option<usize>,
+        script_runtime_sec: Option<f64>,
         max_inflight: usize,
         frequency: usize,
         conflict_rate: f64,
-        crypto: CryptoScheme,
+        crypto: SignatureScheme,
     ) -> Self {
         let accounts_per_node = if client_list.len() == 0 {
             0
@@ -92,6 +96,8 @@ impl AvalancheFlowGen {
             batch_frequency,
             batch_size,
             conflict_rate,
+            script_size: script_size.unwrap_or(0),
+            _script_runtime_sec: script_runtime_sec.unwrap_or(0f64),
             next_batch_time: Instant::now(),
             crypto,
             client_list,
@@ -155,7 +161,7 @@ impl FlowGen for AvalancheFlowGen {
                 }
                 return Ok(());
             }
-            tokio::task::yield_now().await;
+            self._notify.notified().await;
         }
     }
 
@@ -184,8 +190,7 @@ impl FlowGen for AvalancheFlowGen {
                 assert!(accounts.len() > 1);
 
                 let in_utxo = vec![in_utxo_raw];
-                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-                let (sender_signature, _) = self.crypto.sign(&sender_sk, &serialized_in_utxo)?;
+                let sender_signature = mock_sign(self.crypto, &sender_sk, &in_utxo)?;
                 let out_utxo = std::cmp::min(in_utxo_amount, 10);
                 let remainder = in_utxo_amount - out_utxo;
                 let mut recver_idx = rand::random::<usize>() % (accounts.len() - 1);
@@ -201,6 +206,7 @@ impl FlowGen for AvalancheFlowGen {
                         out_utxo,
                         remainder,
                         sender_signature,
+                        payload_size: self.script_size,
                     },
                 });
 
@@ -252,8 +258,7 @@ impl FlowGen for AvalancheFlowGen {
                 let (sender_pk, sender_sk) = &accounts[sender_idx];
 
                 let in_utxo = vec![in_txn_hash];
-                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-                let (sender_signature, _) = self.crypto.sign(&sender_sk, &serialized_in_utxo)?;
+                let sender_signature = mock_sign(self.crypto, &sender_sk, &in_utxo)?;
 
                 let mut recver1_idx = rand::random::<usize>() % (accounts.len() - 1);
                 if recver1_idx >= sender_idx {
@@ -268,6 +273,7 @@ impl FlowGen for AvalancheFlowGen {
                         out_utxo: value,
                         remainder: 0,
                         sender_signature: sender_signature.clone(),
+                        payload_size: self.script_size,
                     },
                 });
                 let base_txn1_hash = txn1.compute_id()?;
@@ -288,6 +294,7 @@ impl FlowGen for AvalancheFlowGen {
                         out_utxo: value,
                         remainder: 0,
                         sender_signature,
+                        payload_size: self.script_size,
                     },
                 });
                 let base_txn2_hash = txn2.compute_id()?;
@@ -319,9 +326,7 @@ impl FlowGen for AvalancheFlowGen {
                     let (recver1_pk, _) = &accounts[recver1_idx];
 
                     let in_utxo1 = vec![txn1_hash];
-                    let serialized_in_utxo1 = bincode::serialize(&in_utxo1)?;
-                    let (sender_signature1, _) =
-                        self.crypto.sign(&sender1_sk, &serialized_in_utxo1)?;
+                    let sender_signature1 = mock_sign(self.crypto, &sender1_sk, &in_utxo1)?;
                     let txn1 = Arc::new(Txn::Avalanche {
                         txn: AvalancheTxn::Send {
                             sender: sender1_pk.clone(),
@@ -330,6 +335,7 @@ impl FlowGen for AvalancheFlowGen {
                             out_utxo: value,
                             remainder: 0,
                             sender_signature: sender_signature1,
+                            payload_size: self.script_size,
                         },
                     });
                     txn1_hash = txn1.compute_id()?;
@@ -343,9 +349,7 @@ impl FlowGen for AvalancheFlowGen {
                     let (recver2_pk, _) = &accounts[recver2_idx];
 
                     let in_utxo2 = vec![txn2_hash];
-                    let serialized_in_utxo2 = bincode::serialize(&in_utxo2)?;
-                    let (sender_signature2, _) =
-                        self.crypto.sign(&sender2_sk, &serialized_in_utxo2)?;
+                    let sender_signature2 = mock_sign(self.crypto, &sender2_sk, &in_utxo2)?;
                     let txn2 = Arc::new(Txn::Avalanche {
                         txn: AvalancheTxn::Send {
                             sender: sender2_pk.clone(),
@@ -354,6 +358,7 @@ impl FlowGen for AvalancheFlowGen {
                             out_utxo: value,
                             remainder: 0,
                             sender_signature: sender_signature2,
+                            payload_size: self.script_size,
                         },
                     });
                     txn2_hash = txn2.compute_id()?;
@@ -413,13 +418,16 @@ impl FlowGen for AvalancheFlowGen {
         chain_info.num_blks += 1;
         chain_info.txn_count += txns.len() as u64;
 
+        let mut rng = rand::thread_rng();
         for txn in txns.iter() {
             let hash = txn.compute_id()?;
 
             // update commit latency
             if let Some(time) = self.in_flight.remove(&hash) {
-                let commit_latency = Instant::now() - time;
-                self.latencies.push(commit_latency.as_secs_f64());
+                if rng.gen::<f64>() < *LAT_SAMPLE_RATE {
+                    let commit_latency = Instant::now() - time;
+                    self.latencies.push(commit_latency.as_secs_f64());
+                }
             };
 
             // check for conflicts
@@ -461,7 +469,8 @@ impl FlowGen for AvalancheFlowGen {
             self.inflight_snapshot = inflight_snapshot;
         }
 
-        let latencies = std::mem::replace(&mut self.latencies, vec![]);
+        let num_latencies = self.latencies.len();
+        let latencies = std::mem::replace(&mut self.latencies, Vec::with_capacity(num_latencies));
 
         Stats {
             latencies,

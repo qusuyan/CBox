@@ -6,9 +6,9 @@ chain-type = "avalanche"
 cluster-threads = 32
 conn-multiply = 1
 correct-config = [
-  "blk_len=40+max_inflight_blk=40",
-  "blk_len=40+max_inflight_blk=2147483647",
-  "blk_len=40+max_inflight_blk=2147483647+vote_timeout=3600",
+  # "blk_len=40+max_inflight_blk=40",
+  # "blk_len=40+max_inflight_blk=2147483647",
+  "blk_len=40+max_inflight_blk=2147483647+vote_timeout_secs=3600",
 ]
 correct-type = "Basic"
 crypto = "dummy-ecdsa"
@@ -18,7 +18,9 @@ exp-time = 310
 frequency = 6000
 mailbox-workers = 16
 max-inflight-txns = 0
+network-bw = 12500000
 network-delay = 30
+nic-bw = 125000000
 num-accounts = 160
 num-clients = 10
 num-faulty = 0

@@ -1,11 +1,14 @@
 mod dummy;
 use dummy::DummyCommit;
-use tokio_metrics::TaskMonitor;
 
-use crate::config::ChainConfig;
+mod execute;
+use execute::ExecuteCommit;
+
+use crate::config::{AptosConfig, ChainConfig};
 use crate::consts::COMMIT_DELAY_INTERVAL;
+use crate::context::TxnCtx;
 use crate::protocol::transaction::Txn;
-use crate::stage::pass;
+use crate::stage::DelayPool;
 use crate::vcores::VCoreGroup;
 use crate::{get_report_timer, CopycatError, NodeId};
 
@@ -13,40 +16,54 @@ use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
-
-use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
+use tokio::time::Instant;
+use tokio_metrics::TaskMonitor;
 
 #[async_trait]
 trait Commit: Sync + Send {
-    async fn commit(&self, block: &Vec<Arc<Txn>>) -> Result<(), CopycatError>;
+    async fn commit(
+        &mut self,
+        block: Vec<Arc<Txn>>,
+        ctx: Vec<Arc<TxnCtx>>,
+    ) -> Result<Vec<Arc<Txn>>, CopycatError>;
 }
 
-fn get_commit(_id: NodeId, config: ChainConfig) -> Box<dyn Commit> {
+fn get_commit(id: NodeId, config: ChainConfig, delay: Arc<DelayPool>) -> Box<dyn Commit> {
     match config {
         ChainConfig::Dummy { .. } => Box::new(DummyCommit::new()),
         ChainConfig::Bitcoin { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::Avalanche { .. } => Box::new(DummyCommit::new()), // TODO:
         ChainConfig::ChainReplication { .. } => Box::new(DummyCommit::new()), // TODO:
+        ChainConfig::Diem { .. } => Box::new(DummyCommit::new()),    // TODO:
+        ChainConfig::Aptos { config } => match config {
+            AptosConfig::Basic { config } => {
+                if config.commit {
+                    Box::new(ExecuteCommit::new(id, delay))
+                } else {
+                    Box::new(DummyCommit::new())
+                }
+            }
+        },
     }
 }
 
 pub async fn commit_thread(
     id: NodeId,
     config: ChainConfig,
-    mut commit_recv: mpsc::Receiver<(u64, Vec<Arc<Txn>>)>,
-    executed_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
+    mut commit_recv: mpsc::Receiver<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>))>,
+    executed_send: mpsc::Sender<(NodeId, (u64, Vec<Arc<Txn>>))>,
     core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "commit stage starting...");
 
-    let delay = Arc::new(AtomicF64::new(0f64));
+    let delay = Arc::new(DelayPool::new());
     let mut insert_delay_time = Instant::now() + COMMIT_DELAY_INTERVAL;
 
-    let commit_stage = get_commit(id, config);
+    let mut commit_stage = get_commit(id, config, delay);
 
+    let mut txns_recved = 0usize;
+    let mut txns_committed = 0usize;
     let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();
 
@@ -62,7 +79,7 @@ pub async fn commit_thread(
                     }
                 };
 
-                let (height, txn_batch) = match new_batch {
+                let (height, (txn_batch, txn_batch_ctx)) = match new_batch {
                     Some(blk) => blk,
                     None => {
                         pf_error!(id; "commit pipe closed unexpectedly");
@@ -70,45 +87,34 @@ pub async fn commit_thread(
                     }
                 };
 
-                pf_debug!(id; "got new txn batch ({})", txn_batch.len());
+                pf_debug!(id; "got new txn batch at height {} ({} txns)", height, txn_batch.len());
 
-                if let Err(e) = commit_stage.commit(&txn_batch).await {
-                    pf_error!(id; "failed to commit: {:?}", e);
-                    continue;
-                }
+                txns_recved += txn_batch.len();
+                let correct_batch = match commit_stage.commit(txn_batch, txn_batch_ctx).await {
+                    Ok(batch) => batch,
+                    Err(e) => {
+                        pf_error!(id; "failed to commit: {:?}", e);
+                        continue;
+                    }
+                };
+                txns_committed += correct_batch.len();
 
                 drop(_permit);
 
-                if let Err(e) = executed_send.send((height, txn_batch)).await {
+                if let Err(e) = executed_send.send((id, (height, correct_batch))).await {
                     pf_error!(id; "failed to send committed txns: {:?}", e);
                     continue;
                 }
             },
 
-            _ = pass(), if Instant::now() > insert_delay_time => {
-                // insert delay as appropriate
-                let sleep_time = delay.load(Ordering::Relaxed);
-                if sleep_time > 0.05 {
-                    // doing aggregated compute cost
-                    let _permit = match core_group.acquire().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            continue;
-                        }
-                    };
-                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-                    delay.store(0f64, Ordering::Relaxed);
-                } else {
-                    tokio::task::yield_now().await;
-                }
-                insert_delay_time = Instant::now() + COMMIT_DELAY_INTERVAL;
-            }
-
             report_val = report_timer.changed() => {
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
                 }
+
+                pf_info!(id; "In the last minute: txns_recved: {}, txns_committed: {}", txns_recved, txns_committed);
+                txns_recved = 0;
+                txns_committed = 0;
 
                 let metrics = task_interval.next().unwrap();
                 let sched_count = metrics.total_scheduled_count;
@@ -117,6 +123,11 @@ pub async fn commit_thread(
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
+        }
+
+        if Instant::now() > insert_delay_time {
+            tokio::task::yield_now().await;
+            insert_delay_time = Instant::now() + COMMIT_DELAY_INTERVAL;
         }
     }
 }

@@ -6,7 +6,7 @@ import pandas as pd
 from get_log_lines import get_log_lines
 from msg_delay import parse_msg_delay
 
-file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
+meta_log = "META.log"
 
 exp_dir = "results/Avax-BlkLen/"
 
@@ -24,7 +24,7 @@ for result_dir in result_dirs:
     start_rt = None
     end_rt = None
     for file in files:
-        if not re.match(file_regex, file):
+        if file == meta_log:
             continue
         csv_path = os.path.join(result_path, file)
         df = pd.read_csv(csv_path)

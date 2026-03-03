@@ -7,7 +7,8 @@ use crate::protocol::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
 
 use async_trait::async_trait;
-use get_size::GetSize;
+use mailbox_client::SizedMsg;
+use primitive_types::U256;
 
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -18,7 +19,7 @@ pub struct ChainReplicationBlockManagement {
     is_head: bool,
     block_size: usize,
     // next block info
-    next_blk_id: Hash,
+    next_blk_id: U256,
     curr_batch_len: usize,
     curr_batch_size: usize,
     _notify: Notify,
@@ -32,7 +33,7 @@ impl ChainReplicationBlockManagement {
             mem_pool: vec![],
             is_head,
             block_size: config.blk_size,
-            next_blk_id: Hash::one(),
+            next_blk_id: U256::one(),
             curr_batch_len: 0,
             curr_batch_size: 0,
             _notify: Notify::new(),
@@ -72,7 +73,7 @@ impl BlockManagement for ChainReplicationBlockManagement {
 
             let (next_txn, _) = &self.mem_pool[self.curr_batch_len];
             self.curr_batch_len += 1;
-            self.curr_batch_size += next_txn.get_size();
+            self.curr_batch_size += next_txn.size()?;
         };
 
         // pf_debug!(self.id; "blk_full: {}, curr_batch_size: {}, curr_batch_len: {}, mem_pool size: {}", blk_full, self.curr_batch_size, self.curr_batch_len, self.mem_pool.len());
@@ -94,20 +95,21 @@ impl BlockManagement for ChainReplicationBlockManagement {
         let (txns, txn_ctx) = txns_with_ctx.unzip();
 
         let header = BlockHeader::ChainReplication {
-            blk_id: self.next_blk_id,
+            blk_id: Hash(self.next_blk_id),
         };
         let blk_ctx: Arc<BlkCtx> = Arc::new(BlkCtx::from_header_and_txns(&header, txn_ctx)?);
         let blk = Arc::new(Block { header, txns });
 
         self.curr_batch_len = 0;
         self.curr_batch_size = 0;
-        self.next_blk_id += Hash::one();
+        self.next_blk_id += U256::one();
 
         Ok((blk, blk_ctx))
     }
 
     async fn validate_block(
         &mut self,
+        _src: NodeId,
         block: Arc<Block>,
         ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {

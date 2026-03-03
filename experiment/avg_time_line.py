@@ -7,7 +7,7 @@ import pandas as pd
 # exp_times = list(range(0, 310, 30))
 exp_time = 310
 
-csv_file_regex = "copycat_cluster_[\d]+\.csv"
+csv_file_regex = "copycat_cluster_\d+\.csv"
 
 exp_dir = "results/Avax-Pmaker"
 result_dirs = os.listdir(exp_dir)

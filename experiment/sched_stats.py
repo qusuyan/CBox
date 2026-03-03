@@ -6,7 +6,7 @@ from subprocess import check_output
 import pandas as pd
 import json
 
-file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
+meta_log = "META.log"
 data_regex = "\(([0-9]+)\).*sched_count: ([0-9.]+), mean_sched_dur: ([0-9.]+) s, poll_count: ([0-9.]+), mean_poll_dur: ([0-9.]+) s"
 
 stages = ["txn_validation", "txn_dissemination", "pacemaker", "block_management", "block_dissemination", "decide", "commit"]
@@ -17,7 +17,7 @@ def parse_sched_stats(log_dir, line_ranges = {}):
     metrics = []
 
     for file_name in log_files:
-        if not re.match(file_regex, file_name):
+        if file_name == meta_log:
             continue
 
         log_file = os.path.join(log_dir, file_name)

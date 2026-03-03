@@ -1,44 +1,42 @@
 use super::{Decision, VoteMsg};
 use crate::config::AvalancheVoteNoConfig;
-use crate::context::BlkCtx;
+use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
+use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::PrivKey;
 use crate::protocol::MsgType;
+use crate::stage::DelayPool;
 use crate::transaction::Txn;
-use crate::{CopycatError, CryptoScheme, NodeId};
+use crate::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 
-use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
-
 use tokio::sync::Notify;
-use tokio::time::Duration;
 
 pub struct AvalancheVoteNoDecision {
     id: NodeId,
-    crypto_scheme: CryptoScheme,
+    signature_scheme: SignatureScheme,
     sk: PrivKey,
     peer_messenger: Arc<PeerMessenger>,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
     _notify: Notify,
 }
 
 impl AvalancheVoteNoDecision {
     pub fn new(
         id: NodeId,
-        crypto_scheme: CryptoScheme,
+        p2p_signature: P2PSignature,
         _config: AvalancheVoteNoConfig,
         peer_messenger: Arc<PeerMessenger>,
-        delay: Arc<AtomicF64>,
+        delay: Arc<DelayPool>,
     ) -> Self {
-        let (_, sk) = crypto_scheme.gen_key_pair(id.into());
+        let (signature_scheme, _, sk) = p2p_signature;
 
         Self {
             id,
-            crypto_scheme,
+            signature_scheme,
             sk,
             peer_messenger,
             delay,
@@ -69,8 +67,8 @@ impl Decision for AvalancheVoteNoDecision {
 
         let msg_content = (id, votes);
         let serialized_msg = &bincode::serialize(&msg_content)?;
-        let (signature, stime) = self.crypto_scheme.sign(&self.sk, serialized_msg)?;
-        let delay = self.delay.fetch_add(stime, Ordering::Relaxed);
+        let (signature, stime) = self.signature_scheme.sign(&self.sk, serialized_msg)?;
+        self.delay.process_illusion(stime).await;
         let vote_msg = VoteMsg {
             round: msg_content.0,
             votes: msg_content.1,
@@ -80,12 +78,11 @@ impl Decision for AvalancheVoteNoDecision {
         pf_debug!(self.id; "sending no votes for block {:?}", new_blk);
 
         self.peer_messenger
-            .delayed_send(
+            .send(
                 proposer,
-                MsgType::ConsensusMsg {
+                Box::new(MsgType::ConsensusMsg {
                     msg: bincode::serialize(&vote_msg)?,
-                },
-                Duration::from_secs_f64(delay + stime),
+                }),
             )
             .await?;
 
@@ -97,7 +94,9 @@ impl Decision for AvalancheVoteNoDecision {
         Ok(())
     }
 
-    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
+    async fn next_to_commit(
+        &mut self,
+    ) -> Result<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)), CopycatError> {
         unreachable!()
     }
 

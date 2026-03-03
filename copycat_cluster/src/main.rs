@@ -1,11 +1,11 @@
-use mailbox::Mailbox;
-
 use copycat::log::colored_level;
-use copycat::{get_report_timer, get_timer_interval, parse_config_file, start_report_timer, Node};
+use copycat::{get_report_timer, get_timer_interval, parse_config_file, start_report_timer, Node, NodeId};
 use copycat::{fully_connected_topology, get_topology};
-use copycat::{ChainType, CryptoScheme};
+use copycat::{ChainType, SignatureScheme, ThresholdSignatureScheme};
 use copycat::protocol::MsgType;
 use copycat_flowgen::get_flow_gen;
+
+use mailbox::Mailbox;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -17,8 +17,6 @@ use tokio::time::Duration;
 use clap::Parser;
 use sysinfo::{MemoryRefreshKind, System};
 
-
-// TODO: add parameters to config individual node configs
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct CliArgs {
@@ -54,9 +52,17 @@ struct CliArgs {
     #[arg(long, short = 'c', value_enum, default_value = "dummy")]
     chain: ChainType,
 
-    /// Cryptography scheme
+    /// Txn signature scheme
+    #[arg(long, short = 'x', value_enum, default_value = "dummy")]
+    txn_signature_scheme: SignatureScheme,
+
+    /// p2p signature scheme
     #[arg(long, short = 'p', value_enum, default_value = "dummy")]
-    crypto: CryptoScheme,
+    p2p_signature_scheme: SignatureScheme,
+
+    /// Threshold signature scheme
+    #[arg(long, short = 'h', value_enum, default_value = "dummy")]
+    threshold_signature_scheme: ThresholdSignatureScheme,
 
     /// Number of clients
     #[arg(long, short = 'l')]
@@ -65,6 +71,14 @@ struct CliArgs {
     /// Number of user accounts for flow generation
     #[arg(long, short = 'a', default_value = "10000")]
     accounts: usize,
+
+    /// Size of each script in bytes, can be used to control txn size
+    #[arg(long, short = 'z')]
+    script_size: Option<usize>,
+
+    /// Runtime of each script in secs
+    #[arg(long, short = 'u')]
+    script_runtime_sec: Option<f64>,
 
     /// Maximum number of inflight transaction requests, 0 means unlimited
     #[arg(long, short = 'f', default_value = "100000")]
@@ -129,6 +143,7 @@ impl CliArgs {
 
 fn main() {
     let mut args = CliArgs::parse();
+    let threshold_signature_scheme = ThresholdSignatureScheme::Dummy;
     args.validate();
 
     let id = args.id;
@@ -145,8 +160,7 @@ fn main() {
 
     log::info!("{:?}", args);
 
-    let txn_crypto = args.crypto;
-    let p2p_crypto = args.crypto;
+    let txn_crypto = args.txn_signature_scheme;
 
     // get mailbox parameters
     let machine_config_path = args.machine_config;
@@ -159,7 +173,7 @@ fn main() {
     };
     let local_nodes = machine_list[&id].node_list.clone();
 
-    let nodes: HashSet<u64> = machine_list
+    let nodes: HashSet<NodeId> = machine_list
         .iter()
         .flat_map(|(_, mailbox::config::Machine { addr: _, node_list })| node_list.clone())
         .collect();
@@ -171,7 +185,7 @@ fn main() {
             return;
         }
     };
-    let pipe_info = mailbox::config::parse_network_config(&nodes, network_config);
+    let (nic_egress_info, pipe_info, nic_ingress_info) = mailbox::config::parse_network_config(&nodes, network_config);
 
     // get node parameters
 
@@ -195,6 +209,13 @@ fn main() {
     };
     log::info!("Node configs: {:?}", node_config_map);
 
+    let majority = nodes.len() / 3 * 2 + 1;
+    let mut threshold_signature_quorum = threshold_signature_scheme.to_threshold_signature(
+        &nodes,
+        majority.try_into().unwrap(),
+        0,
+    ).expect("failed to generate threshold signature");
+
     // get flow generation metrics
     let txn_span = args.txn_span;
     let client_list: Vec<u64> = match args.num_clients {
@@ -214,10 +235,6 @@ fn main() {
         };
         req_dsts.insert(client_list[idx], dsts);
     }
-
-    let max_inflight = args.max_inflight;
-    let frequency = args.frequency;
-    let num_accounts = args.accounts;
 
     // collect system information
     let mut sys = System::new();
@@ -246,7 +263,7 @@ fn main() {
 
     runtime.block_on(async {
         // start mailbox
-        let _mailbox = match Mailbox::init::<MsgType>(id, machine_list, pipe_info, args.num_mailbox_workers, args.num_conn_per_peer).await {
+        let _mailbox = match Mailbox::init::<Box<MsgType>>(id, machine_list, nic_egress_info, pipe_info, nic_ingress_info, args.num_mailbox_workers, args.num_conn_per_peer).await {
             Ok(mailbox) => mailbox,
             Err(e) => {
                 log::error!("Mailbox initialization failed with error {:?}", e);
@@ -255,10 +272,9 @@ fn main() {
         };
 
         // start nodes
-        let (combine_tx, mut combine_rx) = mpsc::channel(0x1000000);
         let mut node_map = HashMap::new();
+        let (executed_send, mut executed_recv) = mpsc::channel(0x1000000);
         // let mut node_rt = HashMap::new();
-        let mut redirect_handles = HashMap::new();
         for node_id in local_nodes.clone() {
             // let rt = Builder::new_multi_thread()
             //     .enable_all()
@@ -267,18 +283,20 @@ fn main() {
             //     .build()
             //     .expect("Creating new runtime failed");
             let node_config = node_config_map.remove(&node_id).unwrap();
-            let result = Node::init(
+            let p2p_crypto = args.p2p_signature_scheme.gen_p2p_signature(node_id, nodes.iter());
+            let threshold_signature = threshold_signature_quorum.remove(&node_id).unwrap();
+            let node = match Node::init(
                 node_id,
-                args.num_mailbox_workers,
-                args.chain,
                 txn_crypto,
                 p2p_crypto,
+                threshold_signature,
                 node_config.chain_config,
                 !args.disable_txn_dissem,
+                args.num_mailbox_workers,
                 topology.remove(&node_id).unwrap_or(HashSet::new()),
                 node_config.max_concurrency,
-            ).await;
-            let (node, mut executed): (Node, _) = match result {
+                executed_send.clone(),
+            ).await {
                 Ok(node) => node,
                 Err(e) => {
                     log::error!("failed to start node: {e:?}");
@@ -286,37 +304,20 @@ fn main() {
                 }
             };
             node_map.insert(node_id, node);
-            // node_rt.insert(node_id, rt);
-
-            let tx = combine_tx.clone();
-            let redirect_handle = tokio::spawn(async move {
-                loop {
-                    match executed.recv().await {
-                        Some(msg) => {
-                            if let Err(e) = tx.send((node_id, msg)).await {
-                                log::error!("Node {id} redirecting executed pipe failed: {e:?}")
-                            }
-                        }
-                        None => {
-                            log::error!("Node {id} executed pipe closed unexpectedly");
-                            return;
-                        }
-                    };
-                }
-            });
-            redirect_handles.insert(node_id, redirect_handle);
         }
 
         // run flowgen
         let mut flow_gen = get_flow_gen(
             id, 
             client_list,
-            num_accounts,
-            max_inflight,
-            frequency,
+            args.accounts,
+            args.script_size,
+            args.script_runtime_sec,
+            args.max_inflight,
+            args.frequency,
             args.conflict_rate,
             args.chain,
-            args.crypto,
+            args.txn_signature_scheme,
         );
         let init_txns = flow_gen.setup_txns().await.unwrap();
 
@@ -336,7 +337,7 @@ fn main() {
         let report_interval = get_timer_interval().as_secs_f64();
         start_report_timer().await;
         // wait when setup txns are propogated over the network
-        let warn_up_time = std::env::var("WARMUP_TIME").map(|str| str.parse::<u64>().expect("invalid warmup time")).unwrap_or(0);
+        let warn_up_time = std::env::var("WARMUP_TIME").map(|str| str.parse::<u64>().expect("invalid warmup time")).unwrap_or(10);
         tokio::time::sleep(Duration::from_secs(warn_up_time)).await;
         log::info!("flow generation starts");
         let mut txns_sent = 0;
@@ -374,7 +375,7 @@ fn main() {
                     }
                 }
 
-                committed_txn = combine_rx.recv() => {
+                committed_txn = executed_recv.recv() => {
                     let (node, (height, txn_batch)) = match committed_txn {
                         Some(txn) => txn,
                         None => {

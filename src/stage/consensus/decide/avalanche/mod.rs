@@ -7,13 +7,17 @@ use blizzard::BlizzardDecision;
 mod vote_no;
 use vote_no::AvalancheVoteNoDecision;
 
+mod no_cache;
+use no_cache::AvalancheNoCacheDecision;
+
 use super::Decision;
 use crate::config::AvalancheConfig;
 use crate::peers::PeerMessenger;
+use crate::protocol::crypto::signature::P2PSignature;
 use crate::protocol::crypto::Signature;
-use crate::{CryptoScheme, NodeId};
+use crate::stage::DelayPool;
+use crate::NodeId;
 
-use atomic_float::AtomicF64;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -27,11 +31,11 @@ struct VoteMsg {
 
 pub fn new(
     id: NodeId,
-    crypto_scheme: CryptoScheme,
+    crypto_scheme: P2PSignature,
     config: AvalancheConfig,
     peer_messenger: Arc<PeerMessenger>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
 ) -> Box<dyn Decision> {
     match config {
         AvalancheConfig::Basic { config } => Box::new(AvalancheDecision::new(
@@ -55,6 +59,14 @@ pub fn new(
             crypto_scheme,
             config,
             peer_messenger,
+            delay,
+        )),
+        AvalancheConfig::NoCache { config } => Box::new(AvalancheNoCacheDecision::new(
+            id,
+            crypto_scheme,
+            config,
+            peer_messenger,
+            pmaker_feedback_send,
             delay,
         )),
     }

@@ -1,8 +1,8 @@
-mod dummy;
-use dummy::DummyTxnValidation;
-
+mod aptos;
 mod avalanche;
 mod bitcoin;
+mod diem;
+mod dummy;
 
 use crate::config::ChainConfig;
 use crate::consts::{TXN_BATCH_DELAY_INTERVAL, TXN_BATCH_INTERVAL};
@@ -10,24 +10,21 @@ use crate::context::TxnCtx;
 use crate::get_report_timer;
 use crate::protocol::crypto::Hash;
 use crate::protocol::transaction::Txn;
-use crate::protocol::CryptoScheme;
-use crate::stage::{pass, process_illusion};
+use crate::protocol::SignatureScheme;
+use crate::stage::DelayPool;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 
 use async_trait::async_trait;
 
 use std::collections::VecDeque;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
-
-use dashmap::DashMap;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
-use tokio::time::{Duration, Instant};
-
-use atomic_float::AtomicF64;
+use tokio::time::Instant;
 use tokio_metrics::TaskMonitor;
+
+use dashmap::DashMap;
 
 #[async_trait]
 trait TxnValidation: Send + Sync {
@@ -40,17 +37,19 @@ trait TxnValidation: Send + Sync {
 fn get_txn_validation(id: NodeId, config: ChainConfig) -> Box<dyn TxnValidation> {
     match config {
         ChainConfig::Dummy { .. } | ChainConfig::ChainReplication { .. } => {
-            Box::new(DummyTxnValidation::new(id))
+            Box::new(dummy::DummyTxnValidation::new(id))
         }
         ChainConfig::Bitcoin { config } => bitcoin::new(id, config),
         ChainConfig::Avalanche { config } => avalanche::new(id, config),
+        ChainConfig::Diem { config } => diem::new(id, config),
+        ChainConfig::Aptos { config } => aptos::new(id, config),
     }
 }
 
 pub async fn txn_validation_thread(
     id: NodeId,
     config: ChainConfig,
-    crypto_scheme: CryptoScheme,
+    crypto_scheme: SignatureScheme,
     mut req_recv: mpsc::Receiver<Arc<Txn>>,
     mut peer_txn_recv: mpsc::Receiver<(NodeId, Vec<Arc<Txn>>)>,
     validated_txn_send: mpsc::Sender<Vec<(NodeId, (Arc<Txn>, Arc<TxnCtx>))>>,
@@ -62,8 +61,8 @@ pub async fn txn_validation_thread(
 
     const VALIDATION_BATCH_SIZE: usize = 100usize;
 
-    let delay: Arc<AtomicF64> = Arc::new(AtomicF64::new(0f64));
-    let mut insert_delay_time = Instant::now() + TXN_BATCH_DELAY_INTERVAL;
+    let delay = Arc::new(DelayPool::new());
+    let mut yield_time = Instant::now() + TXN_BATCH_DELAY_INTERVAL;
 
     let mut txn_buffer = VecDeque::new();
     let mut txn_batch_time = None;
@@ -207,7 +206,7 @@ pub async fn txn_validation_thread(
                         correct_txns.push((src, (txn, txn_ctx)));
                     }
 
-                    process_illusion(Duration::from_secs_f64(verification_time), &delay_pool).await;
+                    delay_pool.process_illusion(verification_time).await;
 
                     if let Err(e) = txn_sender.send(correct_txns).await {
                         pf_error!(id; "failed to send to pending_txns pipe: {:?}", e);
@@ -250,26 +249,6 @@ pub async fn txn_validation_thread(
                 }
             }
 
-            _ = pass(), if Instant::now() > insert_delay_time => {
-                // insert delay as appropriate
-                let sleep_time = delay.load(Ordering::Relaxed);
-                if sleep_time > 0.05 {
-                    // doing skipped compute cost
-                    let _permit = match core_group.acquire().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            continue;
-                        }
-                    };
-                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-                    delay.store(0f64, Ordering::Relaxed);
-                } else {
-                    tokio::task::yield_now().await;
-                }
-                insert_delay_time = Instant::now() + TXN_BATCH_DELAY_INTERVAL;
-            }
-
             report_val = report_timer.changed() => {
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
@@ -291,6 +270,11 @@ pub async fn txn_validation_thread(
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
+        }
+
+        if Instant::now() > yield_time {
+            tokio::task::yield_now().await;
+            yield_time = Instant::now() + TXN_BATCH_DELAY_INTERVAL;
         }
     }
 }

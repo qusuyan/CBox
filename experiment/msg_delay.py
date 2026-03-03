@@ -6,10 +6,10 @@ from subprocess import check_output
 import pandas as pd
 import json
 
-file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
-deliver_regex = "Worker (\d) \(([\d]+)->([\d]+)\): message get delivered later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
-arrive_regex = "Worker (\d) \(([\d]+)->([\d]+)\): message arrived later than it should: SystemTimeError\(([0-9\.]+)(.*)\)"
-msgs_sent_recv_regex = "copycat::peers::peers: \(([\d]+)\) In the last minute: ([\d]+) msgs sent and ([\d]+) msgs recved"
+meta_log = "META.log"
+deliver_regex = "Worker (\d+): (\d+) message get delivered later than it should \(([0-9\.]+)(.*)\). "
+arrive_regex = "Worker (\d+): (\d+) message arrived later than it should \(([0-9\.]+)(.*)\). "
+msgs_sent_recv_regex = "copycat::peers::peers: \((\d+)\) In the last minute: (\d+) msgs sent and (\d+) msgs recved"
 
 
 def parse_msg_delay(log_dir, line_ranges = {}):
@@ -33,7 +33,7 @@ def parse_msg_delay(log_dir, line_ranges = {}):
             raise Exception(f"unit {unit} not recognized")
 
     for file_name in log_files:
-        if not re.match(file_regex, file_name):
+        if file_name == meta_log:
             continue
 
         log_file = os.path.join(log_dir, file_name)
@@ -74,9 +74,9 @@ def parse_msg_delay(log_dir, line_ranges = {}):
         arrive_late_pattern = [re.search(arrive_regex, line) for line in arrive_late]
         arrive_late_pattern = filter(lambda x: x is not None, arrive_late_pattern)
         arrive_late_parsed = [pattern.groups() for pattern in arrive_late_pattern]
-        for (worker, src, dst, late, unit) in arrive_late_parsed:
+        for (worker, count, late, unit) in arrive_late_parsed:
             late_secs = to_secs(float(late), unit)
-            arrive_late_metrics.append((file_name, worker, src, dst, late_secs))
+            arrive_late_metrics.append((file_name, worker, int(count), late_secs))
         
         try:
             deliver_late = check_output(f"{print_command} | grep 'message get delivered later than it should'", shell=True, encoding="utf-8")
@@ -87,26 +87,28 @@ def parse_msg_delay(log_dir, line_ranges = {}):
         deliver_late_pattern = [re.search(deliver_regex, line) for line in deliver_late]
         deliver_late_pattern = filter(lambda x: x is not None, deliver_late_pattern)
         deliver_late_parsed = [pattern.groups() for pattern in deliver_late_pattern]
-        for (worker, src, dst, late, unit) in deliver_late_parsed:
+        for (worker, count, late, unit) in deliver_late_parsed:
             late_secs = to_secs(float(late), unit)
-            deliver_late_metrics.append((file_name, worker, src, dst, late_secs))
+            deliver_late_metrics.append((file_name, worker, int(count), late_secs))
 
-    arrive_late_df = pd.DataFrame(arrive_late_metrics, columns=["log", "worker", "src", "dst", "late_secs"])
-    deliver_late_df = pd.DataFrame(deliver_late_metrics, columns=["log", "worker", "src", "dst", "late_secs"])
+    arrive_late_df = pd.DataFrame(arrive_late_metrics, columns=["log", "worker", "late_count", "late_secs"])
+    deliver_late_df = pd.DataFrame(deliver_late_metrics, columns=["log", "worker", "late_count", "late_secs"])
 
-    arrive_late_secs = arrive_late_df[["late_secs"]]
-    arrive_late_count = arrive_late_secs.shape[0]
-    arrive_late_avg = arrive_late_secs.mean()["late_secs"] * 1000
+    arrive_late = arrive_late_df[["late_count", "late_secs"]].sum()
+    arrive_late_count = arrive_late["late_count"]
+    arrive_late_secs = arrive_late["late_secs"]
+    arrive_late_avg = arrive_late_secs / arrive_late_count * 1000 if arrive_late_count > 0 else 0.0
 
-    deliver_late_secs = deliver_late_df[["late_secs"]]
-    deliver_late_count = deliver_late_secs.shape[0]
-    deliver_late_avg = deliver_late_secs.mean()["late_secs"] * 1000
+    deliver_late = deliver_late_df[["late_count", "late_secs"]].sum()
+    deliver_late_count = deliver_late["late_count"]
+    deliver_late_secs = deliver_late["late_secs"]
+    deliver_late_avg = deliver_late_secs / deliver_late_count * 1000 if deliver_late_count > 0 else 0.0
 
     msgs_sent_total = sum(msgs_sent.values())
     msgs_recv_total = sum(msgs_recv.values())
 
-    arrive_late_chance = arrive_late_count / msgs_recv_total if msgs_recv_total > 0 else 0
-    deliver_late_chance = deliver_late_count / msgs_recv_total if msgs_recv_total > 0 else 0
+    arrive_late_chance = arrive_late_count / msgs_recv_total if msgs_recv_total > 0 else 0.0
+    deliver_late_chance = deliver_late_count / msgs_recv_total if msgs_recv_total > 0 else 0.0
 
     return {"msgs_sent": msgs_sent_total, "msgs_recv": msgs_recv_total, 
             "arrive_late_count": arrive_late_count, "arrive_late_chance": arrive_late_chance, "arrive_late_ms": arrive_late_avg,

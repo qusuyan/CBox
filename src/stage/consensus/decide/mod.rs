@@ -1,31 +1,30 @@
-mod dummy;
-use dummy::DummyDecision;
-
+mod aptos;
 mod avalanche;
 mod bitcoin;
+mod diem;
+mod dummy;
 
 mod chain_replication;
 use chain_replication::ChainReplicationDecision;
 use tokio_metrics::TaskMonitor;
 
 use crate::consts::DECIDE_DELAY_INTERVAL;
-use crate::context::BlkCtx;
+use crate::context::{BlkCtx, TxnCtx};
+use crate::get_report_timer;
 use crate::protocol::block::Block;
-use crate::stage::pass;
+use crate::protocol::crypto::signature::P2PSignature;
+use crate::protocol::crypto::threshold_signature::ThresholdSignature;
+use crate::stage::DelayPool;
 use crate::transaction::Txn;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 use crate::{config::ChainConfig, peers::PeerMessenger};
-use crate::{get_report_timer, CryptoScheme};
 
 use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
-
-use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
+use tokio::time::Instant;
 
 #[async_trait]
 trait Decision: Sync + Send {
@@ -35,7 +34,9 @@ trait Decision: Sync + Send {
         new_tail: Vec<(Arc<Block>, Arc<BlkCtx>)>,
     ) -> Result<(), CopycatError>;
     async fn commit_ready(&self) -> Result<(), CopycatError>;
-    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError>;
+    async fn next_to_commit(
+        &mut self,
+    ) -> Result<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)), CopycatError>;
     async fn timeout(&self) -> Result<(), CopycatError>;
     async fn handle_timeout(&mut self) -> Result<(), CopycatError>;
     async fn handle_peer_msg(&mut self, src: NodeId, content: Vec<u8>) -> Result<(), CopycatError>;
@@ -44,18 +45,19 @@ trait Decision: Sync + Send {
 
 fn get_decision(
     id: NodeId,
-    crypto_scheme: CryptoScheme,
+    p2p_signature: P2PSignature,
+    threshold_signature: Arc<dyn ThresholdSignature>,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
-    delay: Arc<AtomicF64>,
+    delay: Arc<DelayPool>,
 ) -> Box<dyn Decision> {
     match config {
-        ChainConfig::Dummy { .. } => Box::new(DummyDecision::new()),
+        ChainConfig::Dummy { .. } => Box::new(dummy::DummyDecision::new()),
         ChainConfig::Bitcoin { config } => bitcoin::new(id, config),
         ChainConfig::Avalanche { config } => avalanche::new(
             id,
-            crypto_scheme,
+            p2p_signature,
             config,
             peer_messenger,
             pmaker_feedback_send,
@@ -64,29 +66,48 @@ fn get_decision(
         ChainConfig::ChainReplication { .. } => {
             Box::new(ChainReplicationDecision::new(id, config, peer_messenger))
         }
+        ChainConfig::Diem { config } => diem::new(
+            id,
+            p2p_signature,
+            threshold_signature,
+            config,
+            peer_messenger,
+            pmaker_feedback_send,
+            delay,
+        ),
+        ChainConfig::Aptos { config } => aptos::new(
+            id,
+            p2p_signature,
+            threshold_signature,
+            config,
+            peer_messenger,
+            delay,
+        ),
     }
 }
 
 pub async fn decision_thread(
     id: NodeId,
-    crypto_scheme: CryptoScheme,
+    p2p_signature: P2PSignature,
+    threshold_signature: Arc<dyn ThresholdSignature>,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
     mut peer_consensus_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut block_ready_recv: mpsc::Receiver<(NodeId, Vec<(Arc<Block>, Arc<BlkCtx>)>)>,
-    commit_send: mpsc::Sender<(u64, Vec<Arc<Txn>>)>,
+    commit_send: mpsc::Sender<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>))>,
     pmaker_feedback_send: mpsc::Sender<Vec<u8>>,
     core_group: Arc<VCoreGroup>,
     monitor: TaskMonitor,
 ) {
     pf_info!(id; "decision stage starting...");
 
-    let delay = Arc::new(AtomicF64::new(0f64));
+    let delay = Arc::new(DelayPool::new());
     let mut insert_delay_time = Instant::now() + DECIDE_DELAY_INTERVAL;
 
     let mut decision_stage = get_decision(
         id,
-        crypto_scheme,
+        p2p_signature,
+        threshold_signature,
         config,
         peer_messenger,
         pmaker_feedback_send.clone(), // keep pmaker_feedback pipe around
@@ -155,10 +176,10 @@ pub async fn decision_thread(
                     }
                 };
 
-                pf_debug!(id; "committing new block of length {:?}, height {}", block_to_commit.len(), height);
+                pf_debug!(id; "committing new block of length {:?}, height {}", block_to_commit.0.len(), height);
 
                 blks_sent += 1;
-                txns_sent += block_to_commit.len();
+                txns_sent += block_to_commit.0.len();
 
                 drop(_permit);
 
@@ -208,27 +229,6 @@ pub async fn decision_thread(
                 }
             },
 
-            _ = pass(), if Instant::now() > insert_delay_time => {
-                // insert delay as appropriate
-                let sleep_time = delay.load(Ordering::Relaxed);
-                if sleep_time > 0.05 {
-                    // doing skipped compute cost
-                    let _permit = match core_group.acquire().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            continue;
-                        }
-                    };
-
-                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-                    delay.store(0f64, Ordering::Relaxed);
-                } else {
-                    tokio::task::yield_now().await;
-                }
-                insert_delay_time = Instant::now() + DECIDE_DELAY_INTERVAL;
-            }
-
             report_val = report_timer.changed() => {
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
@@ -248,6 +248,11 @@ pub async fn decision_thread(
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
+        }
+
+        if Instant::now() > insert_delay_time {
+            tokio::task::yield_now().await;
+            insert_delay_time = Instant::now() + DECIDE_DELAY_INTERVAL;
         }
     }
 }

@@ -1,10 +1,11 @@
 use super::{FlowGen, Stats};
-use crate::ClientId;
+use crate::{ClientId, LAT_SAMPLE_RATE};
 use copycat::protocol::crypto::{Hash, PubKey, Signature};
 use copycat::protocol::transaction::{DummyTxn, Txn};
-use copycat::{CopycatError, CryptoScheme, NodeId};
+use copycat::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
+use primitive_types::U256;
 use rand::Rng;
 
 use std::collections::HashMap;
@@ -27,7 +28,7 @@ pub struct ChainReplicationFlowGen {
     batch_size: usize,
     next_batch_time: Instant,
     client_list: Vec<ClientId>,
-    next_txn_id: Hash,
+    next_txn_id: U256,
     in_flight: HashMap<Hash, Instant>,
     // fields to create transactions
     content: Arc<Vec<u8>>, // for simplicity, all txns are the same
@@ -42,10 +43,11 @@ pub struct ChainReplicationFlowGen {
 impl ChainReplicationFlowGen {
     pub fn new(
         client_list: Vec<ClientId>,
-        txn_size: usize,
+        script_size: Option<usize>,
+        _script_runtime_sec: Option<f64>, // TODO
         max_inflight: usize,
         frequency: usize,
-        crypto: CryptoScheme,
+        crypto: SignatureScheme,
     ) -> Self {
         let (batch_size, batch_frequency) = if frequency == UNSET {
             (max_inflight, UNSET)
@@ -55,9 +57,10 @@ impl ChainReplicationFlowGen {
             (frequency / MAX_BATCH_FREQ, MAX_BATCH_FREQ)
         };
 
+        let txn_size = script_size.unwrap_or(1024);
         let txn_content = Arc::new(vec![0u8; txn_size]);
         let (pub_key, priv_key) = crypto.gen_key_pair(0);
-        let signature = crypto.sign(&priv_key, &txn_content).unwrap().0;
+        let (signature, _) = crypto.sign(&priv_key, &txn_content).unwrap();
 
         Self {
             max_inflight,
@@ -65,7 +68,7 @@ impl ChainReplicationFlowGen {
             batch_size,
             next_batch_time: Instant::now(),
             client_list,
-            next_txn_id: Hash::zero(),
+            next_txn_id: U256::zero(),
             in_flight: HashMap::new(),
             content: txn_content,
             pub_key,
@@ -95,7 +98,7 @@ impl FlowGen for ChainReplicationFlowGen {
                 }
                 return Ok(());
             }
-            tokio::task::yield_now().await;
+            self._notify.notified().await;
         }
     }
 
@@ -111,7 +114,7 @@ impl FlowGen for ChainReplicationFlowGen {
             let client_id = self.client_list[rand::random::<usize>() % self.client_list.len()];
             let txn = Arc::new(Txn::Dummy {
                 txn: DummyTxn {
-                    id: self.next_txn_id,
+                    id: Hash(self.next_txn_id),
                     content: self.content.clone(),
                     pub_key: self.pub_key.clone(),
                     signature: self.signature.clone(),
@@ -119,7 +122,7 @@ impl FlowGen for ChainReplicationFlowGen {
             });
             let txn_hash = txn.compute_id()?;
 
-            self.next_txn_id += Hash::one();
+            self.next_txn_id += U256::one();
             self.in_flight.insert(txn_hash, Instant::now());
             batch.push((client_id, txn));
         }
@@ -150,6 +153,7 @@ impl FlowGen for ChainReplicationFlowGen {
         log_info.num_blks += 1;
         log_info.num_txns += txns.len() as u64;
 
+        let mut rng = rand::thread_rng();
         for txn in txns {
             let hash = txn.compute_id()?;
             let start_time = match self.in_flight.remove(&hash) {
@@ -159,8 +163,10 @@ impl FlowGen for ChainReplicationFlowGen {
                 } // unrecognized txn, possibly generated from another node
             };
 
-            let commit_latency = Instant::now() - start_time;
-            self.latencies.push(commit_latency.as_secs_f64());
+            if rng.gen::<f64>() < *LAT_SAMPLE_RATE {
+                let commit_latency = Instant::now() - start_time;
+                self.latencies.push(commit_latency.as_secs_f64());
+            }
         }
 
         Ok(())
@@ -174,7 +180,8 @@ impl FlowGen for ChainReplicationFlowGen {
             .reduce(|acc, e| (std::cmp::max(acc.0, e.0), std::cmp::max(acc.1, e.1)))
             .unwrap_or((0, 0));
 
-        let latencies = std::mem::replace(&mut self.latencies, vec![]);
+        let num_latencies = self.latencies.len();
+        let latencies = std::mem::replace(&mut self.latencies, Vec::with_capacity(num_latencies));
 
         Stats {
             latencies,

@@ -44,7 +44,7 @@
         "config": {
             "Basic": {
                 "config": {
-                    "difficulty": 27,
+                    "difficulty": 28,
                     "commit_depth": 6
                 }
             }
@@ -58,7 +58,7 @@
         "config": {
             "Basic": {
                 "config": {
-                    "difficulty": 27,
+                    "difficulty": 28,
                     "commit_depth": 6
                 }
             }

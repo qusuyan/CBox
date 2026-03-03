@@ -3,18 +3,23 @@ use crate::config::AvalancheBasicConfig;
 use crate::context::{BlkCtx, TxnCtx};
 use crate::peers::PeerMessenger;
 use crate::protocol::block::{Block, BlockHeader};
-use crate::protocol::crypto::Hash;
+use crate::protocol::crypto::signature::P2PSignature;
+use crate::protocol::crypto::{Hash, PrivKey, PubKey};
 use crate::protocol::transaction::{AvalancheTxn, Txn};
+use crate::protocol::MsgType;
+use crate::stage::DelayPool;
 use crate::utils::{CopycatError, NodeId};
+use crate::SignatureScheme;
 
 use async_trait::async_trait;
-
-use serde::{Deserialize, Serialize};
-use tokio::sync::Notify;
-use tokio::time::{Duration, Instant};
+use mailbox_client::SizedMsg;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use tokio::sync::Notify;
+use tokio::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
 
 struct DagNode {
     pub num_parents: usize,
@@ -31,51 +36,66 @@ struct PeerReq {
 
 pub struct AvalancheBlockManagement {
     id: NodeId,
-    blk_len: usize,
+    blk_size: usize,
     txn_pool: HashMap<Hash, (Arc<Txn>, Arc<TxnCtx>)>,
     txn_dag: HashMap<Hash, DagNode>,
     dag_frontier: VecDeque<Hash>,
     // fields for constructing new batch of txns
     blk_counter: u64,
     curr_batch: Vec<Hash>,
+    curr_batch_size: usize,
     next_propose_time: Instant,
     proposal_timeout: Duration,
     _notify: Notify,
     // for requesting missing txns
     peer_messenger: Arc<PeerMessenger>,
     pending_blks: HashMap<(NodeId, u64, usize), (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>, Vec<usize>)>,
+    _delay: Arc<DelayPool>,
+    _signature_scheme: SignatureScheme,
+    _peer_pks: HashMap<NodeId, PubKey>,
+    _sk: PrivKey,
     // for control loop
     blk_quota: usize,
     // for reporting data and debugging
     blk_quota_recved: usize,
-    blk_queries_sent: usize,
-    txns_queried: usize,
+    blk_fetch_requests_sent: usize,
+    txns_requested: usize,
 }
 
 impl AvalancheBlockManagement {
     pub fn new(
         id: NodeId,
+        p2p_signature: P2PSignature,
         config: AvalancheBasicConfig,
         peer_messenger: Arc<PeerMessenger>,
+        delay: Arc<DelayPool>,
     ) -> Self {
         let proposal_timeout = Duration::from_secs_f64(config.proposal_timeout_secs);
+
+        let (signature_scheme, peer_pks, sk) = p2p_signature;
+
         Self {
             id,
-            blk_len: config.blk_len,
+            blk_size: config.blk_size,
             txn_pool: HashMap::new(),
             txn_dag: HashMap::new(),
             dag_frontier: VecDeque::new(),
             blk_counter: 0,
             curr_batch: vec![],
+            curr_batch_size: 0,
             next_propose_time: Instant::now() + proposal_timeout,
             proposal_timeout,
             _notify: Notify::new(),
             peer_messenger,
             pending_blks: HashMap::new(),
-            blk_quota: 0,
-            blk_quota_recved: 0,
-            blk_queries_sent: 0,
-            txns_queried: 0,
+            _signature_scheme: signature_scheme,
+            _peer_pks: peer_pks,
+            _sk: sk,
+            blk_quota: config.max_inflight_blk,
+            blk_quota_recved: config.max_inflight_blk,
+            blk_fetch_requests_sent: 0,
+            txns_requested: 0,
+            _delay: delay,
         }
     }
 }
@@ -213,7 +233,7 @@ impl BlockManagement for AvalancheBlockManagement {
 
     async fn prepare_new_block(&mut self) -> Result<CurBlockState, CopycatError> {
         let blk_full = loop {
-            if self.curr_batch.len() >= self.blk_len {
+            if self.curr_batch_size >= self.blk_size {
                 break CurBlockState::Full;
             }
 
@@ -241,6 +261,8 @@ impl BlockManagement for AvalancheBlockManagement {
                 }
             }
 
+            let (txn, _) = self.txn_pool.get(&next_txn).unwrap();
+            self.curr_batch_size += txn.size()?;
             self.curr_batch.push(next_txn);
         };
 
@@ -254,7 +276,7 @@ impl BlockManagement for AvalancheBlockManagement {
             loop {
                 self._notify.notified().await;
             }
-        } else if self.curr_batch.len() >= self.blk_len {
+        } else if self.curr_batch_size >= self.blk_size {
             // we got a complete block, can propose
             return Ok(());
         } else {
@@ -265,15 +287,14 @@ impl BlockManagement for AvalancheBlockManagement {
     }
 
     async fn get_new_block(&mut self) -> Result<(Arc<Block>, Arc<BlkCtx>), CopycatError> {
-        //TODO: add noop txns to drive consensus as needed
+        // TODO: add noop txns to drive consensus as needed
         assert!(self.blk_quota > 0);
-        let txn_hashs: Vec<Hash> = self.curr_batch.drain(0..).collect();
+        let txn_hashs = self.curr_batch.drain(0..);
+        self.curr_batch_size = 0;
         // let mut txn_hashs = vec![];
         // std::mem::swap(&mut txn_hashs, &mut self.curr_batch);
-        let txns_with_ctx = txn_hashs
-            .iter()
-            .map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone());
-        let (txns, txn_ctx) = txns_with_ctx.unzip();
+        let txns_with_ctx = txn_hashs.map(|txn_hash| self.txn_pool.get(&txn_hash).unwrap().clone());
+        let (txns, txn_ctx): (Vec<_>, Vec<_>) = txns_with_ctx.unzip();
 
         let header = BlockHeader::Avalanche {
             proposer: self.id,
@@ -281,7 +302,7 @@ impl BlockManagement for AvalancheBlockManagement {
             depth: 0,
         };
         let blk_ctx = BlkCtx::from_header_and_txns(&header, txn_ctx)?;
-        pf_trace!(self.id; "sending block query {:?} ({} txns)", header, txn_hashs.len());
+        pf_trace!(self.id; "sending block query {:?} ({} txns)", header, txns.len());
         let blk = Arc::new(Block { header, txns });
 
         self.blk_counter += 1;
@@ -292,18 +313,19 @@ impl BlockManagement for AvalancheBlockManagement {
 
     async fn validate_block(
         &mut self,
+        _src: NodeId,
         block: Arc<Block>,
         blk_ctx: Arc<BlkCtx>,
     ) -> Result<Vec<(Arc<Block>, Arc<BlkCtx>)>, CopycatError> {
         pf_trace!(self.id; "Validating block {:?}", block);
         assert!(block.txns.len() == blk_ctx.txn_ctx.len());
 
-        let (proposer, blk_id, depth) = match block.header {
+        let (proposer, blk_id, depth) = match &block.header {
             BlockHeader::Avalanche {
                 proposer,
                 id,
                 depth,
-            } => (proposer, id, depth),
+            } => (*proposer, *id, *depth),
             _ => unreachable!(),
         };
 
@@ -414,8 +436,8 @@ impl BlockManagement for AvalancheBlockManagement {
                 self.dag_frontier.push_front(txn);
             }
 
-            self.blk_queries_sent += 1;
-            self.txns_queried += blk_missing_deps.len();
+            self.blk_fetch_requests_sent += 1;
+            self.txns_requested += blk_missing_deps.len();
 
             let peer_req = PeerReq {
                 proposer,
@@ -425,7 +447,7 @@ impl BlockManagement for AvalancheBlockManagement {
             };
             let msg = bincode::serialize(&peer_req)?;
             self.peer_messenger
-                .send(proposer, crate::protocol::MsgType::BlockReq { msg })
+                .send(proposer, Box::new(MsgType::BlockReq { msg }))
                 .await?;
             // record the current results
             self.pending_blks.insert(
@@ -546,7 +568,7 @@ impl BlockManagement for AvalancheBlockManagement {
             dep_set,
         } = peer_req;
 
-        let txns = dep_set
+        let txns: Vec<Arc<Txn>> = dep_set
             .into_iter()
             .map(|hash| self.txn_pool.get(&hash))
             .filter(|res| {
@@ -570,7 +592,7 @@ impl BlockManagement for AvalancheBlockManagement {
         });
 
         self.peer_messenger
-            .send(peer, crate::protocol::MsgType::NewBlock { blk })
+            .send(peer, Box::new(MsgType::NewBlock { blk }))
             .await?;
 
         Ok(())
@@ -578,9 +600,9 @@ impl BlockManagement for AvalancheBlockManagement {
 
     fn report(&mut self) {
         pf_info!(self.id; "blk_quota_recved: {}, blk_quota: {}", self.blk_quota_recved, self.blk_quota);
-        pf_info!(self.id; "blk_queries_sent: {}, txns_queried: {}", self.blk_queries_sent, self.txns_queried);
+        pf_info!(self.id; "blk_fetch_requests_sent: {}, txns_requested: {}", self.blk_fetch_requests_sent, self.txns_requested);
         self.blk_quota_recved = 0;
-        self.blk_queries_sent = 0;
-        self.txns_queried = 0;
+        self.blk_fetch_requests_sent = 0;
+        self.txns_requested = 0;
     }
 }

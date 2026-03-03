@@ -7,13 +7,39 @@ use bitcoin::BitcoinFlowGen;
 mod avalanche;
 use avalanche::AvalancheFlowGen;
 
+mod diem;
+use diem::DiemFlowGen;
+
+mod aptos;
+use aptos::AptosFlowGen;
+
 use async_trait::async_trait;
-use copycat::{transaction::Txn, ChainType, CopycatError, CryptoScheme, NodeId};
+use lazy_static::lazy_static;
+use serde::Serialize;
+
+use copycat::{
+    protocol::crypto::{PrivKey, Signature},
+    transaction::Txn,
+    ChainType, CopycatError, NodeId, SignatureScheme,
+};
 
 use std::sync::Arc;
 
 pub type FlowGenId = u64;
 pub type ClientId = u64;
+
+lazy_static! {
+    static ref LAT_SAMPLE_RATE: f64 = std::env::var("LAT_SAMPLE_RATE")
+        .map(|rate| match rate.parse::<f64>() {
+            Ok(r) => Some(r),
+            Err(e) => {
+                log::warn!("Invalid LAT_SAMPLE_RATE: {e:?}, using default");
+                None
+            }
+        })
+        .unwrap_or(None)
+        .unwrap_or(0.1);
+}
 
 pub struct Stats {
     pub num_committed: u64,
@@ -41,11 +67,13 @@ pub fn get_flow_gen(
     id: FlowGenId,
     client_list: Vec<ClientId>,
     num_accounts: usize,
+    script_size: Option<usize>,
+    script_runtime_sec: Option<f64>,
     max_inflight: usize,
     frequency: usize,
     conflict_rate: f64,
     chain: ChainType,
-    crypto: CryptoScheme,
+    crypto: SignatureScheme,
 ) -> Box<dyn FlowGen> {
     match chain {
         ChainType::Dummy => todo!(),
@@ -53,6 +81,8 @@ pub fn get_flow_gen(
             id,
             client_list,
             num_accounts,
+            script_size,
+            script_runtime_sec,
             max_inflight,
             frequency,
             crypto,
@@ -61,6 +91,8 @@ pub fn get_flow_gen(
             id,
             client_list,
             num_accounts,
+            script_size,
+            script_runtime_sec,
             max_inflight,
             frequency,
             conflict_rate,
@@ -68,10 +100,48 @@ pub fn get_flow_gen(
         )),
         ChainType::ChainReplication => Box::new(ChainReplicationFlowGen::new(
             client_list,
-            num_accounts, // TODO:
+            script_size,
+            script_runtime_sec,
+            max_inflight,
+            frequency,
+            crypto,
+        )),
+        ChainType::Diem => Box::new(DiemFlowGen::new(
+            id,
+            client_list,
+            num_accounts,
+            script_size,
+            script_runtime_sec,
+            max_inflight,
+            frequency,
+            crypto,
+        )),
+        ChainType::Aptos => Box::new(AptosFlowGen::new(
+            id,
+            client_list,
+            num_accounts,
+            script_size,
+            script_runtime_sec,
             max_inflight,
             frequency,
             crypto,
         )),
     }
+}
+
+fn mock_sign<T: Serialize>(
+    scheme: SignatureScheme,
+    sk: &PrivKey,
+    input: &T,
+) -> Result<Signature, CopycatError> {
+    let serialized = match scheme {
+        SignatureScheme::Dummy | SignatureScheme::DummyECDSA => {
+            // avoid extra serialization
+            vec![]
+        }
+        SignatureScheme::ECDSA => bincode::serialize(&input)?,
+    };
+
+    let (signature, _) = scheme.sign(sk, &serialized)?;
+    Ok(signature)
 }

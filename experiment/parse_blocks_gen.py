@@ -3,16 +3,15 @@
 import os, sys, re, json
 from subprocess import check_output
 
-file_regex = "[\d]+\.[\d]+\.[\d]+\.[\d]+\.log"
-blk_gen_regex = "copycat::stage::consensus::block_management: \(([\d]+)\) In the last minute: self_blks_sent: ([\d]+)"
-
+meta_log = "META.log"
+blk_gen_regex = "copycat::stage::consensus::block_management: \((\d+)\) In the last minute: self_blks_sent: (\d+)"
 
 def parse_total_blks_gen(log_dir):
     log_files = os.listdir(log_dir)
     blk_total = 0
 
     for file_name in log_files:
-        if not re.match(file_regex, file_name):
+        if file_name == meta_log:
             continue
 
         log_file = os.path.join(log_dir, file_name)

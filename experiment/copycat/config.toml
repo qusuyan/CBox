@@ -10,6 +10,7 @@ home-runner = []
 install-perf = []
 install-rust = []
 setup-copycat = [["branch", "main"], ["buildtype", "release"]]
+setup-env = []
 setup-mailbox = [["branch", "main"]]
 
 [run-targets]
@@ -20,7 +21,9 @@ cluster = [
   ["threads", "32"],
   ["mailbox_workers", "32"],
   ["chain_type", "bitcoin"],
-  ["crypto", "dummy"],
+  ["txn_crypto", "dummy"],
+  ["p2p_crypto", "dummy"],
+  ["threshold_crypto", "dummy"],
   ["conn_multiply", "1"],
   ["warmup_time", "10"],
   ["num_clients", "1"],
@@ -31,6 +34,10 @@ cluster = [
   ["conflict_rate", "0"],
   ["txn_span", "0"],
   ["disable_txn_dissem", "false"],
+  ["mailbox_threshold", ""],
+  ["lat_sample_rate", "1"],
+  ["script_size", ""],
+  ["script_runtime", ""],
 ]
 date = []
 mailbox = [

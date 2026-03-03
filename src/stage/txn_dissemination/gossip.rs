@@ -34,7 +34,7 @@ impl TxnDissemination for GossipTxnDissemination {
             if txn_batch.len() > 0 {
                 self.transport
                     .gossip(
-                        MsgType::NewTxn { txn_batch },
+                        Box::new(MsgType::NewTxn { txn_batch }),
                         HashSet::from([*src, self.me]),
                     )
                     .await?;

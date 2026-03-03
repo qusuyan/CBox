@@ -1,6 +1,6 @@
 use super::Decision;
 use crate::config::BitcoinBasicConfig;
-use crate::context::BlkCtx;
+use crate::context::{BlkCtx, TxnCtx};
 use crate::protocol::block::{Block, BlockHeader};
 use crate::protocol::crypto::Hash;
 use crate::transaction::Txn;
@@ -47,15 +47,15 @@ impl Decision for BitcoinDecision {
         // find height of first block
         let (ancester_hash, first_block_height) = match new_tail.first() {
             Some((blk, _)) => {
-                let prev_hash = match &blk.header {
-                    BlockHeader::Bitcoin { prev_hash, .. } => prev_hash,
+                let parent_id = match &blk.header {
+                    BlockHeader::Bitcoin { parent_id, .. } => parent_id,
                     _ => unreachable!(),
                 };
-                if prev_hash.is_zero() {
-                    (prev_hash, 1u64) // first block of chain
+                if parent_id.0.is_zero() {
+                    (parent_id, 1u64) // first block of chain
                 } else {
-                    match self.block_pool.get(prev_hash) {
-                        Some((_, _, height)) => (prev_hash, height + 1),
+                    match self.block_pool.get(parent_id) {
+                        Some((_, _, height)) => (parent_id, height + 1),
                         None => unimplemented!(),
                     }
                 }
@@ -120,17 +120,19 @@ impl Decision for BitcoinDecision {
         }
     }
 
-    async fn next_to_commit(&mut self) -> Result<(u64, Vec<Arc<Txn>>), CopycatError> {
+    async fn next_to_commit(
+        &mut self,
+    ) -> Result<(u64, (Vec<Arc<Txn>>, Vec<Arc<TxnCtx>>)), CopycatError> {
         match self.chain_tail.pop_front() {
             Some(blk_hash) => {
-                let (blk, _, height) = self.block_pool.get(&blk_hash).unwrap();
+                let (blk, blk_ctx, height) = self.block_pool.get(&blk_hash).unwrap();
                 let miner = match &blk.header {
                     BlockHeader::Bitcoin { proposer, .. } => proposer,
                     _ => unreachable!(),
                 };
                 let blk_cnt = self.miners_blk_cnt.entry(*miner).or_insert(0);
                 *blk_cnt += 1;
-                Ok((*height, blk.txns.clone()))
+                Ok((*height, (blk.txns.clone(), blk_ctx.txn_ctx.clone())))
             }
             None => unreachable!(),
         }

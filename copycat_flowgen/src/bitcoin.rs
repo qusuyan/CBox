@@ -1,8 +1,8 @@
 use super::{FlowGen, Stats};
-use crate::{ClientId, FlowGenId};
+use crate::{mock_sign, ClientId, FlowGenId, LAT_SAMPLE_RATE};
 use copycat::protocol::crypto::{Hash, PrivKey, PubKey};
 use copycat::protocol::transaction::{BitcoinTxn, Txn};
-use copycat::{CopycatError, CryptoScheme, NodeId};
+use copycat::{CopycatError, NodeId, SignatureScheme};
 
 use async_trait::async_trait;
 use rand::Rng;
@@ -26,8 +26,10 @@ pub struct BitcoinFlowGen {
     max_inflight: usize,
     batch_frequency: usize,
     batch_size: usize,
+    script_size: usize,
+    script_runtime_sec: f64,
     next_batch_time: Instant,
-    crypto: CryptoScheme,
+    crypto: SignatureScheme,
     client_list: Vec<ClientId>,
     utxos: HashMap<ClientId, HashMap<PubKey, VecDeque<(Hash, u64)>>>,
     accounts: HashMap<ClientId, Vec<(PubKey, PrivKey)>>,
@@ -42,9 +44,11 @@ impl BitcoinFlowGen {
         id: FlowGenId,
         client_list: Vec<ClientId>,
         num_accounts: usize,
+        script_size: Option<usize>,
+        script_runtime_sec: Option<f64>,
         max_inflight: usize,
         frequency: usize,
-        crypto: CryptoScheme,
+        crypto: SignatureScheme,
     ) -> Self {
         let accounts_per_node = if client_list.len() == 0 {
             0
@@ -83,6 +87,8 @@ impl BitcoinFlowGen {
             max_inflight,
             batch_frequency,
             batch_size,
+            script_size: script_size.unwrap_or(0),
+            script_runtime_sec: script_runtime_sec.unwrap_or(0f64),
             next_batch_time: Instant::now(),
             crypto,
             client_list,
@@ -130,7 +136,7 @@ impl FlowGen for BitcoinFlowGen {
                 }
                 return Ok(());
             }
-            tokio::task::yield_now().await;
+            self._notify.notified().await;
         }
     }
 
@@ -162,8 +168,7 @@ impl FlowGen for BitcoinFlowGen {
 
                 let (in_utxo_raw, amount) = sender_utxos.pop_front().unwrap();
                 let in_utxo = vec![in_utxo_raw];
-                let serialized_in_utxo = bincode::serialize(&in_utxo)?;
-                let (sender_signature, _) = self.crypto.sign(sender_sk, &serialized_in_utxo)?;
+                let sender_signature = mock_sign(self.crypto, &sender_sk, &in_utxo)?;
                 let out_utxo = std::cmp::min(amount, 10);
                 let remainder = amount - out_utxo;
                 let txn = Arc::new(Txn::Bitcoin {
@@ -174,8 +179,8 @@ impl FlowGen for BitcoinFlowGen {
                         out_utxo,
                         remainder,
                         sender_signature,
-                        script_bytes: 400,
-                        script_runtime: Duration::from_millis(1),
+                        script_bytes: self.script_size,
+                        script_runtime_sec: self.script_runtime_sec,
                         script_succeed: true,
                     },
                 });
@@ -232,6 +237,7 @@ impl FlowGen for BitcoinFlowGen {
         chain_info.chain_length = blk_height; // blk_height starts with 1
         chain_info.total_committed += txns.len() as u64;
 
+        let mut rng = rand::thread_rng();
         for txn in txns {
             let hash = txn.compute_id()?;
             let start_time = match self.in_flight.remove(&hash) {
@@ -239,8 +245,10 @@ impl FlowGen for BitcoinFlowGen {
                 None => continue, // unrecognized txn, possibly generated from another node
             };
 
-            let commit_latency = Instant::now() - start_time;
-            self.latencies.push(commit_latency.as_secs_f64());
+            if rng.gen::<f64>() < *LAT_SAMPLE_RATE {
+                let commit_latency = Instant::now() - start_time;
+                self.latencies.push(commit_latency.as_secs_f64());
+            }
         }
 
         Ok(())
@@ -278,7 +286,8 @@ impl FlowGen for BitcoinFlowGen {
             acc_commit_confidence / self.chain_info.len() as f64
         };
 
-        let latencies = std::mem::replace(&mut self.latencies, vec![]);
+        let num_latencies = self.latencies.len();
+        let latencies = std::mem::replace(&mut self.latencies, Vec::with_capacity(num_latencies));
 
         Stats {
             latencies,

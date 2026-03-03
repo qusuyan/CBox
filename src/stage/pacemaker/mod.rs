@@ -2,13 +2,18 @@ mod dummy;
 use dummy::DummyPacemaker;
 
 mod fixed_inflight_blk;
-use fixed_inflight_blk::FixedInflightBlkPaceMaker;
-use tokio_metrics::TaskMonitor;
+use fixed_inflight_blk::FixedInflightBlkPacemaker;
+
+pub mod diem;
+use diem::DiemPacemaker;
+
+mod aptos;
 
 use crate::config::AvalancheConfig;
 use crate::consts::PACE_DELAY_INTERVAL;
 use crate::get_report_timer;
-use crate::stage::pass;
+use crate::protocol::crypto::signature::P2PSignature;
+use crate::stage::DelayPool;
 use crate::utils::{CopycatError, NodeId};
 use crate::vcores::VCoreGroup;
 use crate::{config::ChainConfig, peers::PeerMessenger};
@@ -17,37 +22,35 @@ use async_trait::async_trait;
 
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
-
-use atomic_float::AtomicF64;
-use std::sync::atomic::Ordering;
+use tokio::time::Instant;
+use tokio_metrics::TaskMonitor;
 
 #[async_trait]
 trait Pacemaker: Sync + Send {
-    async fn wait_to_propose(&self);
+    async fn wait_to_propose(&self) -> Result<(), CopycatError>;
     async fn get_propose_msg(&mut self) -> Result<Vec<u8>, CopycatError>;
     async fn handle_feedback(&mut self, feedback: Vec<u8>) -> Result<(), CopycatError>;
     async fn handle_peer_msg(&mut self, src: NodeId, msg: Vec<u8>) -> Result<(), CopycatError>;
 }
 
 fn get_pacemaker(
-    _id: NodeId,
+    id: NodeId,
     config: ChainConfig,
-    _peer_messenger: Arc<PeerMessenger>,
+    peer_messenger: Arc<PeerMessenger>,
+    p2p_signature: P2PSignature,
 ) -> Box<dyn Pacemaker> {
     match config {
         ChainConfig::Dummy { .. } => Box::new(DummyPacemaker::new()),
-        ChainConfig::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO
+        ChainConfig::Bitcoin { .. } => Box::new(DummyPacemaker::new()), // TODO: difficulty adjustment
         ChainConfig::Avalanche { config } => match config {
-            AvalancheConfig::Basic { config } => {
-                Box::new(FixedInflightBlkPaceMaker::new(config.max_inflight_blk))
-            }
-            AvalancheConfig::Blizzard { config } => {
-                Box::new(FixedInflightBlkPaceMaker::new(config.max_inflight_blk))
-            }
+            AvalancheConfig::Basic { .. }
+            | AvalancheConfig::Blizzard { .. }
+            | AvalancheConfig::NoCache { .. } => Box::new(FixedInflightBlkPacemaker::new()),
             AvalancheConfig::VoteNo { .. } => Box::new(DummyPacemaker::new()),
         },
-        ChainConfig::ChainReplication { .. } => Box::new(DummyPacemaker::new()), // TODO,
+        ChainConfig::ChainReplication { .. } => Box::new(DummyPacemaker::new()),
+        ChainConfig::Diem { .. } => Box::new(DiemPacemaker::new(id, peer_messenger)),
+        ChainConfig::Aptos { config } => aptos::new(id, config, p2p_signature),
     }
 }
 
@@ -55,6 +58,7 @@ pub async fn pacemaker_thread(
     id: NodeId,
     config: ChainConfig,
     peer_messenger: Arc<PeerMessenger>,
+    p2p_signature: P2PSignature,
     mut peer_pmaker_recv: mpsc::Receiver<(NodeId, Vec<u8>)>,
     mut pmaker_feedback_recv: mpsc::Receiver<Vec<u8>>,
     should_propose_send: mpsc::Sender<Vec<u8>>,
@@ -63,17 +67,22 @@ pub async fn pacemaker_thread(
 ) {
     pf_info!(id; "pacemaker starting...");
 
-    let delay = Arc::new(AtomicF64::new(0f64));
+    let _delay_pool = Arc::new(DelayPool::new());
     let mut insert_delay_time = Instant::now() + PACE_DELAY_INTERVAL;
 
-    let mut pmaker = get_pacemaker(id, config, peer_messenger);
+    let mut pmaker = get_pacemaker(id, config, peer_messenger, p2p_signature);
 
     let mut report_timer = get_report_timer();
     let mut task_interval = monitor.intervals();
 
     loop {
         tokio::select! {
-            _ = pmaker.wait_to_propose() => {
+            wait_result = pmaker.wait_to_propose() => {
+                if let Err(e) = wait_result {
+                    pf_error!(id; "failed waiting for proposal message: {:?}", e);
+                    continue;
+                }
+
                 // pmaker logic to decide if current node can propose new block
                 let _permit = match core_group.acquire().await {
                     Ok(permit) => permit,
@@ -151,26 +160,6 @@ pub async fn pacemaker_thread(
                 }
             }
 
-            _ = pass(), if Instant::now() > insert_delay_time => {
-                // insert delay as appropriate
-                let sleep_time = delay.load(Ordering::Relaxed);
-                if sleep_time > 0.05 {
-                    // doing skipped compute cost
-                    let _permit = match core_group.acquire().await {
-                        Ok(permit) => permit,
-                        Err(e) => {
-                            pf_error!(id; "failed to acquire allowed concurrency: {:?}", e);
-                            continue;
-                        }
-                    };
-                    tokio::time::sleep(Duration::from_secs_f64(sleep_time)).await;
-                    delay.store(0f64, Ordering::Relaxed);
-                } else {
-                    tokio::task::yield_now().await;
-                }
-                insert_delay_time = Instant::now() + PACE_DELAY_INTERVAL;
-            }
-
             report_val = report_timer.changed() => {
                 if let Err(e) = report_val {
                     pf_error!(id; "Waiting for report timeout failed: {}", e);
@@ -182,6 +171,11 @@ pub async fn pacemaker_thread(
                 let mean_poll_dur = metrics.mean_poll_duration().as_secs_f64();
                 pf_info!(id; "In the last minute: sched_count: {}, mean_sched_dur: {} s, poll_count: {}, mean_poll_dur: {} s", sched_count, mean_sched_dur, poll_count, mean_poll_dur);
             }
+        }
+
+        if Instant::now() > insert_delay_time {
+            tokio::task::yield_now().await;
+            insert_delay_time = Instant::now() + PACE_DELAY_INTERVAL;
         }
     }
 }

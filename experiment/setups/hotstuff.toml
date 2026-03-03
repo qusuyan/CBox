@@ -1,0 +1,25 @@
+[experiment]
+num_iterations = 3
+
+[parameters]
+chain-type = "diem"
+cluster-threads = 32
+conn-multiply = 1
+correct-config = "blk_size=409600"
+txn-crypto = "dummy"
+p2p-crypto = "dummy-ecdsa"
+threshold-crypto = "dummy-ecdsa"
+exp-prefix = "HotStuff-Perf/"
+exp-time = 310
+frequency = 0
+max-inflight-txns = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000]
+network-delay = 1
+num-accounts = 1000
+num-clients = 1
+num-machines = 1
+num-nodes = 4
+per-node-concurrency = 16
+txn-span = 0
+disable-txn-dissem = true
+nic-bw = 1200000000
+network-bw = 1200000000

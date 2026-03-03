@@ -1,4 +1,5 @@
-use get_size::GetSize;
+use mailbox_client::{MailboxError, SizedMsg};
+use primitive_types::U256;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 
@@ -7,9 +8,13 @@ use std::{
     sync::Arc,
 };
 
-use super::crypto::sha256;
-use crate::protocol::transaction::Txn;
+use super::types::{aptos::CoA, diem::QuorumCert};
+use super::{
+    crypto::{sha256, Signature},
+    types::diem::{DiemBlock, TimeCert},
+};
 use crate::NodeId;
+use crate::{context::TxnCtx, protocol::transaction::Txn};
 use crate::{protocol::crypto::Hash, CopycatError};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -17,7 +22,7 @@ pub enum BlockHeader {
     Dummy,
     Bitcoin {
         proposer: NodeId,
-        prev_hash: Hash, // vec![] if first block of chain
+        parent_id: Hash, // vec![] if first block of chain
         merkle_root: Hash,
         nonce: u32, // https://en.bitcoin.it/wiki/Nonce
     },
@@ -32,46 +37,97 @@ pub enum BlockHeader {
     ChainReplication {
         blk_id: Hash,
     },
+    Diem {
+        // block data
+        block: DiemBlock,
+        // proposal message
+        last_round_tc: Option<TimeCert>,
+        high_commit_qc: QuorumCert,
+        signature: Signature,
+    },
+    Aptos {
+        sender: NodeId,
+        round: u64,
+        certificates: Vec<CoA>,
+        merkle_root: Hash,
+        signature: Signature,
+    },
 }
 
-impl BlockHeader {
-    pub fn compute_id(&self) -> Result<Hash, CopycatError> {
+impl SizedMsg for BlockHeader {
+    fn size(&self) -> Result<usize, MailboxError> {
         match self {
-            BlockHeader::Dummy => {
-                let mut rng = thread_rng();
-                let mut rand = [0u8; 32];
-                rng.fill(&mut rand);
-                Ok(Hash::from_little_endian(&rand))
-            }
-            BlockHeader::Avalanche {
-                proposer,
-                id,
-                depth,
+            BlockHeader::Dummy => Ok(0),
+            BlockHeader::Bitcoin { .. } => Ok(32 + 32 + 4 + 8),
+            BlockHeader::Avalanche { .. } => Ok(8 + 8 + 8),
+            BlockHeader::ChainReplication { .. } => Ok(32),
+            BlockHeader::Diem {
+                block,
+                last_round_tc,
+                high_commit_qc,
+                signature,
             } => {
-                let raw = [0u64, *depth as u64, *proposer, *id];
-                Ok(Hash { 0: raw })
+                let tc_size = match last_round_tc {
+                    Some(tc) => 1 + tc.size()?,
+                    None => 1,
+                };
+                Ok(block.size()? + tc_size + high_commit_qc.size()? + signature.len())
             }
-            BlockHeader::Bitcoin { .. } => {
-                let serialized_header = bincode::serialize(self)?;
-                Ok(sha256(&serialized_header)?)
-            }
-            BlockHeader::ChainReplication { blk_id } => Ok(*blk_id),
+            BlockHeader::Aptos {
+                certificates,
+                signature,
+                ..
+            } => Ok(8 + 8 + certificates.size()? + 32 + signature.len()),
         }
     }
 }
 
-// TODO: for better accuracy, we should implement GetSize manually so that message size
-// matches the size after marshalling.
-impl GetSize for BlockHeader {}
-
-#[derive(Clone, Serialize, Deserialize, GetSize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Block {
     pub header: BlockHeader,
     pub txns: Vec<Arc<Txn>>,
 }
 
+impl Block {
+    pub fn compute_id(
+        header: &BlockHeader,
+        txn_ctx: &Vec<Arc<TxnCtx>>,
+    ) -> Result<Hash, CopycatError> {
+        match &header {
+            BlockHeader::Dummy => {
+                let mut rng = thread_rng();
+                let mut rand = [0u8; 32];
+                rng.fill(&mut rand);
+                Ok(Hash(U256::from_little_endian(&rand)))
+            }
+            BlockHeader::Avalanche {
+                proposer,
+                id,
+                depth,
+                ..
+            } => {
+                let raw = [0u64, *depth as u64, *proposer, *id];
+                Ok(Hash(U256(raw)))
+            }
+            BlockHeader::Bitcoin { .. } => Ok(sha256(&header)?),
+            BlockHeader::ChainReplication { blk_id } => Ok(*blk_id),
+            BlockHeader::Diem { block, .. } => block.compute_id(txn_ctx),
+            BlockHeader::Aptos { sender, round, .. } => {
+                let raw = [0u64, 0u64, *sender, *round];
+                Ok(Hash(U256(raw)))
+            }
+        }
+    }
+}
+
 impl Debug for Block {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         self.header.fmt(f)
+    }
+}
+
+impl SizedMsg for Block {
+    fn size(&self) -> Result<usize, MailboxError> {
+        Ok(self.header.size()? + self.txns.size()?)
     }
 }
